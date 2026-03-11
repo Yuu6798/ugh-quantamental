@@ -51,6 +51,7 @@ Policy:
 - Rehydration uses `model_validate(...)` against the same models.
 - Serializer helpers are pure and side-effect free.
 - No custom transformation layer is added in v1.
+- `created_at` is normalized at repository save boundaries to **naive UTC** (aware timestamps are converted to UTC first; naive timestamps are treated as already UTC).
 
 This ensures deterministic contracts remain source-of-truth for persistence shape.
 

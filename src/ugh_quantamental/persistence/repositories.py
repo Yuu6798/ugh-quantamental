@@ -25,6 +25,15 @@ from ugh_quantamental.schemas.omega import Omega
 from ugh_quantamental.schemas.ssv import SSVSnapshot
 
 
+def _normalize_created_at(created_at: datetime | None) -> datetime:
+    """Normalize timestamps to naive UTC for storage in timezone=False columns."""
+    if created_at is None:
+        return datetime.now(timezone.utc).replace(tzinfo=None)
+    if created_at.tzinfo is None:
+        return created_at
+    return created_at.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 @dataclass(frozen=True)
 class ProjectionRun:
     run_id: str
@@ -72,7 +81,7 @@ class ProjectionRunRepository:
     ) -> ProjectionRunRecord:
         record = ProjectionRunRecord(
             run_id=run_id,
-            created_at=(created_at or datetime.now(timezone.utc)).replace(tzinfo=None),
+            created_at=_normalize_created_at(created_at),
             projection_id=projection_id,
             question_features_json=dump_model_json(question_features),
             signal_features_json=dump_model_json(signal_features),
@@ -128,7 +137,7 @@ class StateRunRepository:
     ) -> StateRunRecord:
         record = StateRunRecord(
             run_id=run_id,
-            created_at=(created_at or datetime.now(timezone.utc)).replace(tzinfo=None),
+            created_at=_normalize_created_at(created_at),
             snapshot_id=snapshot_id,
             omega_id=omega_id,
             projection_id=projection_id,
