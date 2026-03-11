@@ -65,7 +65,7 @@ cfg = ProjectionConfig()
 
 result = run_projection_engine("my-question-id", 30, q, sig, align, cfg)
 print(result.projection_snapshot.point_estimate)   # float in [-1, 1]
-print(result.projection_snapshot.conviction)       # float in [0, 1]
+print(result.projection_snapshot.confidence)       # float in [0, 1]
 ```
 
 ### State engine
