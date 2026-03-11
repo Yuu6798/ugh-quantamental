@@ -1,10 +1,13 @@
 """Tests for deterministic projection input/result models."""
 
+import math
+
 import pytest
 from pydantic import ValidationError
 
 from ugh_quantamental.engine.projection_models import (
     AlignmentInputs,
+    ProjectionConfig,
     QuestionDirectionSign,
     QuestionFeatures,
     SignalFeatures,
@@ -47,3 +50,53 @@ def test_alignment_inputs_default_weights() -> None:
     )
     assert inputs.w_qf == pytest.approx(1.0)
     assert inputs.w_tp == pytest.approx(1.0)
+
+
+def test_projection_config_rejects_nan_gravity_coefficient() -> None:
+    with pytest.raises(ValidationError):
+        ProjectionConfig(gravity_lock_coef=math.nan)
+
+
+def test_projection_config_rejects_inf_non_gravity_coefficient() -> None:
+    with pytest.raises(ValidationError):
+        ProjectionConfig(bounds_base_width=math.inf)
+
+
+def test_projection_config_rejects_negative_inf_coefficient() -> None:
+    with pytest.raises(ValidationError):
+        ProjectionConfig(gravity_dispersion_coef=-math.inf)
+
+
+def test_alignment_inputs_rejects_inf_weight() -> None:
+    with pytest.raises(ValidationError):
+        AlignmentInputs(
+            d_qf=0.1,
+            d_qt=0.2,
+            d_qp=0.3,
+            d_ft=0.4,
+            d_fp=0.5,
+            d_tp=0.6,
+            w_qf=math.inf,
+        )
+
+
+def test_projection_config_accepts_finite_values() -> None:
+    config = ProjectionConfig(
+        u_weight=0.7,
+        gravity_lock_coef=0.15,
+        bounds_max_width=0.9,
+    )
+    assert config.u_weight == pytest.approx(0.7)
+
+
+def test_alignment_inputs_accepts_finite_values() -> None:
+    inputs = AlignmentInputs(
+        d_qf=0.1,
+        d_qt=0.2,
+        d_qp=0.3,
+        d_ft=0.4,
+        d_fp=0.5,
+        d_tp=0.6,
+        w_qf=0.8,
+    )
+    assert inputs.w_qf == pytest.approx(0.8)

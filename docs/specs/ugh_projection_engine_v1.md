@@ -5,7 +5,7 @@
 `SSVSnapshot` is an outward schema contract, not a full projection-theory representation. For deterministic projection math, v1 introduces a small normalized feature layer (`QuestionFeatures`, `SignalFeatures`, `AlignmentInputs`, `ProjectionConfig`) so that:
 
 - projection functions remain pure and deterministic,
-- math inputs are explicitly bounded and interpretable,
+- math inputs are explicitly bounded, finite real-valued, and interpretable,
 - projection logic does not overfit to accidental payload shape details,
 - downstream transport remains unchanged via `ProjectionSnapshot`.
 

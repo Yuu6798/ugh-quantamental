@@ -153,6 +153,20 @@ def test_build_projection_snapshot_bounds_are_finite_and_ordered() -> None:
     assert snapshot.lower_bound <= snapshot.upper_bound
 
 
+def test_build_projection_snapshot_rejects_non_finite_e_star() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        build_projection_snapshot(
+            projection_id="p-inf",
+            horizon_days=10,
+            e_star=float("nan"),
+            conviction=0.5,
+            urgency=0.5,
+            mismatch_px=0.0,
+            mismatch_sem=0.0,
+            config=ProjectionConfig(),
+        )
+
+
 def test_compute_e_raw_and_e_star_hand_checkable(
     baseline_signal: SignalFeatures,
 ) -> None:

@@ -1,5 +1,7 @@
 """Deterministic v1 projection engine using explicit normalized feature contracts."""
 
+import math
+
 from ugh_quantamental.engine.projection_models import (
     AlignmentInputs,
     ProjectionConfig,
@@ -11,6 +13,8 @@ from ugh_quantamental.schemas.projection import ProjectionSnapshot
 
 
 def _clamp(value: float, lower: float, upper: float) -> float:
+    if not math.isfinite(value):
+        raise ValueError("clamp value must be finite")
     return max(lower, min(upper, value))
 
 

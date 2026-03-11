@@ -2,7 +2,7 @@
 
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
 
 from ugh_quantamental.schemas.projection import ProjectionSnapshot
 
@@ -62,12 +62,12 @@ class AlignmentInputs(BaseModel):
     d_fp: float = Field(ge=0.0, le=1.0)
     d_tp: float = Field(ge=0.0, le=1.0)
 
-    w_qf: float = Field(default=1.0, ge=0.0)
-    w_qt: float = Field(default=1.0, ge=0.0)
-    w_qp: float = Field(default=1.0, ge=0.0)
-    w_ft: float = Field(default=1.0, ge=0.0)
-    w_fp: float = Field(default=1.0, ge=0.0)
-    w_tp: float = Field(default=1.0, ge=0.0)
+    w_qf: FiniteFloat = Field(default=1.0, ge=0.0)
+    w_qt: FiniteFloat = Field(default=1.0, ge=0.0)
+    w_qp: FiniteFloat = Field(default=1.0, ge=0.0)
+    w_ft: FiniteFloat = Field(default=1.0, ge=0.0)
+    w_fp: FiniteFloat = Field(default=1.0, ge=0.0)
+    w_tp: FiniteFloat = Field(default=1.0, ge=0.0)
 
 
 class ProjectionConfig(BaseModel):
@@ -75,26 +75,26 @@ class ProjectionConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    u_weight: float = Field(default=0.5, ge=0.0)
-    f_weight: float = Field(default=0.3, ge=0.0)
-    t_weight: float = Field(default=0.2, ge=0.0)
+    u_weight: FiniteFloat = Field(default=0.5, ge=0.0)
+    f_weight: FiniteFloat = Field(default=0.3, ge=0.0)
+    t_weight: FiniteFloat = Field(default=0.2, ge=0.0)
 
-    pair_weight_qf: float = Field(default=1.0, ge=0.0)
-    pair_weight_qt: float = Field(default=1.0, ge=0.0)
-    pair_weight_qp: float = Field(default=1.0, ge=0.0)
-    pair_weight_ft: float = Field(default=1.0, ge=0.0)
-    pair_weight_fp: float = Field(default=1.0, ge=0.0)
-    pair_weight_tp: float = Field(default=1.0, ge=0.0)
+    pair_weight_qf: FiniteFloat = Field(default=1.0, ge=0.0)
+    pair_weight_qt: FiniteFloat = Field(default=1.0, ge=0.0)
+    pair_weight_qp: FiniteFloat = Field(default=1.0, ge=0.0)
+    pair_weight_ft: FiniteFloat = Field(default=1.0, ge=0.0)
+    pair_weight_fp: FiniteFloat = Field(default=1.0, ge=0.0)
+    pair_weight_tp: FiniteFloat = Field(default=1.0, ge=0.0)
 
-    gravity_lock_coef: float = 0.20
-    gravity_regime_coef: float = 0.15
-    gravity_dispersion_coef: float = 0.10
+    gravity_lock_coef: FiniteFloat = 0.20
+    gravity_regime_coef: FiniteFloat = 0.15
+    gravity_dispersion_coef: FiniteFloat = 0.10
 
-    bounds_base_width: float = Field(default=0.10, ge=0.0)
-    bounds_mismatch_coef: float = Field(default=0.20, ge=0.0)
-    bounds_low_conf_coef: float = Field(default=0.25, ge=0.0)
-    bounds_urgency_coef: float = Field(default=0.15, ge=0.0)
-    bounds_max_width: float = Field(default=1.0, gt=0.0)
+    bounds_base_width: FiniteFloat = Field(default=0.10, ge=0.0)
+    bounds_mismatch_coef: FiniteFloat = Field(default=0.20, ge=0.0)
+    bounds_low_conf_coef: FiniteFloat = Field(default=0.25, ge=0.0)
+    bounds_urgency_coef: FiniteFloat = Field(default=0.15, ge=0.0)
+    bounds_max_width: FiniteFloat = Field(default=1.0, gt=0.0)
 
 
 class ProjectionEngineResult(BaseModel):
