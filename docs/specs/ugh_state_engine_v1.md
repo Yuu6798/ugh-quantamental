@@ -37,6 +37,7 @@ The v1 state engine consumes:
 
 3. `normalize_state_probabilities(scores, config)`
    - Applies temperature softmax to map any finite score vector to a valid `StateProbabilities` simplex.
+   - Rejects non-finite scaled values, and config constrains temperature away from unsafe near-zero values (`softmax_temperature >= 1e-8`).
 
 4. `blend_with_prior(prior_probabilities, evidence_scores, config)`
    - Blends prior probabilities with normalized evidence via deterministic coefficients.

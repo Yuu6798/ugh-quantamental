@@ -369,6 +369,47 @@ def test_market_svp_update_preserves_regime_and_replaces_phi() -> None:
     assert updated.phi == phi
 
 
+
+
+def test_run_state_engine_rejects_non_finite_projection_value(base_config: StateConfig) -> None:
+    snapshot = _make_snapshot(prior_dominant=LifecycleState.setup)
+    with pytest.raises(ValueError, match="finite"):
+        run_state_engine(
+            snapshot=snapshot,
+            omega=_make_omega(snapshot),
+            projection_result=_projection(
+                e_star=float("nan"),
+                conviction=0.55,
+                urgency=0.45,
+                mismatch_px=0.2,
+                mismatch_sem=0.25,
+            ),
+            event_features=StateEventFeatures(
+                catalyst_strength=0.4,
+                follow_through=0.5,
+                pricing_saturation=0.3,
+                disconfirmation_strength=0.15,
+                regime_shock=0.1,
+                observation_freshness=0.9,
+            ),
+            config=base_config,
+        )
+
+
+def test_normalize_state_probabilities_rejects_non_finite_scaled_values() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        normalize_state_probabilities(
+            {
+                LifecycleState.dormant: 0.1,
+                LifecycleState.setup: 0.2,
+                LifecycleState.fire: 0.3,
+                LifecycleState.expansion: float("inf"),
+                LifecycleState.exhaustion: 0.2,
+                LifecycleState.failure: 0.1,
+            },
+            StateConfig(),
+        )
+
 def test_output_probabilities_sum_to_one_and_confidence_bounded(base_config: StateConfig) -> None:
     snapshot = _make_snapshot(prior_dominant=LifecycleState.setup)
     result = run_state_engine(

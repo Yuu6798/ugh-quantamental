@@ -105,6 +105,16 @@ def test_state_config_rejects_too_small_tie_break_epsilon() -> None:
         StateConfig(tie_break_epsilon=1e-10)
 
 
+def test_state_config_rejects_too_small_softmax_temperature() -> None:
+    with pytest.raises(ValidationError):
+        StateConfig(softmax_temperature=1e-323)
+
+
+def test_state_config_accepts_min_safe_softmax_temperature() -> None:
+    config = StateConfig(softmax_temperature=1e-8)
+    assert config.softmax_temperature == pytest.approx(1e-8)
+
+
 def test_state_engine_result_transition_confidence_bounds_enforced() -> None:
     with pytest.raises(ValidationError):
         StateEngineResult(

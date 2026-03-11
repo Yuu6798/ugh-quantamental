@@ -22,6 +22,10 @@ _STATES: tuple[LifecycleState, ...] = (
 
 
 def _clamp(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
+    if not math.isfinite(value):
+        raise ValueError("clamp input must be finite")
+    if not math.isfinite(lower) or not math.isfinite(upper):
+        raise ValueError("clamp bounds must be finite")
     return max(lower, min(upper, value))
 
 
@@ -137,6 +141,8 @@ def normalize_state_probabilities(
 ) -> StateProbabilities:
     """Apply softmax normalization to scores to produce valid lifecycle probabilities."""
     scaled = {state: scores[state] / config.softmax_temperature for state in _STATES}
+    if not all(math.isfinite(value) for value in scaled.values()):
+        raise ValueError("scaled state scores must be finite")
     max_value = max(scaled.values())
     exps = {state: math.exp(scaled[state] - max_value) for state in _STATES}
     total = sum(exps.values())

@@ -26,7 +26,7 @@ class StateConfig(BaseModel):
 
     prior_weight: FiniteFloat = Field(default=0.55, ge=0.0, le=1.0)
     evidence_weight: FiniteFloat = Field(default=0.45, ge=0.0, le=1.0)
-    softmax_temperature: FiniteFloat = Field(default=1.0, gt=0.0)
+    softmax_temperature: FiniteFloat = Field(default=1.0, ge=1e-8)
     tie_break_epsilon: FiniteFloat = Field(default=1e-8, ge=1e-8, le=1e-4)
 
     dormant_weight: FiniteFloat = Field(default=1.0, ge=0.0)
