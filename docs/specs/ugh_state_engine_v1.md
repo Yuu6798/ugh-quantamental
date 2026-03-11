@@ -59,6 +59,7 @@ The v1 state engine consumes:
 Given prior distribution `P_prior` and normalized evidence distribution `P_evidence`:
 
 - normalize blending weights from `StateConfig` (`prior_weight`, `evidence_weight`)
+- blending is defined only when `prior_weight + evidence_weight > 0`
 - compute statewise blended score:
 
 `P_blended[s] = prior_w * P_prior[s] + evidence_w * P_evidence[s]`

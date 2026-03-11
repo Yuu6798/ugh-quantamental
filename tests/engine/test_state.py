@@ -9,6 +9,7 @@ from ugh_quantamental.engine.projection_models import ProjectionEngineResult
 from ugh_quantamental.engine.state import (
     build_market_svp,
     build_phi,
+    blend_with_prior,
     normalize_state_probabilities,
     resolve_dominant_state,
     run_state_engine,
@@ -341,6 +342,68 @@ def test_build_phi_tied_probabilities_valid_with_min_safe_epsilon() -> None:
 
     assert phi.dominant_state is LifecycleState.setup
     assert top_states == [LifecycleState.setup.value]
+
+
+
+def test_blend_with_prior_accepts_valid_non_zero_blend_weights() -> None:
+    prior = StateProbabilities(
+        dormant=0.4,
+        setup=0.2,
+        fire=0.15,
+        expansion=0.1,
+        exhaustion=0.1,
+        failure=0.05,
+    )
+    evidence_scores = {
+        LifecycleState.dormant: 0.1,
+        LifecycleState.setup: 0.2,
+        LifecycleState.fire: 0.3,
+        LifecycleState.expansion: 0.2,
+        LifecycleState.exhaustion: 0.1,
+        LifecycleState.failure: 0.1,
+    }
+    blended = blend_with_prior(
+        prior_probabilities=prior,
+        evidence_scores=evidence_scores,
+        config=StateConfig(prior_weight=1.0, evidence_weight=0.0),
+    )
+    assert blended[LifecycleState.dormant] == pytest.approx(prior.dormant)
+
+
+def test_blend_with_prior_rejects_zero_sum_weights_runtime_guard() -> None:
+    prior = StateProbabilities(
+        dormant=0.4,
+        setup=0.2,
+        fire=0.15,
+        expansion=0.1,
+        exhaustion=0.1,
+        failure=0.05,
+    )
+    evidence_scores = {
+        LifecycleState.dormant: 0.1,
+        LifecycleState.setup: 0.2,
+        LifecycleState.fire: 0.3,
+        LifecycleState.expansion: 0.2,
+        LifecycleState.exhaustion: 0.1,
+        LifecycleState.failure: 0.1,
+    }
+    bypass_cfg = StateConfig.model_construct(
+        prior_weight=0.0,
+        evidence_weight=0.0,
+        softmax_temperature=1.0,
+        tie_break_epsilon=1e-8,
+        dormant_weight=1.0,
+        setup_weight=1.0,
+        fire_weight=1.0,
+        expansion_weight=1.0,
+        exhaustion_weight=1.0,
+        failure_weight=1.0,
+        quality_confidence_weight=0.55,
+        transition_confidence_weight=0.45,
+    )
+
+    with pytest.raises(ValueError, match="must be positive"):
+        blend_with_prior(prior, evidence_scores, bypass_cfg)
 
 def test_market_svp_update_preserves_regime_and_replaces_phi() -> None:
     snapshot = _make_snapshot(prior_dominant=LifecycleState.setup)

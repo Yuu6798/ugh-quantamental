@@ -126,8 +126,10 @@ def blend_with_prior(
     evidence_probs = normalize_state_probabilities(evidence_scores, config)
     evidence = _to_map(evidence_probs)
     weight_sum = config.prior_weight + config.evidence_weight
-    prior_w = 0.0 if weight_sum == 0 else config.prior_weight / weight_sum
-    evidence_w = 0.0 if weight_sum == 0 else config.evidence_weight / weight_sum
+    if weight_sum <= 0.0:
+        raise ValueError("prior/evidence blend-weight sum must be positive")
+    prior_w = config.prior_weight / weight_sum
+    evidence_w = config.evidence_weight / weight_sum
 
     return {
         state: _clamp(prior_w * prior[state] + evidence_w * evidence[state])

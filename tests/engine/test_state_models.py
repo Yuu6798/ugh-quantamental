@@ -115,6 +115,21 @@ def test_state_config_accepts_min_safe_softmax_temperature() -> None:
     assert config.softmax_temperature == pytest.approx(1e-8)
 
 
+def test_state_config_rejects_zero_sum_blend_weights() -> None:
+    with pytest.raises(ValidationError, match="must be positive"):
+        StateConfig(prior_weight=0.0, evidence_weight=0.0)
+
+
+def test_state_config_accepts_prior_only_blend_weight() -> None:
+    cfg = StateConfig(prior_weight=1.0, evidence_weight=0.0)
+    assert cfg.prior_weight == pytest.approx(1.0)
+
+
+def test_state_config_accepts_evidence_only_blend_weight() -> None:
+    cfg = StateConfig(prior_weight=0.0, evidence_weight=1.0)
+    assert cfg.evidence_weight == pytest.approx(1.0)
+
+
 def test_state_engine_result_transition_confidence_bounds_enforced() -> None:
     with pytest.raises(ValidationError):
         StateEngineResult(

@@ -1,6 +1,6 @@
 """Deterministic normalized inputs/config/results for the v1 state engine."""
 
-from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from ugh_quantamental.schemas.enums import LifecycleState
 from ugh_quantamental.schemas.market_svp import MarketSVP, Phi, StateProbabilities
@@ -39,6 +39,11 @@ class StateConfig(BaseModel):
     quality_confidence_weight: FiniteFloat = Field(default=0.55, ge=0.0, le=1.0)
     transition_confidence_weight: FiniteFloat = Field(default=0.45, ge=0.0, le=1.0)
 
+    @model_validator(mode="after")
+    def validate_blend_weight_sum(self) -> "StateConfig":
+        if self.prior_weight + self.evidence_weight <= 0.0:
+            raise ValueError("prior_weight + evidence_weight must be positive")
+        return self
 
 class StateEngineResult(BaseModel):
     """Deterministic state engine outputs for downstream use."""
