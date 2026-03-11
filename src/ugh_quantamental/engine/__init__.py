@@ -21,6 +21,21 @@ from ugh_quantamental.engine.projection_models import (
     QuestionFeatures,
     SignalFeatures,
 )
+from ugh_quantamental.engine.state import (
+    blend_with_prior,
+    build_market_svp,
+    build_phi,
+    compute_block_quality,
+    compute_state_evidence,
+    normalize_state_probabilities,
+    resolve_dominant_state,
+    run_state_engine,
+)
+from ugh_quantamental.engine.state_models import (
+    StateConfig,
+    StateEngineResult,
+    StateEventFeatures,
+)
 
 __all__ = [
     "AlignmentInputs",
@@ -40,4 +55,15 @@ __all__ = [
     "compute_u",
     "compute_urgency",
     "run_projection_engine",
+    "StateConfig",
+    "StateEngineResult",
+    "StateEventFeatures",
+    "blend_with_prior",
+    "build_market_svp",
+    "build_phi",
+    "compute_block_quality",
+    "compute_state_evidence",
+    "normalize_state_probabilities",
+    "resolve_dominant_state",
+    "run_state_engine",
 ]
