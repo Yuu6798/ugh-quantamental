@@ -37,7 +37,7 @@ class Omega(BaseModel):
     omega_id: str = Field(min_length=1)
     market_svp: MarketSVP
     question_ledger: QuestionLedger
-    evidence_lineage: list[EvidenceLineageRecord] = Field(min_length=1)
+    evidence_lineage: tuple[EvidenceLineageRecord, ...] = Field(min_length=1)
     block_confidence: BlockObservability
     block_observability: BlockObservability
     confidence: float = Field(ge=0.0, le=1.0)

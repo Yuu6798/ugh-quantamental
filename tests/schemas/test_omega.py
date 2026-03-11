@@ -60,6 +60,23 @@ def test_omega_valid_payload() -> None:
     assert model.omega_id == "omega-001"
 
 
+def test_omega_lineage_accepts_list_payload_and_stores_tuple() -> None:
+    model = Omega.model_validate(_valid_omega_payload())
+
+    assert isinstance(model.evidence_lineage, tuple)
+    assert len(model.evidence_lineage) == 1
+
+
+def test_omega_lineage_is_immutable_after_validation() -> None:
+    model = Omega.model_validate(_valid_omega_payload())
+
+    with pytest.raises(TypeError):
+        model.evidence_lineage[0] = model.evidence_lineage[0]
+
+    with pytest.raises(AttributeError):
+        model.evidence_lineage.append(model.evidence_lineage[0])
+
+
 def test_omega_reject_missing_lineage() -> None:
     payload = _valid_omega_payload()
     payload["evidence_lineage"] = []
