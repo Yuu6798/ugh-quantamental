@@ -1,5 +1,7 @@
 """Schema models for Market-SVP contracts."""
 
+import math
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ugh_quantamental.schemas.enums import LifecycleState, MarketRegime
@@ -27,8 +29,8 @@ class StateProbabilities(BaseModel):
             + self.exhaustion
             + self.failure
         )
-        if abs(total - 1.0) > 1e-9:
-            raise ValueError("state probabilities must sum to 1.0")
+        if not math.isclose(total, 1.0, abs_tol=1e-5):
+            raise ValueError("state probabilities must sum to 1.0 within tolerance")
         return self
 
 
@@ -39,6 +41,24 @@ class Phi(BaseModel):
 
     dominant_state: LifecycleState
     probabilities: StateProbabilities
+
+    @model_validator(mode="after")
+    def validate_dominant_state(self) -> "Phi":
+        probability_map = self.probabilities.model_dump()
+        max_probability = max(probability_map.values())
+        highest_states = [
+            state_name
+            for state_name, probability in probability_map.items()
+            if math.isclose(probability, max_probability, abs_tol=1e-12)
+        ]
+
+        if len(highest_states) != 1:
+            raise ValueError("dominant_state is ambiguous due to tied highest probabilities")
+
+        if self.dominant_state.value != highest_states[0]:
+            raise ValueError("dominant_state must match the unique highest lifecycle probability")
+
+        return self
 
 
 class MarketSVP(BaseModel):
