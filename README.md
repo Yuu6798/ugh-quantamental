@@ -63,9 +63,9 @@ align = AlignmentInputs(
 )
 cfg = ProjectionConfig()
 
-result = run_projection_engine(q, sig, align, cfg)
-print(result.snapshot.point_estimate)   # float in [-1, 1]
-print(result.snapshot.conviction)       # float in [0, 1]
+result = run_projection_engine("my-question-id", 30, q, sig, align, cfg)
+print(result.projection_snapshot.point_estimate)   # float in [-1, 1]
+print(result.projection_snapshot.conviction)       # float in [0, 1]
 ```
 
 ### State engine
@@ -85,8 +85,8 @@ features = StateEventFeatures(
     failure_score=0.05,
     time_in_state=3.0,
 )
-result = run_state_engine(features, prior_svp, omega, StateConfig())
-print(result.market_svp.phi.dominant_state)  # LifecycleState member
+result = run_state_engine(snapshot, omega, projection_result, features, StateConfig())
+print(result.updated_market_svp.phi.dominant_state)  # LifecycleState member
 ```
 
 ## Development
