@@ -1,6 +1,6 @@
 """Schema model for projection output snapshots."""
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 
 class ProjectionSnapshot(BaseModel):
@@ -10,9 +10,9 @@ class ProjectionSnapshot(BaseModel):
 
     projection_id: str = Field(min_length=1)
     horizon_days: int = Field(ge=1)
-    point_estimate: float
-    lower_bound: float
-    upper_bound: float
+    point_estimate: FiniteFloat
+    lower_bound: FiniteFloat
+    upper_bound: FiniteFloat
     confidence: float = Field(ge=0.0, le=1.0)
 
     @model_validator(mode="after")

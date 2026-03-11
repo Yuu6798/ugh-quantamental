@@ -32,6 +32,60 @@ def test_projection_snapshot_reject_invalid_horizon() -> None:
         )
 
 
+def test_projection_snapshot_reject_nan_lower_bound() -> None:
+    with pytest.raises(ValidationError):
+        ProjectionSnapshot.model_validate(
+            {
+                "projection_id": "proj-1",
+                "horizon_days": 5,
+                "point_estimate": 0.12,
+                "lower_bound": float("nan"),
+                "upper_bound": 0.2,
+                "confidence": 0.8,
+            }
+        )
+
+
+def test_projection_snapshot_reject_inf_upper_bound() -> None:
+    with pytest.raises(ValidationError):
+        ProjectionSnapshot.model_validate(
+            {
+                "projection_id": "proj-1",
+                "horizon_days": 5,
+                "point_estimate": 0.12,
+                "lower_bound": 0.05,
+                "upper_bound": float("inf"),
+                "confidence": 0.8,
+            }
+        )
+
+
+def test_projection_snapshot_reject_negative_inf_bounds() -> None:
+    with pytest.raises(ValidationError):
+        ProjectionSnapshot.model_validate(
+            {
+                "projection_id": "proj-1",
+                "horizon_days": 5,
+                "point_estimate": 0.12,
+                "lower_bound": float("-inf"),
+                "upper_bound": 0.2,
+                "confidence": 0.8,
+            }
+        )
+
+    with pytest.raises(ValidationError):
+        ProjectionSnapshot.model_validate(
+            {
+                "projection_id": "proj-1",
+                "horizon_days": 5,
+                "point_estimate": 0.12,
+                "lower_bound": 0.05,
+                "upper_bound": float("-inf"),
+                "confidence": 0.8,
+            }
+        )
+
+
 def test_projection_snapshot_reject_invalid_bounds() -> None:
     with pytest.raises(ValidationError):
         ProjectionSnapshot.model_validate(
