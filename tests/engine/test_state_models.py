@@ -100,6 +100,11 @@ def test_state_config_bounds_enforced() -> None:
         StateConfig(softmax_temperature=0.0)
 
 
+def test_state_config_rejects_too_small_tie_break_epsilon() -> None:
+    with pytest.raises(ValidationError):
+        StateConfig(tie_break_epsilon=1e-10)
+
+
 def test_state_engine_result_transition_confidence_bounds_enforced() -> None:
     with pytest.raises(ValidationError):
         StateEngineResult(

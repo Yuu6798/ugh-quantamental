@@ -181,6 +181,8 @@ def build_phi(
     ]
 
     if len(tied_states) > 1:
+        # StateConfig enforces a minimum epsilon so Phi tie checks (1e-12 tolerance)
+        # deterministically resolve to a unique dominant state after renormalization.
         values[winner] += config.tie_break_epsilon
         total = sum(values.values())
         values = {state: values[state] / total for state in _STATES}

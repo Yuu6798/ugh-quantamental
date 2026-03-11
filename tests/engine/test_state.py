@@ -3,6 +3,7 @@
 import math
 
 import pytest
+from pydantic import ValidationError
 
 from ugh_quantamental.engine.projection_models import ProjectionEngineResult
 from ugh_quantamental.engine.state import (
@@ -315,6 +316,31 @@ def test_dominant_state_resolution_is_deterministic() -> None:
     assert winner is LifecycleState.setup
     assert phi.dominant_state is LifecycleState.setup
 
+
+
+
+def test_build_phi_tied_probabilities_valid_with_min_safe_epsilon() -> None:
+    tied = StateProbabilities(
+        dormant=0.25,
+        setup=0.25,
+        fire=0.20,
+        expansion=0.15,
+        exhaustion=0.10,
+        failure=0.05,
+    )
+    config = StateConfig(tie_break_epsilon=1e-8)
+
+    try:
+        phi = build_phi(tied, LifecycleState.setup, config)
+    except ValidationError as exc:  # pragma: no cover - regression safety
+        pytest.fail(f"build_phi raised unexpectedly for min-safe epsilon: {exc}")
+
+    values = phi.probabilities.model_dump()
+    max_value = max(values.values())
+    top_states = [name for name, value in values.items() if math.isclose(value, max_value, abs_tol=1e-12)]
+
+    assert phi.dominant_state is LifecycleState.setup
+    assert top_states == [LifecycleState.setup.value]
 
 def test_market_svp_update_preserves_regime_and_replaces_phi() -> None:
     snapshot = _make_snapshot(prior_dominant=LifecycleState.setup)

@@ -74,6 +74,8 @@ Given prior distribution `P_prior` and normalized evidence distribution `P_evide
   `dormant -> setup -> fire -> expansion -> exhaustion -> failure`.
 - Step 4: add tiny configured epsilon to chosen state and renormalize.
 
+`tie_break_epsilon` is constrained in config to a minimum-safe positive value (`>= 1e-8`) so tie resolution remains compatible with `Phi` dominant-state validation.
+
 This keeps tie handling deterministic and minimal.
 
 ## Intentionally deferred
