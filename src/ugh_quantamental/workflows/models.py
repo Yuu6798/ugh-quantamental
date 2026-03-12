@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -21,6 +22,14 @@ from ugh_quantamental.schemas.ssv import SSVSnapshot
 
 if TYPE_CHECKING:
     from ugh_quantamental.persistence.repositories import ProjectionRun, StateRun
+
+
+def make_run_id(prefix: str) -> str:
+    """Generate a short opaque run identifier with the given prefix.
+
+    Format: ``"{prefix}{uuid4_hex[:12]}"``.
+    """
+    return f"{prefix}{uuid.uuid4().hex[:12]}"
 
 
 class ProjectionWorkflowRequest(BaseModel):

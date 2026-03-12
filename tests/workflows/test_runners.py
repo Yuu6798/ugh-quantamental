@@ -20,8 +20,8 @@ from ugh_quantamental.workflows.models import (
     FullWorkflowStateRequest,
     ProjectionWorkflowRequest,
     StateWorkflowRequest,
+    make_run_id,
 )
-from ugh_quantamental.workflows.runners import make_run_id
 
 HAS_SQLALCHEMY = importlib.util.find_spec("sqlalchemy") is not None
 

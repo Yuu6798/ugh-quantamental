@@ -14,6 +14,7 @@ from ugh_quantamental.workflows.models import (
     ProjectionWorkflowResult,
     StateWorkflowRequest,
     StateWorkflowResult,
+    make_run_id,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "ProjectionWorkflowResult",
     "StateWorkflowRequest",
     "StateWorkflowResult",
+    "make_run_id",
 ]

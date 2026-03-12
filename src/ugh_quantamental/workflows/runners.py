@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import uuid
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,12 +17,8 @@ from ugh_quantamental.workflows.models import (
     ProjectionWorkflowResult,
     StateWorkflowRequest,
     StateWorkflowResult,
+    make_run_id,  # re-exported for callers who import from runners
 )
-
-
-def make_run_id(prefix: str) -> str:
-    """Generate a short opaque run identifier with the given prefix."""
-    return f"{prefix}{uuid.uuid4().hex[:12]}"
 
 
 def run_projection_workflow(
