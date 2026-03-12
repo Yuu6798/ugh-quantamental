@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import uuid
+from typing import TYPE_CHECKING
 
-from sqlalchemy.orm import Session
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 from ugh_quantamental.engine.projection import run_projection_engine
 from ugh_quantamental.engine.state import run_state_engine
