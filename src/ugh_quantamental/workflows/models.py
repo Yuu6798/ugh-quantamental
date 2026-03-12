@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -14,9 +16,11 @@ from ugh_quantamental.engine.projection_models import (
     SignalFeatures,
 )
 from ugh_quantamental.engine.state_models import StateConfig, StateEngineResult, StateEventFeatures
-from ugh_quantamental.persistence.repositories import ProjectionRun, StateRun
 from ugh_quantamental.schemas.omega import Omega
 from ugh_quantamental.schemas.ssv import SSVSnapshot
+
+if TYPE_CHECKING:
+    from ugh_quantamental.persistence.repositories import ProjectionRun, StateRun
 
 
 class ProjectionWorkflowRequest(BaseModel):
@@ -51,39 +55,62 @@ class StateWorkflowRequest(BaseModel):
     created_at: datetime | None = None
 
 
+class FullWorkflowStateRequest(BaseModel):
+    """State portion of a full workflow request.
+
+    Does not include ``projection_result``; that is supplied automatically by
+    ``run_full_workflow`` from the projection step it just executed.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    snapshot: SSVSnapshot
+    omega: Omega
+    event_features: StateEventFeatures
+    config: StateConfig = Field(default_factory=StateConfig)
+    snapshot_id: str | None = None
+    omega_id: str | None = None
+    run_id: str | None = None
+    created_at: datetime | None = None
+
+
 class FullWorkflowRequest(BaseModel):
     """Combined request for projection-then-state full workflow execution."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     projection: ProjectionWorkflowRequest
-    state: StateWorkflowRequest
+    state: FullWorkflowStateRequest
 
 
-class ProjectionWorkflowResult(BaseModel):
+# ---------------------------------------------------------------------------
+# Result containers — plain frozen dataclasses so that persistence types
+# (ProjectionRun, StateRun) are never imported at module load time; they
+# are only referenced via TYPE_CHECKING above.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ProjectionWorkflowResult:
     """Outputs from a completed projection workflow run."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     run_id: str
     engine_result: ProjectionEngineResult
     persisted_run: ProjectionRun
 
 
-class StateWorkflowResult(BaseModel):
+@dataclass(frozen=True)
+class StateWorkflowResult:
     """Outputs from a completed state workflow run."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     run_id: str
     engine_result: StateEngineResult
     persisted_run: StateRun
 
 
-class FullWorkflowResult(BaseModel):
+@dataclass(frozen=True)
+class FullWorkflowResult:
     """Combined outputs from a full projection-then-state workflow execution."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     projection: ProjectionWorkflowResult
     state: StateWorkflowResult

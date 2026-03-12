@@ -3,6 +3,7 @@
 from ugh_quantamental.workflows.models import (
     FullWorkflowRequest,
     FullWorkflowResult,
+    FullWorkflowStateRequest,
     ProjectionWorkflowRequest,
     ProjectionWorkflowResult,
     StateWorkflowRequest,
@@ -18,6 +19,7 @@ from ugh_quantamental.workflows.runners import (
 __all__ = [
     "FullWorkflowRequest",
     "FullWorkflowResult",
+    "FullWorkflowStateRequest",
     "ProjectionWorkflowRequest",
     "ProjectionWorkflowResult",
     "StateWorkflowRequest",

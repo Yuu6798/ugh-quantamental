@@ -14,6 +14,7 @@ from ugh_quantamental.engine.projection_models import (
 from ugh_quantamental.engine.state_models import StateConfig, StateEventFeatures
 from ugh_quantamental.workflows.models import (
     FullWorkflowRequest,
+    FullWorkflowStateRequest,
     ProjectionWorkflowRequest,
     StateWorkflowRequest,
 )
@@ -181,7 +182,6 @@ def test_state_request_explicit_ids(
 def test_full_request_composes_sub_requests(
     make_ssv_snapshot,
     make_omega,
-    make_projection_engine_result,
 ) -> None:
     proj_req = ProjectionWorkflowRequest(
         projection_id="p-full",
@@ -190,10 +190,9 @@ def test_full_request_composes_sub_requests(
         signal_features=_signal(),
         alignment_inputs=_alignment(),
     )
-    state_req = StateWorkflowRequest(
+    state_req = FullWorkflowStateRequest(
         snapshot=make_ssv_snapshot,
         omega=make_omega,
-        projection_result=make_projection_engine_result,
         event_features=StateEventFeatures(
             catalyst_strength=0.5,
             follow_through=0.4,

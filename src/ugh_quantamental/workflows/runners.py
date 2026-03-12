@@ -135,7 +135,7 @@ def run_full_workflow(
     state_request = StateWorkflowRequest(
         snapshot=request.state.snapshot,
         omega=request.state.omega,
-        projection_result=proj_result.engine_result,
+        projection_result=proj_result.engine_result,  # injected from projection output
         event_features=request.state.event_features,
         config=request.state.config,
         snapshot_id=request.state.snapshot_id,

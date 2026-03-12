@@ -17,6 +17,7 @@ from ugh_quantamental.engine.projection_models import (
 from ugh_quantamental.engine.state_models import StateConfig, StateEventFeatures
 from ugh_quantamental.workflows.models import (
     FullWorkflowRequest,
+    FullWorkflowStateRequest,
     ProjectionWorkflowRequest,
     StateWorkflowRequest,
 )
@@ -256,7 +257,7 @@ def test_state_workflow_created_at_round_trip(
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
 def test_full_workflow_end_to_end(
-    db_session, make_ssv_snapshot, make_omega, make_projection_engine_result
+    db_session, make_ssv_snapshot, make_omega
 ) -> None:
     from ugh_quantamental.workflows.runners import run_full_workflow
 
@@ -267,10 +268,9 @@ def test_full_workflow_end_to_end(
         signal_features=_signal(),
         alignment_inputs=_alignment(),
     )
-    state_req = StateWorkflowRequest(
+    state_req = FullWorkflowStateRequest(
         snapshot=make_ssv_snapshot,
         omega=make_omega,
-        projection_result=make_projection_engine_result,  # overridden internally
         event_features=_events(),
     )
     full_req = FullWorkflowRequest(projection=proj_req, state=state_req)
@@ -284,7 +284,7 @@ def test_full_workflow_end_to_end(
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
 def test_full_workflow_projection_id_propagated(
-    db_session, make_ssv_snapshot, make_omega, make_projection_engine_result
+    db_session, make_ssv_snapshot, make_omega
 ) -> None:
     """State run records the projection_id from the projection snapshot."""
     from ugh_quantamental.workflows.runners import run_full_workflow
@@ -296,10 +296,9 @@ def test_full_workflow_projection_id_propagated(
         signal_features=_signal(),
         alignment_inputs=_alignment(),
     )
-    state_req = StateWorkflowRequest(
+    state_req = FullWorkflowStateRequest(
         snapshot=make_ssv_snapshot,
         omega=make_omega,
-        projection_result=make_projection_engine_result,
         event_features=_events(),
     )
     result = run_full_workflow(db_session, FullWorkflowRequest(projection=proj_req, state=state_req))
@@ -310,9 +309,9 @@ def test_full_workflow_projection_id_propagated(
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
 def test_full_workflow_state_uses_projection_engine_result(
-    db_session, make_ssv_snapshot, make_omega, make_projection_engine_result
+    db_session, make_ssv_snapshot, make_omega
 ) -> None:
-    """State engine result is derived from the projection workflow output, not the request stub."""
+    """State engine result is derived from the projection workflow output."""
     from ugh_quantamental.workflows.runners import run_full_workflow
 
     proj_req = ProjectionWorkflowRequest(
@@ -322,10 +321,9 @@ def test_full_workflow_state_uses_projection_engine_result(
         signal_features=_signal(),
         alignment_inputs=_alignment(),
     )
-    state_req = StateWorkflowRequest(
+    state_req = FullWorkflowStateRequest(
         snapshot=make_ssv_snapshot,
         omega=make_omega,
-        projection_result=make_projection_engine_result,  # ignored; overridden
         event_features=_events(),
     )
     result = run_full_workflow(db_session, FullWorkflowRequest(projection=proj_req, state=state_req))
