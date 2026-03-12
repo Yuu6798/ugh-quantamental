@@ -53,6 +53,7 @@ A case **passes** if and only if all three conditions hold after its batch resul
 
 | Condition | Meaning |
 |---|---|
+| `aggregate.requested_count > 0` | At least one run was actually replayed |
 | `aggregate.error_count == 0` | No per-run exceptions |
 | `aggregate.missing_count == 0` | All requested run IDs found |
 | `aggregate.mismatch_count == 0` | Engine outputs match stored results exactly |
@@ -60,7 +61,11 @@ A case **passes** if and only if all three conditions hold after its batch resul
 A case **fails** if any condition is violated.  There are no configurable tolerance
 thresholds at this milestone.  Exact determinism is required.
 
-A suite with zero ok-items in a case (e.g. all missing or all error) will fail that case.
+The `requested_count > 0` guard prevents **false-positive green results**: a case built
+from an empty `run_ids=()` tuple or a query filter/offset that matches no runs would
+otherwise pass trivially (zero errors, zero mismatches) while replaying nothing.  Such
+cases provide no regression coverage and must be treated as failures so that typos in
+query filters or accidentally empty ID lists are surfaced immediately.
 
 ---
 

@@ -474,3 +474,61 @@ def test_suite_complete_report_despite_failures(
     assert len(result.state_cases) == 1
     assert result.projection_cases[0].passed is False
     assert result.state_cases[0].passed is False
+
+
+# ---------------------------------------------------------------------------
+# Zero-run case is always a failure (P1 fix: false-positive green prevention)
+# ---------------------------------------------------------------------------
+
+
+def test_suite_empty_run_ids_case_fails(db_session) -> None:
+    """A case with run_ids=() must fail even though error/missing/mismatch are all zero."""
+    from ugh_quantamental.replay.suites import run_regression_suite
+
+    req = RegressionSuiteRequest(
+        projection_cases=(
+            ProjectionSuiteCase(name="empty-proj", run_ids=()),
+        )
+    )
+    result = run_regression_suite(db_session, req)
+
+    case = result.projection_cases[0]
+    assert case.batch_result.aggregate.requested_count == 0
+    assert case.passed is False
+    assert result.aggregate.failed_case_count == 1
+    assert result.aggregate.passed_case_count == 0
+
+
+def test_suite_zero_match_query_case_fails(db_session) -> None:
+    """A query-driven case that matches no runs must fail, not silently pass."""
+    from ugh_quantamental.replay.suites import run_regression_suite
+
+    req = RegressionSuiteRequest(
+        projection_cases=(
+            ProjectionSuiteCase(
+                name="no-match-query",
+                query=ProjectionRunQuery(projection_id="proj-does-not-exist-xyz"),
+            ),
+        )
+    )
+    result = run_regression_suite(db_session, req)
+
+    case = result.projection_cases[0]
+    assert case.batch_result.aggregate.requested_count == 0
+    assert case.passed is False
+    assert result.aggregate.failed_case_count == 1
+
+
+def test_suite_state_empty_run_ids_case_fails(db_session) -> None:
+    """State case with run_ids=() must fail."""
+    from ugh_quantamental.replay.suites import run_regression_suite
+
+    req = RegressionSuiteRequest(
+        state_cases=(
+            StateSuiteCase(name="empty-state", run_ids=()),
+        )
+    )
+    result = run_regression_suite(db_session, req)
+
+    assert result.state_cases[0].passed is False
+    assert result.aggregate.failed_case_count == 1

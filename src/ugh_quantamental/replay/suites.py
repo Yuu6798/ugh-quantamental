@@ -27,9 +27,21 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 
-def _case_passed(error_count: int, missing_count: int, mismatch_count: int) -> bool:
-    """Return True iff the case has no errors, no missing runs, and no mismatches."""
-    return error_count == 0 and missing_count == 0 and mismatch_count == 0
+def _case_passed(
+    requested_count: int, error_count: int, missing_count: int, mismatch_count: int
+) -> bool:
+    """Return True iff at least one run was requested and all replayed exactly.
+
+    A zero-run case (empty run_ids or a query that matches nothing) is always a
+    failure: nothing was actually replayed, so the case provides no coverage
+    and must not produce a false-positive green result.
+    """
+    return (
+        requested_count > 0
+        and error_count == 0
+        and missing_count == 0
+        and mismatch_count == 0
+    )
 
 
 def run_regression_suite(
@@ -53,7 +65,7 @@ def run_regression_suite(
         )
         batch_result = replay_projection_batch(session, batch_req)
         agg = batch_result.aggregate
-        passed = _case_passed(agg.error_count, agg.missing_count, agg.mismatch_count)
+        passed = _case_passed(agg.requested_count, agg.error_count, agg.missing_count, agg.mismatch_count)
         projection_results.append(
             ProjectionSuiteCaseResult(
                 name=case.name,
@@ -71,7 +83,7 @@ def run_regression_suite(
         )
         batch_result = replay_state_batch(session, batch_req)
         agg = batch_result.aggregate
-        passed = _case_passed(agg.error_count, agg.missing_count, agg.mismatch_count)
+        passed = _case_passed(agg.requested_count, agg.error_count, agg.missing_count, agg.mismatch_count)
         state_results.append(
             StateSuiteCaseResult(
                 name=case.name,
