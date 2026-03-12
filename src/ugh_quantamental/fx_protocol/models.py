@@ -285,6 +285,43 @@ class OutcomeRecord(BaseModel):
             raise ValueError("realized_close must be within [realized_low, realized_high]")
         return self
 
+    @model_validator(mode="after")
+    def _validate_derived_fields(self) -> OutcomeRecord:
+        """Cross-check derived fields against raw OHLC to prevent internally inconsistent records."""
+        # --- direction must be consistent with close vs open ---
+        if self.realized_direction == ForecastDirection.up and self.realized_close <= self.realized_open:
+            raise ValueError(
+                "realized_direction='up' requires realized_close > realized_open"
+            )
+        if self.realized_direction == ForecastDirection.down and self.realized_close >= self.realized_open:
+            raise ValueError(
+                "realized_direction='down' requires realized_close < realized_open"
+            )
+        if self.realized_direction == ForecastDirection.flat and self.realized_close != self.realized_open:
+            raise ValueError(
+                "realized_direction='flat' requires realized_close == realized_open"
+            )
+        # --- close_change_bp sign must be consistent with direction ---
+        if self.realized_direction == ForecastDirection.up and self.realized_close_change_bp <= 0:
+            raise ValueError(
+                "realized_close_change_bp must be > 0 when realized_direction='up'"
+            )
+        if self.realized_direction == ForecastDirection.down and self.realized_close_change_bp >= 0:
+            raise ValueError(
+                "realized_close_change_bp must be < 0 when realized_direction='down'"
+            )
+        if self.realized_direction == ForecastDirection.flat and self.realized_close_change_bp != 0:
+            raise ValueError(
+                "realized_close_change_bp must be 0 when realized_direction='flat'"
+            )
+        # --- range_price must equal high - low ---
+        expected_range = self.realized_high - self.realized_low
+        if not math.isclose(self.realized_range_price, expected_range, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError(
+                "realized_range_price must equal realized_high - realized_low"
+            )
+        return self
+
 
 class EvaluationRecord(BaseModel):
     """Atomic diagnostic evaluation joining a ForecastRecord with an OutcomeRecord.

@@ -460,6 +460,104 @@ def test_outcome_record_close_below_low_raises() -> None:
         _outcome(realized_open=150.0, realized_high=150.8, realized_low=149.2, realized_close=148.0)
 
 
+# --- derived-field cross-validation (r2926594708) ---
+
+
+def test_outcome_record_direction_up_requires_close_gt_open() -> None:
+    # close < open but direction='up'
+    with pytest.raises(ValidationError, match="realized_direction='up' requires realized_close > realized_open"):
+        _outcome(
+            realized_open=150.5,
+            realized_high=150.8,
+            realized_low=149.2,
+            realized_close=149.5,
+            realized_direction=ForecastDirection.up,
+            realized_close_change_bp=1.0,
+            realized_range_price=1.6,
+        )
+
+
+def test_outcome_record_direction_down_requires_close_lt_open() -> None:
+    # close > open but direction='down'
+    with pytest.raises(ValidationError, match="realized_direction='down' requires realized_close < realized_open"):
+        _outcome(
+            realized_open=149.5,
+            realized_high=150.8,
+            realized_low=149.2,
+            realized_close=150.5,
+            realized_direction=ForecastDirection.down,
+            realized_close_change_bp=-1.0,
+            realized_range_price=1.6,
+        )
+
+
+def test_outcome_record_direction_flat_requires_close_eq_open() -> None:
+    # close != open but direction='flat'
+    with pytest.raises(ValidationError, match="realized_direction='flat' requires realized_close == realized_open"):
+        _outcome(
+            realized_open=150.0,
+            realized_high=150.8,
+            realized_low=149.2,
+            realized_close=150.3,
+            realized_direction=ForecastDirection.flat,
+            realized_close_change_bp=0.0,
+            realized_range_price=1.6,
+        )
+
+
+def test_outcome_record_close_change_bp_must_be_positive_when_up() -> None:
+    # direction='up' (default) but close_change_bp < 0
+    with pytest.raises(ValidationError, match="realized_close_change_bp must be > 0"):
+        _outcome(realized_close_change_bp=-10.0)
+
+
+def test_outcome_record_close_change_bp_must_be_negative_when_down() -> None:
+    # direction='down', close < open, but close_change_bp > 0
+    with pytest.raises(ValidationError, match="realized_close_change_bp must be < 0"):
+        _outcome(
+            realized_open=150.5,
+            realized_high=150.8,
+            realized_low=149.2,
+            realized_close=149.5,
+            realized_direction=ForecastDirection.down,
+            realized_close_change_bp=10.0,
+            realized_range_price=1.6,
+        )
+
+
+def test_outcome_record_range_price_must_equal_high_minus_low() -> None:
+    # realized_range_price inconsistent with high - low
+    with pytest.raises(ValidationError, match="realized_range_price must equal realized_high - realized_low"):
+        _outcome(realized_range_price=9.9)
+
+
+def test_outcome_record_derived_fields_valid_flat() -> None:
+    # flat: close == open, change_bp == 0, range_price consistent
+    rec = _outcome(
+        realized_open=150.0,
+        realized_high=150.8,
+        realized_low=149.2,
+        realized_close=150.0,
+        realized_direction=ForecastDirection.flat,
+        realized_close_change_bp=0.0,
+        realized_range_price=1.6,
+    )
+    assert rec.realized_direction == ForecastDirection.flat
+
+
+def test_outcome_record_derived_fields_valid_down() -> None:
+    rec = _outcome(
+        realized_open=150.5,
+        realized_high=150.8,
+        realized_low=149.2,
+        realized_close=149.5,
+        realized_direction=ForecastDirection.down,
+        realized_close_change_bp=-67.0,
+        realized_range_price=1.6,
+    )
+    assert rec.realized_direction == ForecastDirection.down
+
+
 def test_outcome_record_event_tags() -> None:
     rec = _outcome(event_happened=True, event_tags=(EventTag.fomc, EventTag.us_holiday))
     assert EventTag.fomc in rec.event_tags
