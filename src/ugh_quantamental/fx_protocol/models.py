@@ -277,6 +277,8 @@ class OutcomeRecord(BaseModel):
 
     @model_validator(mode="after")
     def _ohlc_ordering(self) -> OutcomeRecord:
+        if self.window_start_jst >= self.window_end_jst:
+            raise ValueError("window_start_jst must be strictly before window_end_jst")
         if self.realized_high < self.realized_low:
             raise ValueError("realized_high must be >= realized_low")
         if not (self.realized_low <= self.realized_open <= self.realized_high):
@@ -301,18 +303,12 @@ class OutcomeRecord(BaseModel):
             raise ValueError(
                 "realized_direction='flat' requires realized_close == realized_open"
             )
-        # --- close_change_bp sign must be consistent with direction ---
-        if self.realized_direction == ForecastDirection.up and self.realized_close_change_bp <= 0:
+        # --- close_change_bp must be recomputed from OHLC, not merely sign-checked ---
+        expected_bp = (self.realized_close - self.realized_open) / self.realized_open * 10_000
+        if not math.isclose(self.realized_close_change_bp, expected_bp, rel_tol=1e-6, abs_tol=1e-4):
             raise ValueError(
-                "realized_close_change_bp must be > 0 when realized_direction='up'"
-            )
-        if self.realized_direction == ForecastDirection.down and self.realized_close_change_bp >= 0:
-            raise ValueError(
-                "realized_close_change_bp must be < 0 when realized_direction='down'"
-            )
-        if self.realized_direction == ForecastDirection.flat and self.realized_close_change_bp != 0:
-            raise ValueError(
-                "realized_close_change_bp must be 0 when realized_direction='flat'"
+                "realized_close_change_bp must equal"
+                " (realized_close - realized_open) / realized_open * 10_000"
             )
         # --- range_price must equal high - low ---
         expected_range = self.realized_high - self.realized_low

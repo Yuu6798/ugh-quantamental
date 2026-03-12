@@ -130,6 +130,15 @@ def _baseline_forecast(strategy_kind: StrategyKind, **overrides) -> ForecastReco
     return ForecastRecord(**base)
 
 
+# Default OHLC values used by _outcome(); bp derived exactly from these prices.
+_O_OPEN: float = 149.5
+_O_CLOSE: float = 150.5
+_O_HIGH: float = 150.8
+_O_LOW: float = 149.2
+_O_BP: float = (_O_CLOSE - _O_OPEN) / _O_OPEN * 10_000   # ≈ 66.8896...
+_O_RANGE: float = _O_HIGH - _O_LOW                        # = 1.6
+
+
 def _outcome(**overrides) -> OutcomeRecord:
     base = dict(
         outcome_id="oc_test_001",
@@ -137,13 +146,13 @@ def _outcome(**overrides) -> OutcomeRecord:
         window_start_jst=_AS_OF,
         window_end_jst=_WINDOW_END,
         market_data_provenance=_provenance(),
-        realized_open=149.5,
-        realized_high=150.8,
-        realized_low=149.2,
-        realized_close=150.5,
+        realized_open=_O_OPEN,
+        realized_high=_O_HIGH,
+        realized_low=_O_LOW,
+        realized_close=_O_CLOSE,
         realized_direction=ForecastDirection.up,
-        realized_close_change_bp=67.0,
-        realized_range_price=1.6,
+        realized_close_change_bp=_O_BP,
+        realized_range_price=_O_RANGE,
         event_happened=False,
         event_tags=(),
         schema_version="v1",
@@ -445,6 +454,16 @@ def test_outcome_record_zero_price_raises() -> None:
         _outcome(realized_close=0.0)
 
 
+def test_outcome_record_window_start_after_end_raises() -> None:
+    with pytest.raises(ValidationError, match="window_start_jst must be strictly before window_end_jst"):
+        _outcome(window_start_jst=_WINDOW_END, window_end_jst=_AS_OF)
+
+
+def test_outcome_record_window_start_equal_end_raises() -> None:
+    with pytest.raises(ValidationError, match="window_start_jst must be strictly before window_end_jst"):
+        _outcome(window_start_jst=_AS_OF, window_end_jst=_AS_OF)
+
+
 def test_outcome_record_high_lt_low_raises() -> None:
     with pytest.raises(ValidationError, match="realized_high must be >= realized_low"):
         _outcome(realized_high=148.0, realized_low=151.0)
@@ -506,21 +525,24 @@ def test_outcome_record_direction_flat_requires_close_eq_open() -> None:
 
 
 def test_outcome_record_close_change_bp_must_be_positive_when_up() -> None:
-    # direction='up' (default) but close_change_bp < 0
-    with pytest.raises(ValidationError, match="realized_close_change_bp must be > 0"):
+    # direction='up' (default) but close_change_bp is wrong value
+    with pytest.raises(ValidationError, match="realized_close_change_bp must equal"):
         _outcome(realized_close_change_bp=-10.0)
 
 
 def test_outcome_record_close_change_bp_must_be_negative_when_down() -> None:
-    # direction='down', close < open, but close_change_bp > 0
-    with pytest.raises(ValidationError, match="realized_close_change_bp must be < 0"):
+    # direction='down', close < open, but close_change_bp has wrong value
+    _down_open = 150.5
+    _down_close = 149.5
+    _down_bp = (_down_close - _down_open) / _down_open * 10_000  # correct ≈ -66.44
+    with pytest.raises(ValidationError, match="realized_close_change_bp must equal"):
         _outcome(
-            realized_open=150.5,
+            realized_open=_down_open,
             realized_high=150.8,
             realized_low=149.2,
-            realized_close=149.5,
+            realized_close=_down_close,
             realized_direction=ForecastDirection.down,
-            realized_close_change_bp=10.0,
+            realized_close_change_bp=10.0,      # wrong: positive when should be negative
             realized_range_price=1.6,
         )
 
@@ -546,13 +568,16 @@ def test_outcome_record_derived_fields_valid_flat() -> None:
 
 
 def test_outcome_record_derived_fields_valid_down() -> None:
+    _down_open = 150.5
+    _down_close = 149.5
+    _down_bp = (_down_close - _down_open) / _down_open * 10_000  # ≈ -66.44
     rec = _outcome(
-        realized_open=150.5,
+        realized_open=_down_open,
         realized_high=150.8,
         realized_low=149.2,
-        realized_close=149.5,
+        realized_close=_down_close,
         realized_direction=ForecastDirection.down,
-        realized_close_change_bp=-67.0,
+        realized_close_change_bp=_down_bp,
         realized_range_price=1.6,
     )
     assert rec.realized_direction == ForecastDirection.down
