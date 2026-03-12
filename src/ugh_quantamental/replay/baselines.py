@@ -98,37 +98,39 @@ def _compare_results(
 
     case_count_match = stored_agg["total_case_count"] == current_agg["total_case_count"]
 
-    # Build per-case lookup by name within each group
+    # Process projection and state groups independently so that a case name
+    # shared across groups produces two separate deltas.  Merging into one
+    # all_names set would cause the if/elif to evaluate only the projection
+    # side and silently drop state regressions with the same name.
     stored_proj = {c["name"]: c for c in stored_json["projection_cases"]}
     stored_state = {c["name"]: c for c in stored_json["state_cases"]}
     current_proj = {c["name"]: c for c in current_json["projection_cases"]}
     current_state = {c["name"]: c for c in current_json["state_cases"]}
 
-    all_names = sorted(
-        set(stored_proj) | set(current_proj) | set(stored_state) | set(current_state)
-    )
-
     deltas: list[RegressionSuiteCaseDelta] = []
-    for name in all_names:
-        in_stored = name in stored_proj or name in stored_state
-        in_current = name in current_proj or name in current_state
 
-        if name in stored_proj and name in current_proj:
-            passed_match: bool | None = stored_proj[name]["passed"] == current_proj[name]["passed"]
-        elif name in stored_state and name in current_state:
-            passed_match = stored_state[name]["passed"] == current_state[name]["passed"]
-        else:
-            # Case is absent on one side or changed group — comparison undefined
-            passed_match = None
-
-        deltas.append(
-            RegressionSuiteCaseDelta(
-                name=name,
-                exists_in_baseline=in_stored,
-                exists_in_current=in_current,
-                passed_match=passed_match,
+    for group_label, stored_group, current_group in (
+        ("projection", stored_proj, current_proj),
+        ("state", stored_state, current_state),
+    ):
+        for name in sorted(set(stored_group) | set(current_group)):
+            in_stored = name in stored_group
+            in_current = name in current_group
+            if in_stored and in_current:
+                passed_match: bool | None = (
+                    stored_group[name]["passed"] == current_group[name]["passed"]
+                )
+            else:
+                passed_match = None
+            deltas.append(
+                RegressionSuiteCaseDelta(
+                    group=group_label,
+                    name=name,
+                    exists_in_baseline=in_stored,
+                    exists_in_current=in_current,
+                    passed_match=passed_match,
+                )
             )
-        )
 
     return RegressionBaselineComparison(
         exact_match=exact_match,

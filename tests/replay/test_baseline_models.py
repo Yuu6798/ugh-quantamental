@@ -131,12 +131,14 @@ def test_baseline_is_frozen() -> None:
 )
 def test_case_delta_passed_match_values(passed_match: bool | None) -> None:
     delta = RegressionSuiteCaseDelta(
+        group="projection",
         name="smoke",
         exists_in_baseline=True,
         exists_in_current=True,
         passed_match=passed_match,
     )
     assert delta.passed_match is passed_match
+    assert delta.group == "projection"
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +163,7 @@ def test_comparison_exact_match_all_zeros() -> None:
 
 def test_comparison_non_match() -> None:
     delta = RegressionSuiteCaseDelta(
+        group="state",
         name="flaky",
         exists_in_baseline=True,
         exists_in_current=True,
@@ -180,3 +183,31 @@ def test_comparison_non_match() -> None:
     assert cmp.total_mismatch_count_diff == 3
     assert len(cmp.case_deltas) == 1
     assert cmp.case_deltas[0].passed_match is False
+
+
+# ---------------------------------------------------------------------------
+# RegressionSuiteCaseDelta — group field
+# ---------------------------------------------------------------------------
+
+
+def test_case_delta_group_projection() -> None:
+    delta = RegressionSuiteCaseDelta(
+        group="projection",
+        name="smoke",
+        exists_in_baseline=True,
+        exists_in_current=True,
+        passed_match=True,
+    )
+    assert delta.group == "projection"
+
+
+def test_case_delta_group_state() -> None:
+    delta = RegressionSuiteCaseDelta(
+        group="state",
+        name="smoke",
+        exists_in_baseline=True,
+        exists_in_current=False,
+        passed_match=None,
+    )
+    assert delta.group == "state"
+    assert delta.exists_in_current is False

@@ -73,8 +73,14 @@ class RegressionSuiteBaselineBundle:
 
 @dataclass(frozen=True)
 class RegressionSuiteCaseDelta:
-    """Per-case comparison between baseline and current suite result."""
+    """Per-case comparison between baseline and current suite result.
 
+    ``group`` is ``"projection"`` or ``"state"``.  Cases with the same name
+    in different groups produce separate deltas so that a projection change
+    and a state change are never silently merged.
+    """
+
+    group: str
     name: str
     exists_in_baseline: bool
     exists_in_current: bool

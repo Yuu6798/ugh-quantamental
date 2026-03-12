@@ -113,7 +113,7 @@ compare_regression_baseline(session, request)
 | `total_missing_count_diff` | `current - stored` |
 | `total_error_count_diff` | `current - stored` |
 | `total_mismatch_count_diff` | `current - stored` |
-| `case_deltas` | Per-case by name: `exists_in_baseline`, `exists_in_current`, `passed_match` |
+| `case_deltas` | Per `(group, name)` pair: `group`, `exists_in_baseline`, `exists_in_current`, `passed_match` |
 
 `exact_match` is the primary signal. It is `True` iff the stored and current result JSON are
 byte-for-byte equal. All aggregate diffs are provided for diagnostics even when `exact_match` is
@@ -135,13 +135,18 @@ No configurable tolerances are supported in this milestone.
 
 ## Per-case delta semantics
 
-`RegressionSuiteCaseDelta` is computed per unique case name across both baseline and current result:
+`RegressionSuiteCaseDelta` is computed per unique `(group, name)` pair.
+Projection and state groups are iterated independently, so a case name that
+appears in both groups produces two separate deltas rather than being silently
+merged into one.  This prevents a state-group regression from being hidden
+behind a matching projection-group result with the same name.
 
-- `exists_in_baseline`: case name appeared in stored result
-- `exists_in_current`: case name appeared in current rerun
-- `passed_match`: `True/False` when both sides have the case in the same group
-  (projection–projection or state–state); `None` when the case is missing on one side or when
-  case type changed
+Fields:
+- `group`: `"projection"` or `"state"` — identifies which group this delta belongs to
+- `exists_in_baseline`: case appeared in the stored result for this group
+- `exists_in_current`: case appeared in the current rerun for this group
+- `passed_match`: `True/False` when the case exists on both sides; `None` when absent
+  on one side
 
 ---
 

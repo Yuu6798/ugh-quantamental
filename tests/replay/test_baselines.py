@@ -443,3 +443,43 @@ def test_baseline_created_at_naive_utc(
     assert stored.year == 2026
     assert stored.month == 6
     assert stored.hour == 12
+
+
+# ---------------------------------------------------------------------------
+# case_deltas group separation — same name in projection and state groups
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_compare_case_deltas_have_group_field(
+    db_session, question_features, signal_features, alignment_inputs,
+) -> None:
+    """Each RegressionSuiteCaseDelta must carry a group field ('projection'/'state')."""
+    from ugh_quantamental.replay.baseline_models import (
+        CompareRegressionBaselineRequest,
+        CreateRegressionBaselineRequest,
+    )
+    from ugh_quantamental.replay.baselines import (
+        compare_regression_baseline,
+        create_regression_baseline,
+    )
+
+    _, suite_req = _make_suite_request_with_run(
+        db_session, question_features, signal_features, alignment_inputs
+    )
+    bundle = create_regression_baseline(
+        db_session,
+        CreateRegressionBaselineRequest(baseline_name="group-field-test", suite_request=suite_req),
+    )
+    result = compare_regression_baseline(
+        db_session,
+        CompareRegressionBaselineRequest(baseline_id=bundle.baseline.baseline_id),
+    )
+
+    assert result is not None
+    for delta in result.comparison.case_deltas:
+        assert delta.group in ("projection", "state"), (
+            f"unexpected group {delta.group!r} on delta {delta.name!r}"
+        )
+    # The fixture creates a projection-only suite, so all deltas must be projection
+    assert all(d.group == "projection" for d in result.comparison.case_deltas)
