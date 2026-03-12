@@ -27,10 +27,13 @@ from ugh_quantamental.replay.suite_models import (
     RegressionSuiteRequest,
     RegressionSuiteResult,
 )
-from ugh_quantamental.replay.suites import run_regression_suite
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
+# run_regression_suite is imported lazily inside DB-dependent functions to
+# preserve import isolation: replay.suites → replay.batch → query.readers
+# pulls in SQLAlchemy, which must not be required at module import time.
 
 
 def make_baseline_id(prefix: str = "base_") -> str:
@@ -159,6 +162,7 @@ def create_regression_baseline(
     Flushes but does not commit; the caller owns the transaction.
     """
     from ugh_quantamental.persistence.repositories import RegressionSuiteBaselineRepository
+    from ugh_quantamental.replay.suites import run_regression_suite
 
     suite_result = run_regression_suite(session, request.suite_request)
     suite_result_json = _dump_suite_result(suite_result)
@@ -235,6 +239,8 @@ def compare_regression_baseline(
     )
     if bundle is None:
         return None
+
+    from ugh_quantamental.replay.suites import run_regression_suite
 
     current_result = run_regression_suite(session, bundle.baseline.suite_request)
     current_json = _dump_suite_result(current_result)

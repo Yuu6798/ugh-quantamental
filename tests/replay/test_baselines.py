@@ -10,6 +10,43 @@ HAS_SQLALCHEMY = importlib.util.find_spec("sqlalchemy") is not None
 
 
 # ---------------------------------------------------------------------------
+# Import isolation — make_baseline_id must not require SQLAlchemy
+# ---------------------------------------------------------------------------
+
+
+def test_make_baseline_id_importable_without_sqlalchemy(monkeypatch) -> None:
+    """baselines.make_baseline_id must be importable even when sqlalchemy is absent.
+
+    Simulates a SQLAlchemy-free environment by hiding the module from sys.modules
+    and the finder, then reimporting baselines to verify no transitive SQLAlchemy
+    import occurs at module load time.
+    """
+    import sys
+    import types
+
+    # Remove cached baselines module so it reimports fresh
+    mods_to_remove = [k for k in sys.modules if "baselines" in k or "suites" in k]
+    saved = {k: sys.modules.pop(k) for k in mods_to_remove}
+
+    # Inject a dummy sqlalchemy that raises on real attribute access
+    fake_sa = types.ModuleType("sqlalchemy")
+    fake_orm = types.ModuleType("sqlalchemy.orm")
+    monkeypatch.setitem(sys.modules, "sqlalchemy", fake_sa)
+    monkeypatch.setitem(sys.modules, "sqlalchemy.orm", fake_orm)
+
+    try:
+        # This must not raise even though sqlalchemy is "broken"
+        from ugh_quantamental.replay.baselines import make_baseline_id  # noqa: PLC0415
+
+        bid = make_baseline_id()
+        assert bid.startswith("base_")
+    finally:
+        # Restore original modules
+        for k, v in saved.items():
+            sys.modules[k] = v
+
+
+# ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
 
