@@ -11,17 +11,16 @@
 | 5 | State engine | 8 pure functions; `run_state_engine` entry point |
 | 6 | Persistence scaffolding | SQLAlchemy ORM records, Alembic migration, repositories with naive-UTC `created_at` |
 | 7 | Workflow layer | Synchronous composition: run engine → persist → reload; `run_projection_workflow`, `run_state_workflow`, `run_full_workflow` |
+| 8 | Query layer | Read-only inspection: summaries, filtering, full bundle rehydration from persisted records |
+| 9 | Replay layer | Deterministic replay / regression checking: reruns persisted runs, compares stored vs recomputed results |
 
 ## Next up
 
-**Milestone 8 — TBD**
+**Milestone 10 — Batch replay / experiment runner**
 
-Candidate directions (not yet specced):
-- Analytics or query layer over persisted runs
-- Batch/multi-run orchestration
-- Richer projection bounds or asymmetric confidence intervals
-
-Do not implement any of the above without a formal spec in `docs/specs/`.
+Replay multiple runs in a single call, collect per-run comparison results, and return an aggregate summary.
+Requires: pagination strategy, error-per-run isolation, aggregate mismatch reporting.
+Do not implement without a formal spec in `docs/specs/`.
 
 ## Validation commands
 

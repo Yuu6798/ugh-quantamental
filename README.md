@@ -1,6 +1,6 @@
 # ugh-quantamental
 
-Minimal Python 3.11+ library implementing deterministic quantamental engines with persistence and workflow composition. All logic is synchronous, typed, schema-first, and connector-free.
+Minimal Python 3.11+ library implementing deterministic quantamental engines with persistence, workflow composition, read-only query inspection, and deterministic replay / regression checking. All logic is synchronous, typed, schema-first, and connector-free.
 
 ## Features
 
@@ -8,6 +8,8 @@ Minimal Python 3.11+ library implementing deterministic quantamental engines wit
 - **State engine** — updates lifecycle state probabilities via deterministic softmax blending over a 6-state simplex, driven by observable event features
 - **Persistence scaffolding** — SQLAlchemy ORM-backed run records for projection and state runs; Alembic migration; naive-UTC `created_at` normalisation
 - **Workflow layer** — synchronous composition: run engine → persist result → reload → return both (`run_projection_workflow`, `run_state_workflow`, `run_full_workflow`)
+- **Query layer** — read-only inspection of persisted runs: lightweight summaries with filtering/pagination, full bundle rehydration with all typed models recovered from JSON
+- **Replay layer** — deterministic regression checking: reload a persisted run, rerun the engine with the original inputs, compare stored vs recomputed results field-by-field
 - **Frozen schema contracts** — all data models use `ConfigDict(extra="forbid", frozen=True)`; invariants enforced at construction time
 - **Pure engine functions** — same inputs always produce the same output; no globals, no mutation, no I/O
 
@@ -44,9 +46,15 @@ src/ugh_quantamental/
 │   ├── repositories.py   # ProjectionRunRepository, StateRunRepository
 │   ├── serializers.py    # Pydantic ↔ JSON helpers
 │   └── db.py             # engine/session factory helpers
-└── workflows/            # synchronous workflow composition layer
-    ├── models.py          # request/response models + make_run_id
-    └── runners.py         # run_projection_workflow, run_state_workflow, run_full_workflow
+├── workflows/            # synchronous workflow composition layer
+│   ├── models.py          # request/response models + make_run_id
+│   └── runners.py         # run_projection_workflow, run_state_workflow, run_full_workflow
+├── query/                # read-only inspection layer
+│   ├── models.py          # ProjectionRunQuery, StateRunQuery, *Summary, *Bundle
+│   └── readers.py         # list_*_summaries, get_*_bundle
+└── replay/               # deterministic replay / regression layer
+    ├── models.py          # *ReplayRequest, *ReplayComparison, *ReplayResult
+    └── runners.py         # replay_projection_run, replay_state_run
 
 alembic/                  # Alembic migration environment
 docs/specs/               # formal v1 specifications
@@ -118,6 +126,29 @@ print(result.engine_result.projection_snapshot.point_estimate)
 print(result.persisted_run.created_at)   # naive UTC datetime
 ```
 
+### Query (read-only inspection)
+
+```python
+from ugh_quantamental.query import ProjectionRunQuery
+from ugh_quantamental.query.readers import list_projection_run_summaries, get_projection_run_bundle
+
+summaries = list_projection_run_summaries(session, ProjectionRunQuery(projection_id="my-question-id"))
+bundle = get_projection_run_bundle(session, run_id=summaries[0].run_id)
+print(bundle.result.projection_snapshot.point_estimate)
+```
+
+### Replay (deterministic regression check)
+
+```python
+from ugh_quantamental.replay import ProjectionReplayRequest
+from ugh_quantamental.replay.runners import replay_projection_run
+
+replay = replay_projection_run(session, ProjectionReplayRequest(run_id="proj-abc123"))
+if replay is not None:
+    print(replay.comparison.exact_match)          # True if engine output unchanged
+    print(replay.comparison.point_estimate_diff)  # absolute diff (0.0 if exact match)
+```
+
 ## Development
 
 ```bash
@@ -138,6 +169,8 @@ Formal v1 specs live in `docs/specs/`:
 | `ugh_state_engine_v1.md` | State lifecycle update functions and API (Milestone 5) |
 | `ugh_persistence_v1.md` | Persistence scaffolding policy and schema (Milestone 6) |
 | `ugh_workflow_v1.md` | Workflow composition layer and import policy (Milestone 7) |
+| `ugh_query_v1.md` | Read-only query layer: summaries, filtering, bundle rehydration (Milestone 8) |
+| `ugh_replay_v1.md` | Deterministic replay / regression layer and comparison policy (Milestone 9) |
 
 ## Out of scope
 

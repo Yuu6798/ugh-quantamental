@@ -4,7 +4,7 @@ Guidelines for AI assistants working in this repository.
 
 ## Repository overview
 
-`ugh-quantamental` is a deterministic Python 3.11+ library. It is schema-first, synchronous, connector-free, and typed throughout. It contains four active packages:
+`ugh-quantamental` is a deterministic Python 3.11+ library. It is schema-first, synchronous, connector-free, and typed throughout. It contains six active packages:
 
 | Package | Description |
 |---|---|
@@ -12,8 +12,10 @@ Guidelines for AI assistants working in this repository.
 | `engine` | Pure projection and state-lifecycle functions; no I/O, no stochastic behaviour |
 | `persistence` | SQLAlchemy v2 ORM run records with Alembic migration; naive-UTC `created_at` policy |
 | `workflows` | Synchronous composition layer: run engine → persist → reload → return result |
+| `query` | Read-only inspection layer: summaries, filtering, and full bundle rehydration from persisted records |
+| `replay` | Deterministic replay / regression layer: reruns persisted runs against the current engine and compares stored vs recomputed results |
 
-Milestones 1–7 are complete. The codebase is a research/scaffold tool, not a production application.
+Milestones 1–9 are complete. The codebase is a research/scaffold tool, not a production application.
 
 ---
 
@@ -53,10 +55,18 @@ src/ugh_quantamental/
 │   ├── repositories.py       # ProjectionRunRepository, StateRunRepository; _normalize_created_at
 │   ├── serializers.py        # dump_model_json / load_model_json helpers
 │   └── db.py                 # create_db_engine, create_all_tables, create_session_factory
-└── workflows/
-    ├── __init__.py            # exports model classes and make_run_id (SQLAlchemy-free)
-    ├── models.py              # request/response models + make_run_id
-    └── runners.py             # run_projection_workflow, run_state_workflow, run_full_workflow
+├── workflows/
+│   ├── __init__.py            # exports model classes and make_run_id (SQLAlchemy-free)
+│   ├── models.py              # request/response models + make_run_id
+│   └── runners.py             # run_projection_workflow, run_state_workflow, run_full_workflow
+├── query/
+│   ├── __init__.py            # exports query/summary/bundle models (SQLAlchemy-free)
+│   ├── models.py              # ProjectionRunQuery, StateRunQuery, *Summary, *Bundle
+│   └── readers.py             # list_projection_run_summaries, list_state_run_summaries, get_*_bundle
+└── replay/
+    ├── __init__.py            # exports request/comparison/result models (SQLAlchemy-free)
+    ├── models.py              # ProjectionReplayRequest, StateReplayRequest, *Comparison, *Result
+    └── runners.py             # replay_projection_run, replay_state_run
 
 alembic/                       # Alembic migration environment
 alembic/versions/              # migration scripts
@@ -76,7 +86,14 @@ tests/
 ├── persistence/
 │   ├── test_db.py
 │   └── test_repositories.py
-└── workflows/
+├── workflows/
+│   ├── conftest.py
+│   ├── test_models.py
+│   └── test_runners.py
+├── query/
+│   ├── conftest.py
+│   └── test_readers.py
+└── replay/
     ├── conftest.py
     ├── test_models.py
     └── test_runners.py
@@ -120,7 +137,13 @@ Both engines are explicitly deterministic. All intermediate values are clamped o
 Workflows are thin, synchronous wrappers: call an engine function, persist via the repository, reload the persisted run, return both. The caller owns the session and transaction boundary. Workflows do not commit; they flush only.
 
 ### Import isolation
-`workflows.models` and `workflows.__init__` are importable without SQLAlchemy. Runner functions must be imported from `workflows.runners` directly and require SQLAlchemy at call time.
+`workflows.models`, `query.__init__`, and `replay.__init__` are all importable without SQLAlchemy. Functions that touch the database must be imported from their respective `runners.py` or `readers.py` submodules and require SQLAlchemy at call time.
+
+### Query layer (read-only)
+`query/readers.py` provides list and bundle-fetch functions over persisted run records. Summaries use `load_only` to fetch minimal columns. Bundle fetches use named attribute access (not `__dict__`) so SQLAlchemy's deferred-load mechanism fires correctly.
+
+### Replay layer (read-only, diagnostic)
+`replay/runners.py` reloads a persisted bundle via the query layer, reruns the deterministic engine with the recovered typed inputs, and compares stored vs recomputed results. Replay runners never write, flush, or commit the session.
 
 ---
 
@@ -163,6 +186,19 @@ Functions (in order): `compute_block_quality` → `compute_state_evidence` → `
 - `run_full_workflow(session, request)` → `FullWorkflowResult` (projection then state, same session)
 - `FullWorkflowRequest.state` is `FullWorkflowStateRequest` — does not carry `projection_result` (injected automatically)
 
+### Query layer
+- `list_projection_run_summaries(session, query)` → `list[ProjectionRunSummary]`
+- `list_state_run_summaries(session, query)` → `list[StateRunSummary]`
+- `get_projection_run_bundle(session, run_id)` → `ProjectionRunBundle | None`
+- `get_state_run_bundle(session, run_id)` → `StateRunBundle | None`
+- Import models from `query.__init__`; import reader functions from `query.readers`
+
+### Replay layer
+- `replay_projection_run(session, request)` → `ProjectionReplayResult | None`
+- `replay_state_run(session, request)` → `StateReplayResult | None`
+- Returns `None` if `run_id` is not found; read-only, no writes
+- Import models from `replay.__init__`; import runners from `replay.runners`
+
 ---
 
 ## Development conventions
@@ -197,6 +233,11 @@ Functions (in order): `compute_block_quality` → `compute_state_evidence` → `
 - Runner imports go inside test function bodies or behind `HAS_SQLALCHEMY` guards
 - Workflows flush but do not commit; the caller owns the transaction
 
+### Working with query and replay
+- `query.__init__` and `replay.__init__` must remain importable without SQLAlchemy
+- Reader and runner imports go inside test function bodies or behind `HAS_SQLALCHEMY` guards
+- Replay runners must not write, flush, or commit; they are diagnostic only
+
 ### Tests
 - Do not modify existing tests unless explicitly required
 - New tests follow the existing pattern: parametrised for multiple cases, single-case for edge conditions
@@ -230,6 +271,8 @@ Always include a ready-to-paste PR title and body (markdown) alongside the link.
 | `docs/specs/ugh_state_engine_v1.md` | State lifecycle update functions and API (Milestone 5) |
 | `docs/specs/ugh_persistence_v1.md` | Persistence scaffolding policy and schema (Milestone 6) |
 | `docs/specs/ugh_workflow_v1.md` | Workflow composition layer and import policy (Milestone 7) |
+| `docs/specs/ugh_query_v1.md` | Read-only query layer: summaries, filtering, bundle rehydration (Milestone 8) |
+| `docs/specs/ugh_replay_v1.md` | Deterministic replay / regression layer and comparison policy (Milestone 9) |
 
 When implementing a new milestone, read the corresponding spec first.
 

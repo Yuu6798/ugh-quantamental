@@ -5,11 +5,13 @@
 `ugh-quantamental` is a deterministic Python 3.11+ library containing:
 
 - **schemas** — frozen Pydantic v2 data contracts (enums, SSVSnapshot, Omega, MarketSVP, ProjectionSnapshot)
-- **engine** — pure projection and state-lifecycle functions (Milestones 4–5)
-- **persistence** — SQLAlchemy/Alembic-backed run records for projection and state runs (Milestone 6)
-- **workflows** — synchronous composition layer: run engine → persist → reload → return (Milestone 7)
+- **engine** — pure projection and state-lifecycle functions
+- **persistence** — SQLAlchemy/Alembic-backed run records for projection and state runs
+- **workflows** — synchronous composition layer: run engine → persist → reload → return
+- **query** — read-only inspection layer: summaries, filtering, and full bundle rehydration
+- **replay** — deterministic replay / regression checker: reruns persisted runs against the current engine and compares stored vs recomputed results
 
-Milestones 1–7 are complete. All code is deterministic, synchronous, and connector-free.
+Milestones 1–9 are complete. All code is deterministic, synchronous, and connector-free.
 
 ## Durable working rules
 
