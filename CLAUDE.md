@@ -4,7 +4,7 @@ Guidelines for AI assistants working in this repository.
 
 ## Repository overview
 
-`ugh-quantamental` is a deterministic Python 3.11+ library. It is schema-first, synchronous, connector-free, and typed throughout. It contains eight active packages:
+`ugh-quantamental` is a deterministic Python 3.11+ library. It is schema-first, synchronous, connector-free, and typed throughout. It contains nine active packages:
 
 | Package | Description |
 |---|---|
@@ -16,8 +16,9 @@ Guidelines for AI assistants working in this repository.
 | `replay` | Single-run deterministic replay / regression checker |
 | `replay.batch` | Multi-run batch replay with per-run isolation and aggregate reporting |
 | `replay.suites` | Named regression suite runner with deterministic pass/fail reporting |
+| `replay.baselines` | Baseline / golden snapshot: persist named suite results and compare future reruns |
 
-Milestones 1–11 are complete. The codebase is a research/scaffold tool, not a production application.
+Milestones 1–12 are complete. The codebase is a research/scaffold tool, not a production application.
 
 ---
 
@@ -53,8 +54,8 @@ src/ugh_quantamental/
 │   └── state_models.py       # StateEventFeatures, StateConfig, StateEngineResult
 ├── persistence/
 │   ├── __init__.py           # package exports
-│   ├── models.py             # ProjectionRunRecord, StateRunRecord (SQLAlchemy ORM)
-│   ├── repositories.py       # ProjectionRunRepository, StateRunRepository; _normalize_created_at
+│   ├── models.py             # ProjectionRunRecord, StateRunRecord, RegressionSuiteBaselineRecord (SQLAlchemy ORM)
+│   ├── repositories.py       # ProjectionRunRepository, StateRunRepository, RegressionSuiteBaselineRepository; _normalize_created_at
 │   ├── serializers.py        # dump_model_json / load_model_json helpers
 │   └── db.py                 # create_db_engine, create_all_tables, create_session_factory
 ├── workflows/
@@ -72,10 +73,12 @@ src/ugh_quantamental/
     ├── batch_models.py        # *BatchReplayRequest/Item/Aggregate/Result, BatchReplayStatus
     ├── batch.py               # replay_projection_batch, replay_state_batch
     ├── suite_models.py        # *SuiteCase, RegressionSuiteRequest/Aggregate/Result
-    └── suites.py              # run_regression_suite
+    ├── suites.py              # run_regression_suite
+    ├── baseline_models.py     # Create/CompareRequest, RegressionSuiteBaseline/Bundle, *Delta, *Comparison, *CompareResult
+    └── baselines.py           # make_baseline_id, create_regression_baseline, get_regression_baseline, compare_regression_baseline
 
 alembic/                       # Alembic migration environment
-alembic/versions/              # migration scripts
+alembic/versions/              # migration scripts (0001 initial, 0002 baselines)
 
 tests/
 ├── test_import_smoke.py
@@ -91,7 +94,8 @@ tests/
 │   └── test_ssv.py
 ├── persistence/
 │   ├── test_db.py
-│   └── test_repositories.py
+│   ├── test_repositories.py
+│   └── test_baseline_repositories.py
 ├── workflows/
 │   ├── conftest.py
 │   ├── test_models.py
@@ -106,7 +110,9 @@ tests/
     ├── test_batch_models.py
     ├── test_batch.py
     ├── test_suite_models.py
-    └── test_suites.py
+    ├── test_suites.py
+    ├── test_baseline_models.py
+    └── test_baselines.py
 
 docs/specs/                    # formal v1 specifications
 ```
@@ -147,7 +153,7 @@ Both engines are explicitly deterministic. All intermediate values are clamped o
 Workflows are thin, synchronous wrappers: call an engine function, persist via the repository, reload the persisted run, return both. The caller owns the session and transaction boundary. Workflows do not commit; they flush only.
 
 ### Import isolation
-`workflows.models`, `query.__init__`, and `replay.__init__` are all importable without SQLAlchemy. Functions that touch the database must be imported from their respective `runners.py`, `readers.py`, `batch.py`, or `suites.py` submodules and require SQLAlchemy at call time.
+`workflows.models`, `query.__init__`, and `replay.__init__` are all importable without SQLAlchemy. Functions that touch the database must be imported from their respective `runners.py`, `readers.py`, `batch.py`, `suites.py`, or `baselines.py` submodules and require SQLAlchemy at call time. SQLAlchemy-transitive imports (e.g. `run_regression_suite`) must be deferred inside function bodies when the importing module must remain SQLAlchemy-free.
 
 ### Query layer (read-only)
 `query/readers.py` provides list and bundle-fetch functions over persisted run records. Summaries use `load_only` to fetch minimal columns. Bundle fetches use named attribute access (not `__dict__`) so SQLAlchemy's deferred-load mechanism fires correctly.
@@ -160,6 +166,9 @@ Workflows are thin, synchronous wrappers: call an engine function, persist via t
 
 ### Regression suite layer (read-only, named pass/fail)
 `replay/suites.py` runs named batch replay cases and computes a deterministic pass/fail result per case. A case passes iff `requested_count > 0` and `error_count == missing_count == mismatch_count == 0`. A zero-run case is always a failure — it provides no coverage and must not produce a false-positive green result.
+
+### Baseline layer (read-mostly, golden snapshot)
+`replay/baselines.py` persists named suite results as immutable baselines and supports comparison against future reruns. `create_regression_baseline` writes one baseline record (flush only). `get_regression_baseline` and `compare_regression_baseline` are read-only. Case deltas use `(group, name)` keys so projection and state cases with the same name produce independent deltas.
 
 ---
 
@@ -194,6 +203,9 @@ Functions (in order): `compute_block_quality` → `compute_state_evidence` → `
 - `ProjectionRunRepository.load_run(session, run_id)` → `ProjectionRun | None`
 - `StateRunRepository.save_run(session, *, run_id, snapshot_id, omega_id, ...)` — persists full JSON payload
 - `StateRunRepository.load_run(session, run_id)` → `StateRun | None`
+- `RegressionSuiteBaselineRepository.save_baseline(session, *, baseline_id, baseline_name, ...)` — persists suite request + serialized result JSON
+- `RegressionSuiteBaselineRepository.load_baseline(session, baseline_id)` → `RegressionSuiteBaselineRun | None`
+- `RegressionSuiteBaselineRepository.load_baseline_by_name(session, baseline_name)` → `RegressionSuiteBaselineRun | None`
 
 ### Workflow layer
 - `make_run_id(prefix)` → short `"{prefix}{uuid4_hex[:12]}"` identifier (importable without SQLAlchemy)
@@ -227,6 +239,15 @@ Functions (in order): `compute_block_quality` → `compute_state_evidence` → `
 - Each case provides `name` and exactly one of `run_ids` or `query`
 - Pass condition: `requested_count > 0` and `error_count == missing_count == mismatch_count == 0`
 - Import models from `replay.suite_models`; import runner from `replay.suites`
+
+### Baseline layer
+- `make_baseline_id(prefix)` → short `"{prefix}{uuid4_hex[:12]}"` identifier (importable without SQLAlchemy)
+- `create_regression_baseline(session, request)` → `RegressionSuiteBaselineBundle` — runs suite, persists baseline (flush only)
+- `get_regression_baseline(session, *, baseline_id=..., baseline_name=...)` → `RegressionSuiteBaselineBundle | None` — read-only
+- `compare_regression_baseline(session, request)` → `RegressionBaselineCompareResult | None` — read-only; `None` if baseline not found
+- `RegressionBaselineComparison`: `exact_match`, aggregate diffs, `case_deltas: tuple[RegressionSuiteCaseDelta, ...]`
+- `RegressionSuiteCaseDelta`: `group` (`"projection"` or `"state"`), `name`, `exists_in_baseline`, `exists_in_current`, `passed_match`
+- Import models from `replay.__init__` or `replay.baseline_models`; import functions from `replay.baselines`
 
 ---
 
@@ -265,7 +286,8 @@ Functions (in order): `compute_block_quality` → `compute_state_evidence` → `
 ### Working with query and replay
 - `query.__init__` and `replay.__init__` must remain importable without SQLAlchemy
 - Reader and runner imports go inside test function bodies or behind `HAS_SQLALCHEMY` guards
-- All replay runners (`runners.py`, `batch.py`, `suites.py`) must not write, flush, or commit; they are diagnostic only
+- All replay runners (`runners.py`, `batch.py`, `suites.py`) and `baselines.py` must not write, flush, or commit during read operations
+- `baselines.py` defers `run_regression_suite` import inside DB-dependent function bodies to avoid transitive SQLAlchemy imports at module load time
 
 ### Tests
 - Do not modify existing tests unless explicitly required
@@ -304,6 +326,7 @@ Always include a ready-to-paste PR title and body (markdown) alongside the link.
 | `docs/specs/ugh_replay_v1.md` | Deterministic replay / regression layer and comparison policy (Milestone 9) |
 | `docs/specs/ugh_batch_replay_v1.md` | Batch replay / experiment runner (Milestone 10) |
 | `docs/specs/ugh_regression_suite_v1.md` | Regression suite runner and pass/fail policy (Milestone 11) |
+| `docs/specs/ugh_baseline_v1.md` | Baseline / golden snapshot management and comparison policy (Milestone 12) |
 
 When implementing a new milestone, read the corresponding spec first.
 

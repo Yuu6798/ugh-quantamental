@@ -1,6 +1,6 @@
 # ugh-quantamental
 
-Minimal Python 3.11+ library implementing deterministic quantamental engines with persistence, workflow composition, read-only query inspection, deterministic replay, multi-run batch replay, and regression suite execution. All logic is synchronous, typed, schema-first, and connector-free.
+Minimal Python 3.11+ library implementing deterministic quantamental engines with persistence, workflow composition, read-only query inspection, deterministic replay, multi-run batch replay, regression suite execution, and baseline / golden snapshot management. All logic is synchronous, typed, schema-first, and connector-free.
 
 ## Features
 
@@ -12,6 +12,7 @@ Minimal Python 3.11+ library implementing deterministic quantamental engines wit
 - **Replay layer** — deterministic single-run regression checking: reload a persisted run, rerun the engine with the original inputs, compare stored vs recomputed results field-by-field
 - **Batch replay** — multi-run replay in one call: per-run isolation, aggregate mismatch / error / missing counts, optional deduplication
 - **Regression suite** — named suite runner over batch replay cases: deterministic pass/fail per case, zero-run guard prevents false-positive green results
+- **Baseline / golden snapshot** — persist a named suite result; compare future reruns against the pinned baseline; per-`(group, name)` case deltas with exact-match and aggregate-diff reporting
 - **Frozen schema contracts** — all data models use `ConfigDict(extra="forbid", frozen=True)`; invariants enforced at construction time
 - **Pure engine functions** — same inputs always produce the same output; no globals, no mutation, no I/O
 
@@ -44,8 +45,8 @@ src/ugh_quantamental/
 │   ├── state.py          # 8 pure state-lifecycle functions
 │   └── state_models.py   # StateEventFeatures, StateConfig, StateEngineResult
 ├── persistence/          # SQLAlchemy/Alembic run persistence
-│   ├── models.py         # ProjectionRunRecord, StateRunRecord ORM models
-│   ├── repositories.py   # ProjectionRunRepository, StateRunRepository
+│   ├── models.py         # ProjectionRunRecord, StateRunRecord, RegressionSuiteBaselineRecord
+│   ├── repositories.py   # ProjectionRunRepository, StateRunRepository, RegressionSuiteBaselineRepository
 │   ├── serializers.py    # Pydantic ↔ JSON helpers
 │   └── db.py             # engine/session factory helpers
 ├── workflows/            # synchronous workflow composition layer
@@ -54,13 +55,15 @@ src/ugh_quantamental/
 ├── query/                # read-only inspection layer
 │   ├── models.py          # ProjectionRunQuery, StateRunQuery, *Summary, *Bundle
 │   └── readers.py         # list_*_summaries, get_*_bundle
-└── replay/               # deterministic replay / regression layer
+└── replay/               # deterministic replay / regression / baseline layer
     ├── models.py          # *ReplayRequest, *ReplayComparison, *ReplayResult
     ├── runners.py         # replay_projection_run, replay_state_run
     ├── batch_models.py    # *BatchReplayRequest/Item/Aggregate/Result, BatchReplayStatus
     ├── batch.py           # replay_projection_batch, replay_state_batch
     ├── suite_models.py    # *SuiteCase, RegressionSuiteRequest/Aggregate/Result
-    └── suites.py          # run_regression_suite
+    ├── suites.py          # run_regression_suite
+    ├── baseline_models.py # Create/CompareRequest, RegressionSuiteBaseline, *Comparison, *Delta
+    └── baselines.py       # make_baseline_id, create/get/compare_regression_baseline
 
 alembic/                  # Alembic migration environment
 docs/specs/               # formal v1 specifications
@@ -185,6 +188,33 @@ print(result.aggregate.passed_case_count)  # 1 if exact match and at least one r
 print(result.projection_cases[0].passed)   # True / False
 ```
 
+### Baseline (golden snapshot create + compare)
+
+```python
+from ugh_quantamental.replay.baseline_models import (
+    CreateRegressionBaselineRequest, CompareRegressionBaselineRequest,
+)
+from ugh_quantamental.replay.baselines import (
+    create_regression_baseline, compare_regression_baseline,
+)
+
+# Pin a named baseline
+bundle = create_regression_baseline(
+    session,
+    CreateRegressionBaselineRequest(baseline_name="v1-golden", suite_request=req),
+)
+session.commit()
+
+# Compare a future rerun against the pinned baseline
+result = compare_regression_baseline(
+    session,
+    CompareRegressionBaselineRequest(baseline_name="v1-golden"),
+)
+if result is not None:
+    print(result.comparison.exact_match)          # True if suite result unchanged
+    print(result.comparison.passed_case_count_diff)  # 0 if no change in passing cases
+```
+
 ## Development
 
 ```bash
@@ -209,6 +239,7 @@ Formal v1 specs live in `docs/specs/`:
 | `ugh_replay_v1.md` | Deterministic replay / regression layer and comparison policy (Milestone 9) |
 | `ugh_batch_replay_v1.md` | Batch replay / experiment runner (Milestone 10) |
 | `ugh_regression_suite_v1.md` | Regression suite runner and pass/fail policy (Milestone 11) |
+| `ugh_baseline_v1.md` | Baseline / golden snapshot management and comparison policy (Milestone 12) |
 
 ## Out of scope
 
