@@ -9,9 +9,11 @@
 - **persistence** — SQLAlchemy/Alembic-backed run records for projection and state runs
 - **workflows** — synchronous composition layer: run engine → persist → reload → return
 - **query** — read-only inspection layer: summaries, filtering, and full bundle rehydration
-- **replay** — deterministic replay / regression checker: reruns persisted runs against the current engine and compares stored vs recomputed results
+- **replay** — deterministic single-run regression checker: rerun persisted runs against current engine
+- **batch replay** — multi-run replay with per-run isolation and aggregate mismatch reporting
+- **regression suite** — named suite runner over batch replay cases with deterministic pass/fail reporting
 
-Milestones 1–9 are complete. All code is deterministic, synchronous, and connector-free.
+Milestones 1–11 are complete. All code is deterministic, synchronous, and connector-free.
 
 ## Durable working rules
 

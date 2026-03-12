@@ -1,6 +1,6 @@
 # ugh-quantamental
 
-Minimal Python 3.11+ library implementing deterministic quantamental engines with persistence, workflow composition, read-only query inspection, and deterministic replay / regression checking. All logic is synchronous, typed, schema-first, and connector-free.
+Minimal Python 3.11+ library implementing deterministic quantamental engines with persistence, workflow composition, read-only query inspection, deterministic replay, multi-run batch replay, and regression suite execution. All logic is synchronous, typed, schema-first, and connector-free.
 
 ## Features
 
@@ -9,7 +9,9 @@ Minimal Python 3.11+ library implementing deterministic quantamental engines wit
 - **Persistence scaffolding** — SQLAlchemy ORM-backed run records for projection and state runs; Alembic migration; naive-UTC `created_at` normalisation
 - **Workflow layer** — synchronous composition: run engine → persist result → reload → return both (`run_projection_workflow`, `run_state_workflow`, `run_full_workflow`)
 - **Query layer** — read-only inspection of persisted runs: lightweight summaries with filtering/pagination, full bundle rehydration with all typed models recovered from JSON
-- **Replay layer** — deterministic regression checking: reload a persisted run, rerun the engine with the original inputs, compare stored vs recomputed results field-by-field
+- **Replay layer** — deterministic single-run regression checking: reload a persisted run, rerun the engine with the original inputs, compare stored vs recomputed results field-by-field
+- **Batch replay** — multi-run replay in one call: per-run isolation, aggregate mismatch / error / missing counts, optional deduplication
+- **Regression suite** — named suite runner over batch replay cases: deterministic pass/fail per case, zero-run guard prevents false-positive green results
 - **Frozen schema contracts** — all data models use `ConfigDict(extra="forbid", frozen=True)`; invariants enforced at construction time
 - **Pure engine functions** — same inputs always produce the same output; no globals, no mutation, no I/O
 
@@ -54,7 +56,11 @@ src/ugh_quantamental/
 │   └── readers.py         # list_*_summaries, get_*_bundle
 └── replay/               # deterministic replay / regression layer
     ├── models.py          # *ReplayRequest, *ReplayComparison, *ReplayResult
-    └── runners.py         # replay_projection_run, replay_state_run
+    ├── runners.py         # replay_projection_run, replay_state_run
+    ├── batch_models.py    # *BatchReplayRequest/Item/Aggregate/Result, BatchReplayStatus
+    ├── batch.py           # replay_projection_batch, replay_state_batch
+    ├── suite_models.py    # *SuiteCase, RegressionSuiteRequest/Aggregate/Result
+    └── suites.py          # run_regression_suite
 
 alembic/                  # Alembic migration environment
 docs/specs/               # formal v1 specifications
@@ -137,7 +143,7 @@ bundle = get_projection_run_bundle(session, run_id=summaries[0].run_id)
 print(bundle.result.projection_snapshot.point_estimate)
 ```
 
-### Replay (deterministic regression check)
+### Replay (single-run regression check)
 
 ```python
 from ugh_quantamental.replay import ProjectionReplayRequest
@@ -147,6 +153,36 @@ replay = replay_projection_run(session, ProjectionReplayRequest(run_id="proj-abc
 if replay is not None:
     print(replay.comparison.exact_match)          # True if engine output unchanged
     print(replay.comparison.point_estimate_diff)  # absolute diff (0.0 if exact match)
+```
+
+### Batch replay (multi-run regression check)
+
+```python
+from ugh_quantamental.replay import ProjectionBatchReplayRequest
+from ugh_quantamental.replay.batch import replay_projection_batch
+
+batch_req = ProjectionBatchReplayRequest(run_ids=("proj-abc123", "proj-def456"))
+result = replay_projection_batch(session, batch_req)
+print(result.aggregate.requested_count)   # 2
+print(result.aggregate.mismatch_count)    # 0 if engine unchanged
+```
+
+### Regression suite (named pass/fail report)
+
+```python
+from ugh_quantamental.replay.suite_models import (
+    RegressionSuiteRequest, ProjectionSuiteCase,
+)
+from ugh_quantamental.replay.suites import run_regression_suite
+
+req = RegressionSuiteRequest(
+    projection_cases=(
+        ProjectionSuiteCase(name="smoke", run_ids=("proj-abc123",)),
+    )
+)
+result = run_regression_suite(session, req)
+print(result.aggregate.passed_case_count)  # 1 if exact match and at least one run
+print(result.projection_cases[0].passed)   # True / False
 ```
 
 ## Development
@@ -171,6 +207,8 @@ Formal v1 specs live in `docs/specs/`:
 | `ugh_workflow_v1.md` | Workflow composition layer and import policy (Milestone 7) |
 | `ugh_query_v1.md` | Read-only query layer: summaries, filtering, bundle rehydration (Milestone 8) |
 | `ugh_replay_v1.md` | Deterministic replay / regression layer and comparison policy (Milestone 9) |
+| `ugh_batch_replay_v1.md` | Batch replay / experiment runner (Milestone 10) |
+| `ugh_regression_suite_v1.md` | Regression suite runner and pass/fail policy (Milestone 11) |
 
 ## Out of scope
 

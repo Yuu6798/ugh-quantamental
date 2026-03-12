@@ -4,7 +4,7 @@ Guidelines for AI assistants working in this repository.
 
 ## Repository overview
 
-`ugh-quantamental` is a deterministic Python 3.11+ library. It is schema-first, synchronous, connector-free, and typed throughout. It contains six active packages:
+`ugh-quantamental` is a deterministic Python 3.11+ library. It is schema-first, synchronous, connector-free, and typed throughout. It contains eight active packages:
 
 | Package | Description |
 |---|---|
@@ -13,9 +13,11 @@ Guidelines for AI assistants working in this repository.
 | `persistence` | SQLAlchemy v2 ORM run records with Alembic migration; naive-UTC `created_at` policy |
 | `workflows` | Synchronous composition layer: run engine → persist → reload → return result |
 | `query` | Read-only inspection layer: summaries, filtering, and full bundle rehydration from persisted records |
-| `replay` | Deterministic replay / regression layer: reruns persisted runs against the current engine and compares stored vs recomputed results |
+| `replay` | Single-run deterministic replay / regression checker |
+| `replay.batch` | Multi-run batch replay with per-run isolation and aggregate reporting |
+| `replay.suites` | Named regression suite runner with deterministic pass/fail reporting |
 
-Milestones 1–9 are complete. The codebase is a research/scaffold tool, not a production application.
+Milestones 1–11 are complete. The codebase is a research/scaffold tool, not a production application.
 
 ---
 
@@ -64,9 +66,13 @@ src/ugh_quantamental/
 │   ├── models.py              # ProjectionRunQuery, StateRunQuery, *Summary, *Bundle
 │   └── readers.py             # list_projection_run_summaries, list_state_run_summaries, get_*_bundle
 └── replay/
-    ├── __init__.py            # exports request/comparison/result models (SQLAlchemy-free)
-    ├── models.py              # ProjectionReplayRequest, StateReplayRequest, *Comparison, *Result
-    └── runners.py             # replay_projection_run, replay_state_run
+    ├── __init__.py            # exports all model classes (SQLAlchemy-free)
+    ├── models.py              # *ReplayRequest, *ReplayComparison, *ReplayResult
+    ├── runners.py             # replay_projection_run, replay_state_run
+    ├── batch_models.py        # *BatchReplayRequest/Item/Aggregate/Result, BatchReplayStatus
+    ├── batch.py               # replay_projection_batch, replay_state_batch
+    ├── suite_models.py        # *SuiteCase, RegressionSuiteRequest/Aggregate/Result
+    └── suites.py              # run_regression_suite
 
 alembic/                       # Alembic migration environment
 alembic/versions/              # migration scripts
@@ -96,7 +102,11 @@ tests/
 └── replay/
     ├── conftest.py
     ├── test_models.py
-    └── test_runners.py
+    ├── test_runners.py
+    ├── test_batch_models.py
+    ├── test_batch.py
+    ├── test_suite_models.py
+    └── test_suites.py
 
 docs/specs/                    # formal v1 specifications
 ```
@@ -137,13 +147,19 @@ Both engines are explicitly deterministic. All intermediate values are clamped o
 Workflows are thin, synchronous wrappers: call an engine function, persist via the repository, reload the persisted run, return both. The caller owns the session and transaction boundary. Workflows do not commit; they flush only.
 
 ### Import isolation
-`workflows.models`, `query.__init__`, and `replay.__init__` are all importable without SQLAlchemy. Functions that touch the database must be imported from their respective `runners.py` or `readers.py` submodules and require SQLAlchemy at call time.
+`workflows.models`, `query.__init__`, and `replay.__init__` are all importable without SQLAlchemy. Functions that touch the database must be imported from their respective `runners.py`, `readers.py`, `batch.py`, or `suites.py` submodules and require SQLAlchemy at call time.
 
 ### Query layer (read-only)
 `query/readers.py` provides list and bundle-fetch functions over persisted run records. Summaries use `load_only` to fetch minimal columns. Bundle fetches use named attribute access (not `__dict__`) so SQLAlchemy's deferred-load mechanism fires correctly.
 
 ### Replay layer (read-only, diagnostic)
 `replay/runners.py` reloads a persisted bundle via the query layer, reruns the deterministic engine with the recovered typed inputs, and compares stored vs recomputed results. Replay runners never write, flush, or commit the session.
+
+### Batch replay layer (read-only, multi-run)
+`replay/batch.py` runs multiple replay operations in a single call. Each run is isolated: an error in one run does not abort the others. Results are collected into per-item comparison results and an aggregate summary (`requested_count`, `replayed_count`, `missing_count`, `error_count`, `mismatch_count`).
+
+### Regression suite layer (read-only, named pass/fail)
+`replay/suites.py` runs named batch replay cases and computes a deterministic pass/fail result per case. A case passes iff `requested_count > 0` and `error_count == missing_count == mismatch_count == 0`. A zero-run case is always a failure — it provides no coverage and must not produce a false-positive green result.
 
 ---
 
@@ -199,6 +215,19 @@ Functions (in order): `compute_block_quality` → `compute_state_evidence` → `
 - Returns `None` if `run_id` is not found; read-only, no writes
 - Import models from `replay.__init__`; import runners from `replay.runners`
 
+### Batch replay layer
+- `replay_projection_batch(session, request)` → `ProjectionBatchReplayResult`
+- `replay_state_batch(session, request)` → `StateBatchReplayResult`
+- Each run is isolated: errors do not abort the batch; aggregate counts include `missing_count` and `error_count`
+- Import models from `replay.__init__`; import batch functions from `replay.batch`
+
+### Regression suite layer
+- `run_regression_suite(session, request)` → `RegressionSuiteResult`
+- `RegressionSuiteRequest` — tuple of named `ProjectionSuiteCase` and/or `StateSuiteCase` objects
+- Each case provides `name` and exactly one of `run_ids` or `query`
+- Pass condition: `requested_count > 0` and `error_count == missing_count == mismatch_count == 0`
+- Import models from `replay.suite_models`; import runner from `replay.suites`
+
 ---
 
 ## Development conventions
@@ -236,7 +265,7 @@ Functions (in order): `compute_block_quality` → `compute_state_evidence` → `
 ### Working with query and replay
 - `query.__init__` and `replay.__init__` must remain importable without SQLAlchemy
 - Reader and runner imports go inside test function bodies or behind `HAS_SQLALCHEMY` guards
-- Replay runners must not write, flush, or commit; they are diagnostic only
+- All replay runners (`runners.py`, `batch.py`, `suites.py`) must not write, flush, or commit; they are diagnostic only
 
 ### Tests
 - Do not modify existing tests unless explicitly required
@@ -273,6 +302,8 @@ Always include a ready-to-paste PR title and body (markdown) alongside the link.
 | `docs/specs/ugh_workflow_v1.md` | Workflow composition layer and import policy (Milestone 7) |
 | `docs/specs/ugh_query_v1.md` | Read-only query layer: summaries, filtering, bundle rehydration (Milestone 8) |
 | `docs/specs/ugh_replay_v1.md` | Deterministic replay / regression layer and comparison policy (Milestone 9) |
+| `docs/specs/ugh_batch_replay_v1.md` | Batch replay / experiment runner (Milestone 10) |
+| `docs/specs/ugh_regression_suite_v1.md` | Regression suite runner and pass/fail policy (Milestone 11) |
 
 When implementing a new milestone, read the corresponding spec first.
 
