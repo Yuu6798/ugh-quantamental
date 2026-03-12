@@ -208,6 +208,17 @@ Functions (in order): `compute_block_quality` → `compute_state_evidence` → `
 - Keep diffs tightly scoped
 - Use `/plan` for non-trivial work
 
+### How to create a pull request
+
+This environment has no GitHub API credentials, so PRs cannot be created programmatically.
+After committing and pushing the branch, provide the user with this URL to open a PR manually:
+
+```
+https://github.com/Yuu6798/ugh-quantamental/compare/main...<branch-name>
+```
+
+Always include a ready-to-paste PR title and body (markdown) alongside the link.
+
 ---
 
 ## Specification documents
