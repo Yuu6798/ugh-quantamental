@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from sqlalchemy import select
+from sqlalchemy.orm import load_only
 
 from ugh_quantamental.persistence.models import ProjectionRunRecord, StateRunRecord
 from ugh_quantamental.persistence.serializers import (
@@ -30,10 +31,18 @@ def list_projection_run_summaries(
 ) -> list[ProjectionRunSummary]:
     """Return lightweight projection run summaries matching the query.
 
-    Ordered newest-first by created_at. Applies offset and limit.
+    Ordered newest-first by created_at, then by run_id for deterministic pagination.
     ``point_estimate`` and ``confidence`` are extracted from ``result_json``.
+    Only the columns required for the summary are fetched.
     """
-    stmt = select(ProjectionRunRecord)
+    stmt = select(ProjectionRunRecord).options(
+        load_only(
+            ProjectionRunRecord.run_id,
+            ProjectionRunRecord.created_at,
+            ProjectionRunRecord.projection_id,
+            ProjectionRunRecord.result_json,
+        )
+    )
 
     if query.projection_id is not None:
         stmt = stmt.where(ProjectionRunRecord.projection_id == query.projection_id)
@@ -42,7 +51,7 @@ def list_projection_run_summaries(
     if query.created_at_to is not None:
         stmt = stmt.where(ProjectionRunRecord.created_at <= query.created_at_to)
 
-    stmt = stmt.order_by(ProjectionRunRecord.created_at.desc())
+    stmt = stmt.order_by(ProjectionRunRecord.created_at.desc(), ProjectionRunRecord.run_id.asc())
     stmt = stmt.offset(query.offset).limit(query.limit)
 
     records = session.scalars(stmt).all()
@@ -64,10 +73,20 @@ def list_state_run_summaries(
 ) -> list[StateRunSummary]:
     """Return lightweight state run summaries matching the query.
 
-    Ordered newest-first by created_at. Applies offset and limit.
-    All fields are read from typed columns; no JSON parsing required.
+    Ordered newest-first by created_at, then by run_id for deterministic pagination.
+    All fields are read from typed columns; no JSON columns are loaded.
     """
-    stmt = select(StateRunRecord)
+    stmt = select(StateRunRecord).options(
+        load_only(
+            StateRunRecord.run_id,
+            StateRunRecord.created_at,
+            StateRunRecord.snapshot_id,
+            StateRunRecord.omega_id,
+            StateRunRecord.projection_id,
+            StateRunRecord.dominant_state,
+            StateRunRecord.transition_confidence,
+        )
+    )
 
     if query.snapshot_id is not None:
         stmt = stmt.where(StateRunRecord.snapshot_id == query.snapshot_id)
@@ -82,7 +101,7 @@ def list_state_run_summaries(
     if query.created_at_to is not None:
         stmt = stmt.where(StateRunRecord.created_at <= query.created_at_to)
 
-    stmt = stmt.order_by(StateRunRecord.created_at.desc())
+    stmt = stmt.order_by(StateRunRecord.created_at.desc(), StateRunRecord.run_id.asc())
     stmt = stmt.offset(query.offset).limit(query.limit)
 
     records = session.scalars(stmt).all()
