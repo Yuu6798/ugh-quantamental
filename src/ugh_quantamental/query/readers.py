@@ -132,7 +132,13 @@ def get_projection_run_bundle(
         return None
 
     question_features, signal_features, alignment_inputs, config, result = (
-        projection_payload_to_models(record.__dict__)
+        projection_payload_to_models({
+            "question_features_json": record.question_features_json,
+            "signal_features_json": record.signal_features_json,
+            "alignment_inputs_json": record.alignment_inputs_json,
+            "config_json": record.config_json,
+            "result_json": record.result_json,
+        })
     )
     return ProjectionRunBundle(
         run_id=record.run_id,
@@ -159,7 +165,14 @@ def get_state_run_bundle(
         return None
 
     snapshot, omega, projection_result, event_features, config, result = (
-        state_payload_to_models(record.__dict__)
+        state_payload_to_models({
+            "snapshot_json": record.snapshot_json,
+            "omega_json": record.omega_json,
+            "projection_result_json": record.projection_result_json,
+            "event_features_json": record.event_features_json,
+            "config_json": record.config_json,
+            "result_json": record.result_json,
+        })
     )
     return StateRunBundle(
         run_id=record.run_id,
