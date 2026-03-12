@@ -78,8 +78,19 @@ Composes projection and state workflows in sequence:
 
 **Inputs (`FullWorkflowRequest`):**
 - `projection: ProjectionWorkflowRequest`
-- `state: StateWorkflowRequest` — `projection_result` field is ignored; overridden from step 1
-  output. `projection_id` is also overridden to match the projection run.
+- `state: FullWorkflowStateRequest` — a dedicated model that omits `projection_result`;
+  the workflow injects it automatically from the projection step output.
+  `projection_id` is also derived from the projection snapshot and does not need to be supplied.
+
+**`FullWorkflowStateRequest` fields:**
+- `snapshot: SSVSnapshot`
+- `omega: Omega`
+- `event_features: StateEventFeatures`
+- `config: StateConfig` — defaults to `StateConfig()`
+- `snapshot_id: str | None` — optional; taken from `snapshot.snapshot_id` if omitted
+- `omega_id: str | None` — optional; taken from `omega.omega_id` if omitted
+- `run_id: str | None` — optional; generated internally if omitted
+- `created_at: datetime | None` — optional
 
 **Outputs (`FullWorkflowResult`):**
 - `projection: ProjectionWorkflowResult`
@@ -92,6 +103,26 @@ Composes projection and state workflows in sequence:
 `make_run_id(prefix: str) -> str` generates a short opaque identifier using `uuid4`, prefixed with
 the supplied string for readability (e.g. `"proj-"`, `"state-"`). The format is
 `"{prefix}{uuid4_hex[:12]}"`. Callers may supply their own `run_id` in the request to override.
+
+## Import policy
+
+Request/response model classes are importable without SQLAlchemy:
+
+```python
+from ugh_quantamental.workflows.models import (
+    ProjectionWorkflowRequest, StateWorkflowRequest,
+    FullWorkflowRequest, FullWorkflowStateRequest,
+)
+```
+
+Runner functions require SQLAlchemy and must be imported directly from the submodule:
+
+```python
+from ugh_quantamental.workflows.runners import (
+    run_projection_workflow, run_state_workflow,
+    run_full_workflow, make_run_id,
+)
+```
 
 ---
 
