@@ -6,14 +6,15 @@
 
 - **schemas** — frozen Pydantic v2 data contracts (enums, SSVSnapshot, Omega, MarketSVP, ProjectionSnapshot)
 - **engine** — pure projection and state-lifecycle functions
-- **persistence** — SQLAlchemy/Alembic-backed run records for projection and state runs
+- **persistence** — SQLAlchemy/Alembic-backed run records for projection, state runs, and regression suite baselines
 - **workflows** — synchronous composition layer: run engine → persist → reload → return
 - **query** — read-only inspection layer: summaries, filtering, and full bundle rehydration
 - **replay** — deterministic single-run regression checker: rerun persisted runs against current engine
 - **batch replay** — multi-run replay with per-run isolation and aggregate mismatch reporting
 - **regression suite** — named suite runner over batch replay cases with deterministic pass/fail reporting
+- **baseline / golden snapshot** — persist named suite results; compare future reruns against a pinned baseline
 
-Milestones 1–11 are complete. All code is deterministic, synchronous, and connector-free.
+Milestones 1–12 are complete. All code is deterministic, synchronous, and connector-free.
 
 ## Durable working rules
 

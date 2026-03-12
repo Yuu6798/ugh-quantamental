@@ -15,14 +15,15 @@
 | 9 | Replay layer | Deterministic single-run replay / regression checking: reruns persisted runs, compares stored vs recomputed results |
 | 10 | Batch replay / experiment runner | Multi-run replay in a single call; per-run isolation; aggregate mismatch and error reporting |
 | 11 | Regression suite / report layer | Named suite runner over batch replay cases; deterministic pass/fail per case; zero-run guard |
+| 12 | Baseline / golden snapshot management | Persist named suite results; compare future reruns against a pinned baseline; per-`(group, name)` case deltas |
 
 ## Next up
 
-**Milestone 12 — Baseline / golden snapshot management**
+**Milestone 13 — Persisted regression reports**
 
-Persist a named "golden" replay result so that future regression suites can compare
-against a pinned baseline rather than only the live engine output.
-Requires: a new persistence table or JSON sidecar policy, a formal spec in `docs/specs/`.
+Persist the result of a `compare_regression_baseline` call so that comparison
+history is queryable over time without re-running.
+Requires: a new persistence table, a formal spec in `docs/specs/`.
 
 ## Validation commands
 
