@@ -216,6 +216,12 @@ class ForecastRecord(BaseModel):
     protocol_version: str = Field(min_length=1)
 
     @model_validator(mode="after")
+    def _validate_window_chronology(self) -> ForecastRecord:
+        if self.as_of_jst >= self.window_end_jst:
+            raise ValueError("as_of_jst must be strictly before window_end_jst")
+        return self
+
+    @model_validator(mode="after")
     def _validate_strategy_consistency(self) -> ForecastRecord:
         if self.strategy_kind == StrategyKind.ugh:
             null_fields = [f for f in _UGH_REQUIRED_FIELDS if getattr(self, f) is None]

@@ -306,6 +306,16 @@ def test_disconfirmer_rule_none_threshold() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_forecast_record_window_as_of_after_end_raises() -> None:
+    with pytest.raises(ValidationError, match="as_of_jst must be strictly before window_end_jst"):
+        _ugh_forecast(as_of_jst=_WINDOW_END, window_end_jst=_AS_OF)
+
+
+def test_forecast_record_window_as_of_equal_end_raises() -> None:
+    with pytest.raises(ValidationError, match="as_of_jst must be strictly before window_end_jst"):
+        _ugh_forecast(as_of_jst=_AS_OF, window_end_jst=_AS_OF)
+
+
 def test_forecast_record_ugh_valid() -> None:
     rec = _ugh_forecast()
     assert rec.strategy_kind == StrategyKind.ugh
