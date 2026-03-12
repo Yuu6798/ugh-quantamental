@@ -49,3 +49,17 @@ class StateRunRecord(Base):
     event_features_json: Mapped[dict] = mapped_column(JSON, nullable=False)
     config_json: Mapped[dict] = mapped_column(JSON, nullable=False)
     result_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
+class RegressionSuiteBaselineRecord(Base):
+    """Persisted regression suite baseline (golden snapshot)."""
+
+    __tablename__ = "regression_suite_baselines"
+
+    baseline_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    baseline_name: Mapped[str] = mapped_column(String(256), unique=True, index=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+
+    suite_request_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    suite_result_json: Mapped[dict] = mapped_column(JSON, nullable=False)

@@ -15,7 +15,13 @@ from ugh_quantamental.engine.projection_models import (
     SignalFeatures,
 )
 from ugh_quantamental.engine.state_models import StateConfig, StateEngineResult, StateEventFeatures
-from ugh_quantamental.persistence.models import ProjectionRunRecord, StateRunRecord
+from sqlalchemy import select
+
+from ugh_quantamental.persistence.models import (
+    ProjectionRunRecord,
+    RegressionSuiteBaselineRecord,
+    StateRunRecord,
+)
 from ugh_quantamental.persistence.serializers import (
     dump_model_json,
     projection_payload_to_models,
@@ -111,6 +117,79 @@ class ProjectionRunRepository:
             alignment_inputs=alignment_inputs,
             config=config,
             result=result,
+        )
+
+
+@dataclass(frozen=True)
+class RegressionSuiteBaselineRun:
+    """Rehydrated regression suite baseline record from the persistence layer."""
+
+    baseline_id: str
+    baseline_name: str
+    created_at: datetime
+    description: str | None
+    suite_request_json: dict
+    suite_result_json: dict
+
+
+class RegressionSuiteBaselineRepository:
+    """Persistence adapter for regression suite baseline records."""
+
+    @staticmethod
+    def save_baseline(
+        session: Session,
+        *,
+        baseline_id: str,
+        baseline_name: str,
+        created_at: datetime | None = None,
+        description: str | None = None,
+        suite_request_json: dict,
+        suite_result_json: dict,
+    ) -> RegressionSuiteBaselineRecord:
+        """Persist a new baseline record. Flushes but does not commit."""
+        record = RegressionSuiteBaselineRecord(
+            baseline_id=baseline_id,
+            baseline_name=baseline_name,
+            created_at=_normalize_created_at(created_at),
+            description=description,
+            suite_request_json=suite_request_json,
+            suite_result_json=suite_result_json,
+        )
+        session.add(record)
+        session.flush()
+        return record
+
+    @staticmethod
+    def load_baseline(session: Session, baseline_id: str) -> RegressionSuiteBaselineRun | None:
+        """Load a baseline record by primary key."""
+        record = session.get(RegressionSuiteBaselineRecord, baseline_id)
+        if record is None:
+            return None
+        return RegressionSuiteBaselineRepository._to_run(record)
+
+    @staticmethod
+    def load_baseline_by_name(
+        session: Session, baseline_name: str
+    ) -> RegressionSuiteBaselineRun | None:
+        """Load a baseline record by unique name."""
+        record = session.execute(
+            select(RegressionSuiteBaselineRecord).where(
+                RegressionSuiteBaselineRecord.baseline_name == baseline_name
+            )
+        ).scalar_one_or_none()
+        if record is None:
+            return None
+        return RegressionSuiteBaselineRepository._to_run(record)
+
+    @staticmethod
+    def _to_run(record: RegressionSuiteBaselineRecord) -> RegressionSuiteBaselineRun:
+        return RegressionSuiteBaselineRun(
+            baseline_id=record.baseline_id,
+            baseline_name=record.baseline_name,
+            created_at=record.created_at,
+            description=record.description,
+            suite_request_json=record.suite_request_json,
+            suite_result_json=record.suite_result_json,
         )
 
 
