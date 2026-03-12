@@ -428,14 +428,36 @@ def test_outcome_record_extra_state_field_rejected() -> None:
         _outcome(actual_state_change=True)  # type: ignore[call-arg]
 
 
-def test_outcome_record_non_finite_price_raises() -> None:
+@pytest.mark.parametrize("bad_value", [float("inf"), float("-inf"), float("nan")])
+def test_outcome_record_non_finite_price_raises(bad_value: float) -> None:
     with pytest.raises(ValidationError, match="finite"):
-        _outcome(realized_close=float("inf"))
+        _outcome(realized_close=bad_value)
+
+
+@pytest.mark.parametrize("field", ["realized_open", "realized_high", "realized_low", "realized_close"])
+def test_outcome_record_negative_price_raises(field: str) -> None:
+    with pytest.raises(ValidationError, match="positive"):
+        _outcome(**{field: -1.0})
+
+
+def test_outcome_record_zero_price_raises() -> None:
+    with pytest.raises(ValidationError, match="positive"):
+        _outcome(realized_close=0.0)
 
 
 def test_outcome_record_high_lt_low_raises() -> None:
     with pytest.raises(ValidationError, match="realized_high must be >= realized_low"):
         _outcome(realized_high=148.0, realized_low=151.0)
+
+
+def test_outcome_record_open_above_high_raises() -> None:
+    with pytest.raises(ValidationError, match="realized_open must be within"):
+        _outcome(realized_open=152.0, realized_high=150.8, realized_low=149.2, realized_close=150.0)
+
+
+def test_outcome_record_close_below_low_raises() -> None:
+    with pytest.raises(ValidationError, match="realized_close must be within"):
+        _outcome(realized_open=150.0, realized_high=150.8, realized_low=149.2, realized_close=148.0)
 
 
 def test_outcome_record_event_tags() -> None:

@@ -268,15 +268,21 @@ class OutcomeRecord(BaseModel):
 
     @field_validator("realized_open", "realized_high", "realized_low", "realized_close")
     @classmethod
-    def _price_must_be_finite(cls, v: float) -> float:
+    def _price_must_be_finite_and_positive(cls, v: float) -> float:
         if not math.isfinite(v):
             raise ValueError("realized price must be finite")
+        if v <= 0:
+            raise ValueError("realized price must be positive")
         return v
 
     @model_validator(mode="after")
     def _ohlc_ordering(self) -> OutcomeRecord:
         if self.realized_high < self.realized_low:
             raise ValueError("realized_high must be >= realized_low")
+        if not (self.realized_low <= self.realized_open <= self.realized_high):
+            raise ValueError("realized_open must be within [realized_low, realized_high]")
+        if not (self.realized_low <= self.realized_close <= self.realized_high):
+            raise ValueError("realized_close must be within [realized_low, realized_high]")
         return self
 
 

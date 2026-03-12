@@ -223,6 +223,30 @@ def test_outcome_and_evaluation_ids_are_distinct() -> None:
     assert ev.startswith("ev_")
 
 
+def test_forecast_batch_id_utc_and_jst_same_instant_produce_same_id() -> None:
+    """UTC and JST representations of the same instant must yield identical IDs."""
+    from datetime import timezone as _tz
+    jst_dt = datetime(2026, 3, 10, 8, 0, 0, tzinfo=JST)           # 08:00 JST
+    utc_dt = datetime(2026, 3, 9, 23, 0, 0, tzinfo=_tz.utc)       # same instant in UTC
+    assert make_forecast_batch_id(_PAIR, jst_dt, _PROTO_VER) == make_forecast_batch_id(_PAIR, utc_dt, _PROTO_VER)
+
+
+def test_forecast_id_utc_and_jst_same_instant_produce_same_id() -> None:
+    from datetime import timezone as _tz
+    jst_dt = datetime(2026, 3, 10, 8, 0, 0, tzinfo=JST)
+    utc_dt = datetime(2026, 3, 9, 23, 0, 0, tzinfo=_tz.utc)
+    assert make_forecast_id(_PAIR, jst_dt, _PROTO_VER, StrategyKind.ugh) == make_forecast_id(_PAIR, utc_dt, _PROTO_VER, StrategyKind.ugh)
+
+
+def test_outcome_id_utc_and_jst_same_instant_produce_same_id() -> None:
+    from datetime import timezone as _tz
+    jst_start = datetime(2026, 3, 10, 8, 0, 0, tzinfo=JST)
+    utc_start = datetime(2026, 3, 9, 23, 0, 0, tzinfo=_tz.utc)
+    jst_end = datetime(2026, 3, 11, 8, 0, 0, tzinfo=JST)
+    utc_end = datetime(2026, 3, 10, 23, 0, 0, tzinfo=_tz.utc)
+    assert make_outcome_id(_PAIR, jst_start, jst_end, _SCHEMA_VER) == make_outcome_id(_PAIR, utc_start, utc_end, _SCHEMA_VER)
+
+
 def test_all_four_id_types_have_distinct_prefixes() -> None:
     fb = make_forecast_batch_id(_PAIR, _AS_OF, _PROTO_VER)
     fc = make_forecast_id(_PAIR, _AS_OF, _PROTO_VER, StrategyKind.ugh)

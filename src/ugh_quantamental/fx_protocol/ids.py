@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import hashlib
 from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from ugh_quantamental.fx_protocol.models import CurrencyPair, StrategyKind
+
+# Canonical timezone for all ID-generation hashing.
+_JST: ZoneInfo = ZoneInfo("Asia/Tokyo")
 
 # Separator used between key components before hashing.
 _SEP: str = "|"
@@ -21,7 +25,19 @@ def _digest(*parts: str) -> str:
 
 
 def _fmt_dt(dt: datetime) -> str:
-    """Format *dt* as ``YYYYMMDDTHHmmSS`` (compact ISO-8601, no timezone suffix)."""
+    """Normalize *dt* to JST then format as ``YYYYMMDDTHHmmSS``.
+
+    All datetime inputs are converted to JST before formatting so that the same
+    logical instant always produces the same string regardless of the caller's
+    timezone representation (e.g. ``2026-03-10 08:00+09:00`` and
+    ``2026-03-09 23:00+00:00`` both yield ``"20260310T080000"``).
+
+    Naive datetimes are treated as already in JST.
+    """
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(_JST)
+    else:
+        dt = dt.replace(tzinfo=_JST)
     return dt.strftime("%Y%m%dT%H%M%S")
 
 
