@@ -78,6 +78,34 @@ def test_import_rule_does_not_modify_multiline_string(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "doc = \"\"\"\nimport  fake\n\"\"\"\nimport os\n"
 
 
+
+def test_import_rule_preserves_lf_newlines(tmp_path: Path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("import  os\nx = 1\n", encoding="utf-8")
+    context = _context("lint: sort imports", str(target))
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is True
+    assert target.read_text(encoding="utf-8") == "import os\nx = 1\n"
+
+
+def test_import_rule_preserves_crlf_newlines(tmp_path: Path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_bytes(b"import  os\r\nx = 1\r\n")
+    context = _context("lint: sort imports", str(target))
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is True
+    assert target.read_bytes() == b"import os\r\nx = 1\r\n"
+
 def test_import_rule_preserves_indentation_inside_function(tmp_path: Path) -> None:
     target = tmp_path / "sample.py"
     target.write_text(

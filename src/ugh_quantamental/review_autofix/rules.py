@@ -66,7 +66,8 @@ class NoneNormalizationRule(BaseRule):
         if context.path is None:
             return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", None, "", ""), False, "no file")
         file_path = Path(context.path)
-        before = file_path.read_text(encoding="utf-8")
+        with file_path.open(encoding="utf-8", newline="") as fh:
+            before = fh.read()
         lines = before.splitlines(keepends=True)
         target_line = context.line or context.start_line
         if (
@@ -124,7 +125,8 @@ class ImportCleanupRule(BaseRule):
         if context.path is None:
             return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", None, "", ""), False, "no file")
         file_path = Path(context.path)
-        before = file_path.read_text(encoding="utf-8")
+        with file_path.open(encoding="utf-8", newline="") as fh:
+            before = fh.read()
         try:
             tree = ast.parse(before)
         except SyntaxError:
@@ -139,20 +141,22 @@ class ImportCleanupRule(BaseRule):
         if not import_lines:
             return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "no-op")
 
-        lines = before.splitlines()
+        lines = before.splitlines(keepends=True)
         changed = False
         for line_no in sorted(import_lines):
             idx = line_no - 1
             if idx >= len(lines):
                 continue
             line = lines[idx]
-            if "  " not in line:
+            line_body = line.rstrip("\r\n")
+            if "  " not in line_body:
                 continue
-            leading = line[: len(line) - len(line.lstrip())]
-            stripped = line.lstrip()
+            leading = line_body[: len(line_body) - len(line_body.lstrip())]
+            stripped = line_body.lstrip()
             if ";" in stripped:
                 continue
-            updated = leading + " ".join(stripped.split())
+            suffix = line[len(line_body) :]
+            updated = leading + " ".join(stripped.split()) + suffix
             if updated != line:
                 lines[idx] = updated
                 changed = True
@@ -160,8 +164,8 @@ class ImportCleanupRule(BaseRule):
         if not changed:
             return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "no-op")
 
-        after = "\n".join(lines) + ("\n" if before.endswith("\n") else "")
-        file_path.write_text(after, encoding="utf-8")
+        after = "".join(lines)
+        file_path.write_text(after, encoding="utf-8", newline="")
         return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), True, "applied")
 
 
