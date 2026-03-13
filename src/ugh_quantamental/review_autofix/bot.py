@@ -61,6 +61,9 @@ def run() -> ProcessResult:
     if config.bot_mode not in _VALID_BOT_MODES:
         return ProcessResult("mode:invalid", Classification.skip, None, False, False, False, False, "invalid-bot-mode")
 
+    if config.bot_mode in {"apply_and_push", "apply_push_and_resolve"} and not config.target_reviewers:
+        return ProcessResult("reviewer:missing-allowlist", Classification.skip, None, False, False, False, False, "reviewer-allowlist-required")
+
     state = FileStateStore(os.getenv("STATE_STORE_PATH", ".autofix-bot/state.json"))
     key = _processed_key(context)
     marker = _dedupe_marker(key)

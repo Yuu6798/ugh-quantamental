@@ -96,6 +96,7 @@ def _set_common_env(monkeypatch, tmp_path: Path, event_path: Path) -> None:
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
     monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("BOT_MODE", "apply_and_push")
+    monkeypatch.setenv("TARGET_REVIEWERS", "alice,bob,trusted-review-bot[bot]")
     monkeypatch.setenv("DRY_RUN", "false")
     monkeypatch.setenv("VALIDATION_LINT_COMMANDS", "true")
     monkeypatch.setenv("VALIDATION_TEST_COMMANDS", "true")
@@ -309,6 +310,7 @@ def test_validation_failure_does_not_push(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
     monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("BOT_MODE", "apply_and_push")
+    monkeypatch.setenv("TARGET_REVIEWERS", "alice,bob,trusted-review-bot[bot]")
     monkeypatch.setenv("DRY_RUN", "false")
     monkeypatch.setenv("VALIDATION_LINT_COMMANDS", "false")
     monkeypatch.setenv("VALIDATION_TEST_COMMANDS", "")
@@ -330,6 +332,7 @@ def test_invalid_review_body_file_hint_does_not_apply_or_push(tmp_path: Path, mo
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review")
     monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("BOT_MODE", "apply_and_push")
+    monkeypatch.setenv("TARGET_REVIEWERS", "alice,bob,trusted-review-bot[bot]")
     monkeypatch.setenv("DRY_RUN", "false")
 
     monkeypatch.setattr(bot, "commit_changes", lambda msg: (_ for _ in ()).throw(AssertionError("should not commit")))
@@ -338,3 +341,53 @@ def test_invalid_review_body_file_hint_does_not_apply_or_push(tmp_path: Path, mo
     result = bot.run()
     assert result.reason == "no-matching-rule"
     assert result.matched_rule is None
+
+
+def test_mutating_mode_requires_reviewer_allowlist(tmp_path: Path, monkeypatch) -> None:
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="alice")
+
+    _set_common_env(monkeypatch, tmp_path, event_path)
+    monkeypatch.delenv("TARGET_REVIEWERS", raising=False)
+
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: (_ for _ in ()).throw(AssertionError("should not commit")))
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: (_ for _ in ()).throw(AssertionError("should not push")))
+
+    result = bot.run()
+    assert result.reason == "reviewer-allowlist-required"
+
+
+def test_mutating_mode_still_works_for_allowlisted_reviewer(tmp_path: Path, monkeypatch) -> None:
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="alice")
+
+    _set_common_env(monkeypatch, tmp_path, event_path)
+    monkeypatch.setenv("TARGET_REVIEWERS", "alice")
+
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    result = bot.run()
+    assert result.reason == "pushed"
+
+
+def test_propose_only_mode_works_without_allowlist(tmp_path: Path, monkeypatch) -> None:
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="alice")
+
+    _set_common_env(monkeypatch, tmp_path, event_path)
+    monkeypatch.setenv("BOT_MODE", "propose_only")
+    monkeypatch.delenv("TARGET_REVIEWERS", raising=False)
+
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: (_ for _ in ()).throw(AssertionError("should not commit")))
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: (_ for _ in ()).throw(AssertionError("should not push")))
+
+    result = bot.run()
+    assert result.reason == "proposed-only"
