@@ -6,6 +6,7 @@ import math
 from datetime import datetime, timedelta
 from enum import Enum
 from typing import Literal
+from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -142,6 +143,16 @@ _BASELINE_STRATEGY_KINDS: frozenset[StrategyKind] = frozenset(
     }
 )
 
+_JST: ZoneInfo = ZoneInfo("Asia/Tokyo")
+
+
+def _to_jst(dt: datetime) -> datetime:
+    """Normalize *dt* to JST; treat naive datetimes as already in JST."""
+    if dt.tzinfo is not None:
+        return dt.astimezone(_JST)
+    return dt.replace(tzinfo=_JST)
+
+
 # UGH-only diagnostic fields on EvaluationRecord (must be None for baselines).
 _UGH_EVAL_ONLY_FIELDS: tuple[str, ...] = (
     "state_proxy_hit",
@@ -159,28 +170,34 @@ def _check_canonical_business_day_window(
 ) -> None:
     """Raise ``ValueError`` if *start*/*end* violate canonical 08:00 JST window rules.
 
+    Inputs are normalized to JST before all checks so that timezone-aware datetimes
+    like ``2026-03-10 08:00+00:00`` (which equals 17:00 JST) are correctly rejected.
+    Naive datetimes are treated as already in JST, matching the ``ids.py`` policy.
+
     Rules (in enforcement order):
-    1. Both endpoints must be at exactly 08:00:00.
-    2. Both must fall on Mon–Fri (ISO weekday 1–5).
+    1. Both endpoints must be at exactly 08:00:00 JST.
+    2. Both must fall on Mon–Fri (ISO weekday 1–5) in JST.
     3. *start* must be strictly before *end*.
-    4. *end* must be the immediately-following business-day 08:00 (Fri → Mon).
+    4. *end* must be the immediately-following business-day 08:00 JST (Fri → Mon).
     """
-    for field_name, value in ((start_name, start), (end_name, end)):
+    start_jst = _to_jst(start)
+    end_jst = _to_jst(end)
+    for field_name, value in ((start_name, start_jst), (end_name, end_jst)):
         if (value.hour, value.minute, value.second, value.microsecond) != (8, 0, 0, 0):
             raise ValueError(
                 f"{field_name} must be at exactly 08:00:00 (canonical forecast window open)"
             )
-    for field_name, value in ((start_name, start), (end_name, end)):
+    for field_name, value in ((start_name, start_jst), (end_name, end_jst)):
         if value.isoweekday() not in range(1, 6):
             raise ValueError(
                 f"{field_name} must be a business day (Monday–Friday); "
                 f"got ISO weekday {value.isoweekday()}"
             )
-    if start >= end:
+    if start_jst >= end_jst:
         raise ValueError(f"{start_name} must be strictly before {end_name}")
-    days_ahead = 3 if start.isoweekday() == 5 else 1  # Friday → Monday
-    expected_end = start + timedelta(days=days_ahead)
-    if end != expected_end:
+    days_ahead = 3 if start_jst.isoweekday() == 5 else 1  # Friday → Monday
+    expected_end = start_jst + timedelta(days=days_ahead)
+    if end_jst != expected_end:
         raise ValueError(
             f"{end_name} must be the next business-day 08:00 JST "
             f"(expected {expected_end}, got {end})"

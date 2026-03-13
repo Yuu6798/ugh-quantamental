@@ -266,7 +266,7 @@ always produced. This enables idempotent replay and deduplication without a cent
 | `forecast_batch_id`  | `fb_{pair}_{as_of_yyyymmddTHHMMSS}_{protocol_version}_{hash16}`       |
 | `forecast_id`        | `fc_{pair}_{as_of_yyyymmddTHHMMSS}_{protocol_version}_{strategy}_{hash16}` |
 | `outcome_id`         | `oc_{pair}_{start_yyyymmddTHHMMSS}_{end_yyyymmddTHHMMSS}_{schema_version}_{hash16}` |
-| `evaluation_id`      | `ev_{forecast_id}_{schema_version}_{hash16}`                          |
+| `evaluation_id`      | `ev_{forecast_id}_{outcome_id}_{schema_version}_{hash16}`             |
 
 Where `hash16` is the first 16 characters of the SHA-256 digest of the pipe-separated
 (`|`) concatenation of the ID's input fields.

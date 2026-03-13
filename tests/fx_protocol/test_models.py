@@ -817,6 +817,32 @@ def test_outcome_record_friday_window_end_is_monday() -> None:
 
 
 # ---------------------------------------------------------------------------
+# OutcomeRecord — timezone-aware inputs are normalized to JST (r2929000997)
+# ---------------------------------------------------------------------------
+
+
+def test_outcome_record_utc_aware_non_canonical_hour_raises() -> None:
+    """A UTC-aware datetime that maps to 17:00 JST must be rejected even though its raw
+    hour is 8 in UTC.  Before the fix this passed incorrectly."""
+    from datetime import timezone as _tz
+    # 2026-03-10 08:00 UTC == 2026-03-10 17:00 JST — NOT a canonical window open.
+    utc_start = datetime(2026, 3, 10, 8, 0, 0, tzinfo=_tz.utc)
+    utc_end = datetime(2026, 3, 11, 8, 0, 0, tzinfo=_tz.utc)
+    with pytest.raises(ValidationError, match="window_start_jst must be at exactly 08:00:00"):
+        _outcome(window_start_jst=utc_start, window_end_jst=utc_end)
+
+
+def test_outcome_record_jst_aware_canonical_hour_accepted() -> None:
+    """A JST-aware datetime at 08:00 JST is a valid canonical window open."""
+    from zoneinfo import ZoneInfo
+    jst = ZoneInfo("Asia/Tokyo")
+    jst_start = datetime(2026, 3, 10, 8, 0, 0, tzinfo=jst)
+    jst_end = datetime(2026, 3, 11, 8, 0, 0, tzinfo=jst)
+    rec = _outcome(window_start_jst=jst_start, window_end_jst=jst_end)
+    assert rec.window_start_jst == jst_start
+
+
+# ---------------------------------------------------------------------------
 # EvaluationRecord — baseline rejects UGH-only diagnostic fields (r2928948835)
 # ---------------------------------------------------------------------------
 
