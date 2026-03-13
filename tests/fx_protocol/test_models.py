@@ -28,6 +28,8 @@ from ugh_quantamental.schemas.market_svp import StateProbabilities
 
 _UTC = timezone.utc
 _NOW = datetime(2026, 3, 10, 8, 0, 0, tzinfo=_UTC)
+# as_of_jst 08:00 JST = 23:00 UTC Mar 9; locked_at_utc must be strictly before that.
+_LOCKED_AT = datetime(2026, 3, 9, 22, 0, 0, tzinfo=_UTC)
 _AS_OF = datetime(2026, 3, 10, 8, 0, 0)
 _WINDOW_END = datetime(2026, 3, 11, 8, 0, 0)
 
@@ -78,7 +80,7 @@ def _ugh_forecast(**overrides) -> ForecastRecord:
         strategy_kind=StrategyKind.ugh,
         as_of_jst=_AS_OF,
         window_end_jst=_WINDOW_END,
-        locked_at_utc=_NOW,
+        locked_at_utc=_LOCKED_AT,
         market_data_provenance=_provenance(),
         input_snapshot_ref="ssv_snap_001",
         forecast_direction=ForecastDirection.up,
@@ -117,7 +119,7 @@ def _baseline_forecast(strategy_kind: StrategyKind, **overrides) -> ForecastReco
         strategy_kind=strategy_kind,
         as_of_jst=_AS_OF,
         window_end_jst=_WINDOW_END,
-        locked_at_utc=_NOW,
+        locked_at_utc=_LOCKED_AT,
         market_data_provenance=_provenance(),
         forecast_direction=ForecastDirection.flat,
         expected_close_change_bp=0.0,
@@ -984,3 +986,63 @@ def test_evaluation_record_disconfirmer_explained_none_with_empty_disconfirmers_
     """disconfirmer_explained=None (unknown) with no fired disconfirmers is valid."""
     rec = _evaluation(disconfirmer_explained=None, disconfirmers_hit=())
     assert rec.disconfirmer_explained is None
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — lock-before-open guarantee (r2929053939)
+# ---------------------------------------------------------------------------
+
+
+def test_forecast_record_locked_at_utc_after_as_of_jst_raises() -> None:
+    """locked_at_utc at or after the window open must be rejected."""
+    # _NOW is 08:00 UTC Mar 10 = 17:00 JST, which is after as_of_jst 08:00 JST = 23:00 UTC Mar 9.
+    with pytest.raises(ValidationError, match="locked_at_utc must be strictly before as_of_jst"):
+        _ugh_forecast(locked_at_utc=_NOW)
+
+
+def test_forecast_record_locked_at_utc_equal_as_of_jst_raises() -> None:
+    """locked_at_utc exactly equal to as_of_jst (in UTC terms) must be rejected."""
+    from zoneinfo import ZoneInfo
+    jst = ZoneInfo("Asia/Tokyo")
+    # Convert as_of_jst to UTC-aware so they are exactly equal.
+    as_of_utc = datetime(2026, 3, 10, 8, 0, 0, tzinfo=jst).astimezone(_UTC)
+    with pytest.raises(ValidationError, match="locked_at_utc must be strictly before as_of_jst"):
+        _ugh_forecast(locked_at_utc=as_of_utc)
+
+
+def test_forecast_record_locked_at_utc_before_as_of_jst_accepted() -> None:
+    """locked_at_utc strictly before the window open is valid."""
+    rec = _ugh_forecast(locked_at_utc=_LOCKED_AT)
+    assert rec.locked_at_utc == _LOCKED_AT
+
+
+def test_forecast_record_locked_at_utc_naive_treated_as_utc() -> None:
+    """Naive locked_at_utc is treated as UTC; must still be before as_of_jst."""
+    # 2026-03-09 22:00 naive (= UTC) is before 2026-03-09 23:00 UTC (as_of_jst).
+    naive_lock = datetime(2026, 3, 9, 22, 0, 0)
+    rec = _ugh_forecast(locked_at_utc=naive_lock)
+    assert rec.locked_at_utc == naive_lock
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — expected_close_change_bp finiteness (r2929053941)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+def test_forecast_record_expected_close_change_bp_non_finite_raises(bad_value: float) -> None:
+    """NaN/Inf in expected_close_change_bp must be rejected at record construction."""
+    with pytest.raises(ValidationError, match="expected_close_change_bp must be finite"):
+        _ugh_forecast(expected_close_change_bp=bad_value)
+
+
+def test_forecast_record_expected_close_change_bp_zero_accepted() -> None:
+    """Zero is a valid finite value for expected_close_change_bp (flat forecast)."""
+    rec = _ugh_forecast(expected_close_change_bp=0.0)
+    assert rec.expected_close_change_bp == 0.0
+
+
+def test_forecast_record_expected_close_change_bp_negative_accepted() -> None:
+    """Negative finite values are valid (downside forecast)."""
+    rec = _ugh_forecast(expected_close_change_bp=-45.5)
+    assert rec.expected_close_change_bp == -45.5

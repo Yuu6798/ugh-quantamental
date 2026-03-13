@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -153,6 +153,13 @@ def _to_jst(dt: datetime) -> datetime:
     return dt.replace(tzinfo=_JST)
 
 
+def _to_aware_utc(dt: datetime) -> datetime:
+    """Normalize *dt* to a timezone-aware UTC datetime; treat naive inputs as UTC."""
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc)
+    return dt.replace(tzinfo=timezone.utc)
+
+
 # UGH-only diagnostic fields on EvaluationRecord (must be None for baselines).
 _UGH_EVAL_ONLY_FIELDS: tuple[str, ...] = (
     "state_proxy_hit",
@@ -276,12 +283,33 @@ class ForecastRecord(BaseModel):
     schema_version: str = Field(min_length=1)
     protocol_version: str = Field(min_length=1)
 
+    @field_validator("expected_close_change_bp")
+    @classmethod
+    def _expected_close_change_bp_must_be_finite(cls, v: float) -> float:
+        """Reject NaN/Inf so that evaluation math and replay comparisons cannot be silently corrupted."""
+        if not math.isfinite(v):
+            raise ValueError("expected_close_change_bp must be finite")
+        return v
+
     @model_validator(mode="after")
     def _validate_window_chronology(self) -> ForecastRecord:
-        """Enforce canonical 08:00 JST forecast-window semantics via shared helper."""
+        """Enforce canonical 08:00 JST forecast-window semantics and lock-before-open guarantee.
+
+        1. ``as_of_jst`` and ``window_end_jst`` must satisfy the canonical business-day
+           08:00 JST window rules (delegated to :func:`_check_canonical_business_day_window`).
+        2. ``locked_at_utc`` must be strictly before the window opens (``as_of_jst``),
+           preventing post-hoc or backfilled forecasts from passing schema validation.
+        """
         _check_canonical_business_day_window(
             self.as_of_jst, self.window_end_jst, "as_of_jst", "window_end_jst"
         )
+        locked_utc = _to_aware_utc(self.locked_at_utc)
+        as_of_utc = _to_jst(self.as_of_jst).astimezone(timezone.utc)
+        if locked_utc >= as_of_utc:
+            raise ValueError(
+                "locked_at_utc must be strictly before as_of_jst "
+                f"(lock={locked_utc.isoformat()}, window_open={as_of_utc.isoformat()})"
+            )
         return self
 
     @model_validator(mode="after")
