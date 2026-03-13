@@ -34,6 +34,25 @@ def test_has_processed_marker_for_review_comment() -> None:
         body="b",
         path="a.py",
         diff_hunk="@@",
+        line=1,
+        start_line=1,
         version_discriminator="v",
     )
     assert client.has_processed_marker(context, "<!-- review-autofix-key:k -->") is True
+
+
+def test_list_paginated_fetches_multiple_pages() -> None:
+    client = GithubClient("token")
+
+    def fake_request(method: str, path: str, body=None):
+        del method
+        del body
+        if path.endswith("page=1"):
+            return [{"id": n} for n in range(100)]
+        if path.endswith("page=2"):
+            return [{"id": 101}]
+        return []
+
+    client._request = fake_request  # type: ignore[method-assign]
+    items = client.list_issue_comments("acme/repo", 7)
+    assert len(items) == 101

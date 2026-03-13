@@ -40,16 +40,30 @@ class NoneNormalizationRule(BaseRule):
             )
         return None
 
+    def _replace_range_hit_assignment(self, line: str) -> tuple[str, bool]:
+        updated = re.sub(r"^(\s*range_hit\s*=\s*)([^#\n]+)", r"\1None", line)
+        return updated, updated != line
+
     def apply(self, context: ReviewContext) -> RuleApplication:
         if context.path is None:
             return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", None, "", ""), False, "no file")
+        target_line = context.line or context.start_line
+        if target_line is None or target_line <= 0:
+            return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "no reviewed line")
+
         file_path = Path(context.path)
         before = file_path.read_text(encoding="utf-8")
-        after = re.sub(r"(range_hit\s*=\s*)([^\n#]+)", r"\1None", before)
-        changed = before != after
-        if changed:
-            file_path.write_text(after, encoding="utf-8")
-        return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), changed, "applied" if changed else "no-op")
+        lines = before.splitlines(keepends=True)
+        if target_line > len(lines):
+            return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "reviewed line out of range")
+
+        updated_line, changed = self._replace_range_hit_assignment(lines[target_line - 1])
+        if not changed:
+            return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "no-op")
+
+        lines[target_line - 1] = updated_line
+        file_path.write_text("".join(lines), encoding="utf-8")
+        return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), True, "applied")
 
 
 class ImportCleanupRule(BaseRule):

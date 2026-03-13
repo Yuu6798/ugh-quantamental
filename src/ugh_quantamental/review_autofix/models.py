@@ -30,6 +30,8 @@ class ReviewContext:
     body: str
     path: str | None
     diff_hunk: str | None
+    line: int | None
+    start_line: int | None
     version_discriminator: str
 
 

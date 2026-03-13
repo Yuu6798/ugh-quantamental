@@ -39,13 +39,26 @@ class GithubClient:
             raw = resp.read().decode("utf-8")
             return json.loads(raw) if raw else {}
 
+    def _list_paginated(self, path: str) -> tuple[dict, ...]:
+        page = 1
+        per_page = 100
+        items: list[dict] = []
+        while True:
+            sep = "&" if "?" in path else "?"
+            payload = self._request("GET", f"{path}{sep}per_page={per_page}&page={page}")
+            if not isinstance(payload, list) or not payload:
+                break
+            items.extend(payload)
+            if len(payload) < per_page:
+                break
+            page += 1
+        return tuple(items)
+
     def list_review_comments(self, repo: str, pr_number: int) -> tuple[dict, ...]:
-        payload = self._request("GET", f"/repos/{repo}/pulls/{pr_number}/comments?per_page=100")
-        return tuple(payload) if isinstance(payload, list) else ()
+        return self._list_paginated(f"/repos/{repo}/pulls/{pr_number}/comments")
 
     def list_issue_comments(self, repo: str, pr_number: int) -> tuple[dict, ...]:
-        payload = self._request("GET", f"/repos/{repo}/issues/{pr_number}/comments?per_page=100")
-        return tuple(payload) if isinstance(payload, list) else ()
+        return self._list_paginated(f"/repos/{repo}/issues/{pr_number}/comments")
 
     def has_processed_marker(self, context: ReviewContext, marker: str) -> bool:
         if context.review_comment_id is not None:
@@ -122,6 +135,8 @@ def build_review_context(event: GithubEvent) -> ReviewContext:
             body=body,
             path=comment.get("path"),
             diff_hunk=comment.get("diff_hunk"),
+            line=comment.get("line"),
+            start_line=comment.get("start_line"),
             version_discriminator=_build_version_discriminator(comment, body),
         )
 
@@ -147,5 +162,7 @@ def build_review_context(event: GithubEvent) -> ReviewContext:
         body=body,
         path=path,
         diff_hunk=None,
+        line=None,
+        start_line=None,
         version_discriminator=_build_version_discriminator(review, body),
     )

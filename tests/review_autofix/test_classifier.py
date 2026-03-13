@@ -17,6 +17,8 @@ def _context(body: str, path: str | None = "src/a.py") -> ReviewContext:
         body=body,
         path=path,
         diff_hunk="@@",
+        line=1,
+        start_line=1,
         version_discriminator="2024-01-01T00:00:00Z:deadbeef",
     )
 

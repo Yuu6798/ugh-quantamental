@@ -26,6 +26,8 @@ def _write_event(
             "body": body,
             "path": "dummy.py",
             "diff_hunk": "@@",
+            "line": 1,
+            "start_line": 1,
             "updated_at": updated_at,
         },
     }
