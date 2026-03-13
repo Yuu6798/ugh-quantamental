@@ -310,6 +310,18 @@ class ForecastRecord(BaseModel):
         """
         return _to_jst(v)
 
+    @field_validator("locked_at_utc")
+    @classmethod
+    def _normalize_locked_at_utc(cls, v: datetime) -> datetime:
+        """Canonicalize locked_at_utc to a UTC-aware datetime on ingestion.
+
+        A field explicitly named ``*_utc`` must always store a timezone-aware UTC
+        datetime so that mixed ingestion paths (naive, JST-aware, etc.) cannot
+        produce non-canonical records that cause false diffs in deterministic
+        replay and baseline comparisons.  Naive inputs are treated as UTC.
+        """
+        return _to_aware_utc(v)
+
     @field_validator("expected_close_change_bp")
     @classmethod
     def _expected_close_change_bp_must_be_finite(cls, v: float) -> float:
@@ -571,6 +583,17 @@ class EvaluationRecord(BaseModel):
     engine_version: str = Field(min_length=1)
     schema_version: str = Field(min_length=1)
     protocol_version: str = Field(min_length=1)
+
+    @field_validator("evaluated_at_utc")
+    @classmethod
+    def _normalize_evaluated_at_utc(cls, v: datetime) -> datetime:
+        """Canonicalize evaluated_at_utc to a UTC-aware datetime on ingestion.
+
+        Prevents naive or non-UTC datetimes from persisting in a field explicitly
+        named ``*_utc``, which would cause false diffs in serialization and
+        deterministic comparison.  Naive inputs are treated as UTC.
+        """
+        return _to_aware_utc(v)
 
     @field_validator("close_error_bp", "magnitude_error_bp", "mismatch_change_bp")
     @classmethod

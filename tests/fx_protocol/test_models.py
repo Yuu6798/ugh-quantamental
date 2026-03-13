@@ -1080,11 +1080,11 @@ def test_forecast_record_locked_at_utc_before_as_of_jst_accepted() -> None:
 
 
 def test_forecast_record_locked_at_utc_naive_treated_as_utc() -> None:
-    """Naive locked_at_utc is treated as UTC; must still be before as_of_jst."""
+    """Naive locked_at_utc is treated as UTC and stored as UTC-aware."""
     # 2026-03-09 22:00 naive (= UTC) is before 2026-03-09 23:00 UTC (as_of_jst).
     naive_lock = datetime(2026, 3, 9, 22, 0, 0)
     rec = _ugh_forecast(locked_at_utc=naive_lock)
-    assert rec.locked_at_utc == naive_lock
+    assert rec.locked_at_utc == naive_lock.replace(tzinfo=_UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -1296,3 +1296,50 @@ def test_market_data_provenance_utc_aware_stored_unchanged() -> None:
         resolution="1d", timezone="Asia/Tokyo", retrieved_at_utc=utc_dt,
     )
     assert p.retrieved_at_utc == utc_dt
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — locked_at_utc UTC canonicalization (r2930285070)
+# ---------------------------------------------------------------------------
+
+
+def test_forecast_record_locked_at_utc_utc_aware_stored_unchanged() -> None:
+    """UTC-aware locked_at_utc is stored as-is."""
+    rec = _ugh_forecast(locked_at_utc=_LOCKED_AT)
+    assert rec.locked_at_utc == _LOCKED_AT
+    assert rec.locked_at_utc.tzinfo is not None
+
+
+def test_forecast_record_locked_at_utc_jst_aware_canonicalized_to_utc() -> None:
+    """JST-aware locked_at_utc is converted to its UTC equivalent."""
+    # 2026-03-09 07:00 JST == 2026-03-08 22:00 UTC (well before window open)
+    jst_lock = datetime(2026, 3, 9, 7, 0, 0, tzinfo=_JST)
+    expected_utc = datetime(2026, 3, 8, 22, 0, 0, tzinfo=_UTC)
+    rec = _ugh_forecast(locked_at_utc=jst_lock)
+    assert rec.locked_at_utc == expected_utc
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — evaluated_at_utc UTC canonicalization (r2930285075)
+# ---------------------------------------------------------------------------
+
+
+def test_evaluation_record_naive_evaluated_at_utc_stored_as_utc_aware() -> None:
+    """Naive evaluated_at_utc is treated as UTC and stored as UTC-aware."""
+    naive_ts = datetime(2026, 3, 10, 9, 0, 0)
+    rec = _evaluation(evaluated_at_utc=naive_ts)
+    assert rec.evaluated_at_utc == naive_ts.replace(tzinfo=_UTC)
+    assert rec.evaluated_at_utc.tzinfo is not None
+
+
+def test_evaluation_record_jst_aware_evaluated_at_utc_canonicalized() -> None:
+    """JST-aware evaluated_at_utc is stored as its UTC equivalent."""
+    jst_ts = datetime(2026, 3, 10, 18, 0, 0, tzinfo=_JST)   # 18:00 JST = 09:00 UTC
+    rec = _evaluation(evaluated_at_utc=jst_ts)
+    assert rec.evaluated_at_utc == datetime(2026, 3, 10, 9, 0, 0, tzinfo=_UTC)
+
+
+def test_evaluation_record_utc_aware_evaluated_at_utc_stored_unchanged() -> None:
+    """UTC-aware evaluated_at_utc is stored as-is."""
+    rec = _evaluation(evaluated_at_utc=_NOW)
+    assert rec.evaluated_at_utc == _NOW
