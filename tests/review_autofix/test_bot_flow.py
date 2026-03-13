@@ -10,7 +10,7 @@ def _write_event(
     path: Path,
     body: str = "P1 please set range_hit to None",
     updated_at: str = "2024-01-01T00:00:00Z",
-    reviewer: str = "bob",
+    reviewer: str = "chatgpt-codex-connector[bot]",
     head_repo: str = "acme/repo",
 ) -> None:
     payload = {
@@ -41,7 +41,7 @@ def _write_review_event(
     path: Path,
     body: str = "file: dummy.py\nP1 please set range_hit to None",
     submitted_at: str = "2024-01-01T00:00:00Z",
-    reviewer: str = "bob",
+    reviewer: str = "chatgpt-codex-connector[bot]",
 ) -> None:
     payload = {
         "repository": {"full_name": "acme/repo"},
@@ -105,41 +105,35 @@ def _set_common_env(monkeypatch, tmp_path: Path, event_path: Path) -> None:
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
     monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("BOT_MODE", "apply_and_push")
-    monkeypatch.setenv("TARGET_REVIEWERS", "alice,bob,trusted-review-bot[bot]")
+    monkeypatch.setenv("TARGET_REVIEWERS", "chatgpt-codex-connector[bot]")
     monkeypatch.setenv("DRY_RUN", "false")
     monkeypatch.setenv("VALIDATION_LINT_COMMANDS", "true")
     monkeypatch.setenv("VALIDATION_TEST_COMMANDS", "true")
 
 
-def test_human_actor_comment_is_processed(tmp_path: Path, monkeypatch) -> None:
+def test_codex_bot_actor_comment_is_processed(tmp_path: Path, monkeypatch) -> None:
     dummy = tmp_path / "dummy.py"
     dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="chatgpt-codex-connector[bot]")
+    _set_common_env(monkeypatch, tmp_path, event_path)
+
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    result = bot.run()
+    assert result.reason == "pushed"
+
+
+def test_human_actor_comment_is_ignored(tmp_path: Path, monkeypatch) -> None:
     event_path = tmp_path / "event.json"
     _write_event(event_path, reviewer="alice")
     _set_common_env(monkeypatch, tmp_path, event_path)
 
-    monkeypatch.setattr(bot, "has_changes", lambda: True)
-    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
-    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
-
     result = bot.run()
-    assert result.reason == "pushed"
+    assert result.reason == "ignored-actor"
 
-
-def test_trusted_bot_actor_comment_is_processed(tmp_path: Path, monkeypatch) -> None:
-    dummy = tmp_path / "dummy.py"
-    dummy.write_text("range_hit = 1\n", encoding="utf-8")
-    event_path = tmp_path / "event.json"
-    _write_event(event_path, reviewer="trusted-review-bot[bot]")
-    _set_common_env(monkeypatch, tmp_path, event_path)
-    monkeypatch.setenv("ALLOWED_BOT_REVIEWERS", "trusted-review-bot[bot]")
-
-    monkeypatch.setattr(bot, "has_changes", lambda: True)
-    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
-    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
-
-    result = bot.run()
-    assert result.reason == "pushed"
 
 
 def test_untrusted_bot_actor_comment_is_skipped(tmp_path: Path, monkeypatch) -> None:
@@ -188,7 +182,7 @@ def test_durable_duplicate_detection_across_runs(tmp_path: Path, monkeypatch) ->
     event_path = tmp_path / "event.json"
     dummy = tmp_path / "dummy.py"
     dummy.write_text("range_hit = 1\n", encoding="utf-8")
-    _write_event(event_path, reviewer="alice")
+    _write_event(event_path, reviewer="chatgpt-codex-connector[bot]")
 
     monkeypatch.setattr(bot, "GithubClient", _FakeGithubClient)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
@@ -212,7 +206,7 @@ def test_durable_marker_persists_when_reply_on_success_disabled(tmp_path: Path, 
     event_path = tmp_path / "event.json"
     dummy = tmp_path / "dummy.py"
     dummy.write_text("range_hit = 1\n", encoding="utf-8")
-    _write_event(event_path, reviewer="alice")
+    _write_event(event_path, reviewer="chatgpt-codex-connector[bot]")
 
     monkeypatch.setattr(bot, "GithubClient", _FakeGithubClient)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
@@ -263,7 +257,7 @@ def test_apply_push_and_resolve_mode_resolves_thread(tmp_path: Path, monkeypatch
     dummy = tmp_path / "dummy.py"
     dummy.write_text("range_hit = 1\n", encoding="utf-8")
     event_path = tmp_path / "event.json"
-    _write_event(event_path, reviewer="alice")
+    _write_event(event_path, reviewer="chatgpt-codex-connector[bot]")
 
     monkeypatch.setattr(bot, "GithubClient", _FakeGithubClient)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
@@ -282,7 +276,7 @@ def test_apply_push_and_resolve_mode_resolves_thread(tmp_path: Path, monkeypatch
 
 def test_invalid_bot_mode_fails_closed(tmp_path: Path, monkeypatch) -> None:
     event_path = tmp_path / "event.json"
-    _write_event(event_path, reviewer="alice")
+    _write_event(event_path, reviewer="chatgpt-codex-connector[bot]")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
@@ -319,7 +313,7 @@ def test_validation_failure_does_not_push(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
     monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("BOT_MODE", "apply_and_push")
-    monkeypatch.setenv("TARGET_REVIEWERS", "alice,bob,trusted-review-bot[bot]")
+    monkeypatch.setenv("TARGET_REVIEWERS", "chatgpt-codex-connector[bot]")
     monkeypatch.setenv("DRY_RUN", "false")
     monkeypatch.setenv("VALIDATION_LINT_COMMANDS", "false")
     monkeypatch.setenv("VALIDATION_TEST_COMMANDS", "")
@@ -334,14 +328,14 @@ def test_validation_failure_does_not_push(tmp_path: Path, monkeypatch) -> None:
 
 def test_invalid_review_body_file_hint_does_not_apply_or_push(tmp_path: Path, monkeypatch) -> None:
     event_path = tmp_path / "event.json"
-    _write_review_event(event_path, body="file: ../tmp/x.py\nP1 please set range_hit to None", reviewer="alice")
+    _write_review_event(event_path, body="file: ../tmp/x.py\nP1 please set range_hit to None", reviewer="chatgpt-codex-connector[bot]")
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review")
     monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("BOT_MODE", "apply_and_push")
-    monkeypatch.setenv("TARGET_REVIEWERS", "alice,bob,trusted-review-bot[bot]")
+    monkeypatch.setenv("TARGET_REVIEWERS", "chatgpt-codex-connector[bot]")
     monkeypatch.setenv("DRY_RUN", "false")
 
     monkeypatch.setattr(bot, "commit_changes", lambda msg: (_ for _ in ()).throw(AssertionError("should not commit")))
@@ -356,7 +350,7 @@ def test_mutating_mode_requires_reviewer_allowlist(tmp_path: Path, monkeypatch) 
     dummy = tmp_path / "dummy.py"
     dummy.write_text("range_hit = 1\n", encoding="utf-8")
     event_path = tmp_path / "event.json"
-    _write_event(event_path, reviewer="alice")
+    _write_event(event_path, reviewer="chatgpt-codex-connector[bot]")
 
     _set_common_env(monkeypatch, tmp_path, event_path)
     monkeypatch.delenv("TARGET_REVIEWERS", raising=False)
@@ -372,10 +366,10 @@ def test_mutating_mode_still_works_for_allowlisted_reviewer(tmp_path: Path, monk
     dummy = tmp_path / "dummy.py"
     dummy.write_text("range_hit = 1\n", encoding="utf-8")
     event_path = tmp_path / "event.json"
-    _write_event(event_path, reviewer="alice")
+    _write_event(event_path, reviewer="chatgpt-codex-connector[bot]")
 
     _set_common_env(monkeypatch, tmp_path, event_path)
-    monkeypatch.setenv("TARGET_REVIEWERS", "alice")
+    monkeypatch.setenv("TARGET_REVIEWERS", "chatgpt-codex-connector[bot]")
 
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
@@ -389,7 +383,7 @@ def test_propose_only_mode_works_without_allowlist(tmp_path: Path, monkeypatch) 
     dummy = tmp_path / "dummy.py"
     dummy.write_text("range_hit = 1\n", encoding="utf-8")
     event_path = tmp_path / "event.json"
-    _write_event(event_path, reviewer="alice")
+    _write_event(event_path, reviewer="chatgpt-codex-connector[bot]")
 
     _set_common_env(monkeypatch, tmp_path, event_path)
     monkeypatch.setenv("BOT_MODE", "propose_only")
@@ -406,7 +400,7 @@ def test_fork_propose_only_reply_failure_is_non_fatal(tmp_path: Path, monkeypatc
     event_path = tmp_path / "event.json"
     dummy = tmp_path / "dummy.py"
     dummy.write_text("range_hit = 1\n", encoding="utf-8")
-    _write_event(event_path, reviewer="alice", head_repo="fork/repo")
+    _write_event(event_path, reviewer="chatgpt-codex-connector[bot]", head_repo="fork/repo")
 
     monkeypatch.setattr(bot, "GithubClient", _FailingReplyGithubClient)
 
@@ -423,7 +417,7 @@ def test_same_repo_propose_only_reply_failure_remains_fatal(tmp_path: Path, monk
     event_path = tmp_path / "event.json"
     dummy = tmp_path / "dummy.py"
     dummy.write_text("range_hit = 1\n", encoding="utf-8")
-    _write_event(event_path, reviewer="alice")
+    _write_event(event_path, reviewer="chatgpt-codex-connector[bot]")
 
     monkeypatch.setattr(bot, "GithubClient", _FailingReplyGithubClient)
 

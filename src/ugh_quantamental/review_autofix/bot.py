@@ -13,6 +13,7 @@ from .state_store import FileStateStore
 from .validator import run_validation
 
 _VALID_BOT_MODES = {"detect_only", "propose_only", "apply_and_push", "apply_push_and_resolve"}
+_TRUSTED_REVIEW_AUTHOR = "chatgpt-codex-connector[bot]"
 
 
 def should_process_actor(login: str | None, config: BotConfig) -> bool:
@@ -20,9 +21,7 @@ def should_process_actor(login: str | None, config: BotConfig) -> bool:
         return False
     if login in config.self_bot_actors:
         return False
-    if login.endswith("[bot]"):
-        return login in config.allowed_bot_reviewers
-    return True
+    return login == _TRUSTED_REVIEW_AUTHOR
 
 
 def _processed_key(context) -> str:
