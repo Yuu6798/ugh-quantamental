@@ -10,6 +10,17 @@ from .models import ReviewContext, ReviewKind
 
 _REVIEW_EVENTS = {"pull_request_review_comment", "pull_request_review"}
 
+_TRUSTED_MARKER_AUTHORS_DEFAULT = {"github-actions[bot]", "chatgpt-codex-connector[bot]"}
+
+
+def _parse_csv_env(name: str) -> set[str]:
+    raw = os.getenv(name, "")
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def _trusted_marker_authors() -> set[str]:
+    return _TRUSTED_MARKER_AUTHORS_DEFAULT | _parse_csv_env("ALLOWED_BOT_REVIEWERS") | _parse_csv_env("SELF_BOT_ACTORS")
+
 
 @dataclass(frozen=True)
 class GithubEvent:
@@ -61,13 +72,23 @@ class GithubClient:
         return self._list_paginated(f"/repos/{repo}/issues/{pr_number}/comments")
 
     def has_processed_marker(self, context: ReviewContext, marker: str) -> bool:
+        trusted_authors = _trusted_marker_authors()
+
+        def is_trusted(comment: dict) -> bool:
+            login = ((comment.get("user") or {}).get("login") or "")
+            return login in trusted_authors
+
         if context.review_comment_id is not None:
             for comment in self.list_review_comments(context.repository, context.pr_number):
-                if comment.get("in_reply_to_id") == context.review_comment_id and marker in comment.get("body", ""):
+                if (
+                    comment.get("in_reply_to_id") == context.review_comment_id
+                    and marker in comment.get("body", "")
+                    and is_trusted(comment)
+                ):
                     return True
 
         for comment in self.list_issue_comments(context.repository, context.pr_number):
-            if marker in comment.get("body", ""):
+            if marker in comment.get("body", "") and is_trusted(comment):
                 return True
         return False
 

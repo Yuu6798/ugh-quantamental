@@ -34,14 +34,14 @@ class NoneNormalizationRule(BaseRule):
         explicit_rule_id = re.search(r"\brule\s*:\s*none-normalization\b", text) is not None
         has_target_field = "range_hit" in text
         has_none_request = re.search(r"\b(none|null)\b", text) is not None
+        has_normalize_phrase = re.search(r"\bnone[-\s]?normalization\b", text) is not None
+        has_set_to_none_phrase = re.search(r"\bset\b.*\b(none|null)\b", text) is not None
+        has_explicit_intent = explicit_rule_id or has_target_field or has_normalize_phrase or has_set_to_none_phrase
 
         if context.path is None:
             return None
 
-        if context.kind.value == "review_body" and (context.line is None and context.start_line is None):
-            if not ((explicit_rule_id or has_target_field) and has_none_request):
-                return None
-        elif not has_none_request:
+        if not (has_none_request and has_explicit_intent):
             return None
 
         return RuleMatch(

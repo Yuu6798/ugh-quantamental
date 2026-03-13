@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from ugh_quantamental.review_autofix.models import ReviewContext, ReviewKind
-from ugh_quantamental.review_autofix.rules import RuleRegistry
+from ugh_quantamental.review_autofix.rules import NoneNormalizationRule, RuleRegistry
 
 
 def _context(body: str, path: str, line: int = 1) -> ReviewContext:
@@ -217,3 +217,17 @@ def test_import_rule_skips_semicolon_mixed_content_line(tmp_path: Path) -> None:
     result = rule.apply(context)
     assert result.changed is False
     assert target.read_text(encoding="utf-8") == 'import  os; msg = "a  b"\n'
+
+
+def test_none_rule_diff_comment_generic_none_text_does_not_match() -> None:
+    context = _context("none of these import changes look right", "src/file.py")
+    rule = NoneNormalizationRule()
+    assert rule.match(context) is None
+
+
+def test_none_rule_diff_comment_explicit_intent_still_matches() -> None:
+    context = _context("Please set range_hit to None", "src/file.py")
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+    assert rule.rule_id == "none-normalization"

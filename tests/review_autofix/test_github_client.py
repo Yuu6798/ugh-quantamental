@@ -17,10 +17,8 @@ def test_build_review_context_raises_for_non_review_event() -> None:
         raise AssertionError("expected ValueError")
 
 
-def test_has_processed_marker_for_review_comment() -> None:
-    client = GithubClient("token")
-    client.list_review_comments = lambda repo, pr: ({"in_reply_to_id": 44, "body": "ok\n<!-- review-autofix-key:k -->"},)
-    context = ReviewContext(
+def _diff_context() -> ReviewContext:
+    return ReviewContext(
         kind=ReviewKind.diff_comment,
         repository="acme/repo",
         pr_number=1,
@@ -38,7 +36,26 @@ def test_has_processed_marker_for_review_comment() -> None:
         start_line=1,
         version_discriminator="v",
     )
+
+
+def test_has_processed_marker_for_review_comment_trusted_author() -> None:
+    client = GithubClient("token")
+    client.list_review_comments = lambda repo, pr: (
+        {"in_reply_to_id": 44, "body": "ok\n<!-- review-autofix-key:k -->", "user": {"login": "github-actions[bot]"}},
+    )
+    client.list_issue_comments = lambda repo, pr: ()
+    context = _diff_context()
     assert client.has_processed_marker(context, "<!-- review-autofix-key:k -->") is True
+
+
+def test_has_processed_marker_ignores_untrusted_author() -> None:
+    client = GithubClient("token")
+    client.list_review_comments = lambda repo, pr: (
+        {"in_reply_to_id": 44, "body": "ok\n<!-- review-autofix-key:k -->", "user": {"login": "alice"}},
+    )
+    client.list_issue_comments = lambda repo, pr: ()
+    context = _diff_context()
+    assert client.has_processed_marker(context, "<!-- review-autofix-key:k -->") is False
 
 
 def test_list_paginated_fetches_multiple_pages() -> None:
