@@ -1,0 +1,1428 @@
+"""Tests for fx_protocol.models — enumerations, support models, and record contracts."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+import pytest
+from pydantic import ValidationError
+
+from ugh_quantamental.fx_protocol.models import (
+    CurrencyPair,
+    DisconfirmerRule,
+    EvaluationRecord,
+    EventTag,
+    ExpectedRange,
+    ForecastDirection,
+    ForecastRecord,
+    MarketDataProvenance,
+    OutcomeRecord,
+    StrategyKind,
+)
+from ugh_quantamental.schemas.enums import LifecycleState, QuestionDirection
+from ugh_quantamental.schemas.market_svp import StateProbabilities
+
+# ---------------------------------------------------------------------------
+# Helpers / fixtures
+# ---------------------------------------------------------------------------
+
+_UTC = timezone.utc
+_JST = ZoneInfo("Asia/Tokyo")
+_NOW = datetime(2026, 3, 10, 8, 0, 0, tzinfo=_UTC)
+# as_of_jst 08:00 JST = 23:00 UTC Mar 9; locked_at_utc must be strictly before that.
+_LOCKED_AT = datetime(2026, 3, 9, 22, 0, 0, tzinfo=_UTC)
+_AS_OF = datetime(2026, 3, 10, 8, 0, 0)
+_WINDOW_END = datetime(2026, 3, 11, 8, 0, 0)
+
+
+def _provenance() -> MarketDataProvenance:
+    return MarketDataProvenance(
+        vendor="test_vendor",
+        feed_name="test_feed",
+        price_type="mid",
+        resolution="1d",
+        timezone="Asia/Tokyo",
+        retrieved_at_utc=_NOW,
+    )
+
+
+def _state_probs() -> StateProbabilities:
+    return StateProbabilities(
+        dormant=0.0,
+        setup=0.0,
+        fire=1.0,
+        expansion=0.0,
+        exhaustion=0.0,
+        failure=0.0,
+    )
+
+
+def _expected_range() -> ExpectedRange:
+    return ExpectedRange(low_price=149.0, high_price=151.0)
+
+
+def _disconfirmer() -> DisconfirmerRule:
+    return DisconfirmerRule(
+        rule_id="dc_01",
+        label="FOMC event disconfirmer",
+        audit_kind="event_tag",
+        target_field="event_tags",
+        operator="contains",
+        threshold_value="fomc",
+        window_scope="current",
+    )
+
+
+def _ugh_forecast(**overrides) -> ForecastRecord:
+    base = dict(
+        forecast_id="fc_test_001",
+        forecast_batch_id="fb_test_001",
+        pair=CurrencyPair.USDJPY,
+        strategy_kind=StrategyKind.ugh,
+        as_of_jst=_AS_OF,
+        window_end_jst=_WINDOW_END,
+        locked_at_utc=_LOCKED_AT,
+        market_data_provenance=_provenance(),
+        input_snapshot_ref="ssv_snap_001",
+        forecast_direction=ForecastDirection.up,
+        expected_close_change_bp=30.0,
+        expected_range=_expected_range(),
+        primary_question="Will USDJPY close higher?",
+        disconfirmers=(_disconfirmer(),),
+        dominant_state=LifecycleState.fire,
+        state_probabilities=_state_probs(),
+        q_dir=QuestionDirection.positive,
+        q_strength=0.7,
+        s_q=0.6,
+        temporal_score=0.8,
+        grv_raw=0.2,
+        grv_lock=0.3,
+        alignment=0.5,
+        e_star=0.4,
+        mismatch_px=0.1,
+        mismatch_sem=0.05,
+        conviction=0.6,
+        urgency=0.7,
+        theory_version="v1",
+        engine_version="v1",
+        schema_version="v1",
+        protocol_version="v1",
+    )
+    base.update(overrides)
+    return ForecastRecord(**base)
+
+
+def _baseline_forecast(strategy_kind: StrategyKind, **overrides) -> ForecastRecord:
+    base = dict(
+        forecast_id="fc_baseline_001",
+        forecast_batch_id="fb_baseline_001",
+        pair=CurrencyPair.USDJPY,
+        strategy_kind=strategy_kind,
+        as_of_jst=_AS_OF,
+        window_end_jst=_WINDOW_END,
+        locked_at_utc=_LOCKED_AT,
+        market_data_provenance=_provenance(),
+        forecast_direction=ForecastDirection.flat,
+        expected_close_change_bp=0.0,
+        theory_version="v1",
+        engine_version="v1",
+        schema_version="v1",
+        protocol_version="v1",
+    )
+    base.update(overrides)
+    return ForecastRecord(**base)
+
+
+# Default OHLC values used by _outcome(); bp derived exactly from these prices.
+_O_OPEN: float = 149.5
+_O_CLOSE: float = 150.5
+_O_HIGH: float = 150.8
+_O_LOW: float = 149.2
+_O_BP: float = (_O_CLOSE - _O_OPEN) / _O_OPEN * 10_000   # ≈ 66.8896...
+_O_RANGE: float = _O_HIGH - _O_LOW                        # = 1.6
+
+
+def _outcome(**overrides) -> OutcomeRecord:
+    base = dict(
+        outcome_id="oc_test_001",
+        pair=CurrencyPair.USDJPY,
+        window_start_jst=_AS_OF,
+        window_end_jst=_WINDOW_END,
+        market_data_provenance=_provenance(),
+        realized_open=_O_OPEN,
+        realized_high=_O_HIGH,
+        realized_low=_O_LOW,
+        realized_close=_O_CLOSE,
+        realized_direction=ForecastDirection.up,
+        realized_close_change_bp=_O_BP,
+        realized_range_price=_O_RANGE,
+        event_happened=False,
+        event_tags=(),
+        schema_version="v1",
+        protocol_version="v1",
+    )
+    base.update(overrides)
+    return OutcomeRecord(**base)
+
+
+def _evaluation(**overrides) -> EvaluationRecord:
+    base = dict(
+        evaluation_id="ev_test_001",
+        forecast_id="fc_test_001",
+        outcome_id="oc_test_001",
+        pair=CurrencyPair.USDJPY,
+        strategy_kind=StrategyKind.ugh,
+        direction_hit=True,
+        range_hit=True,          # UGH evaluations always require a non-None range_hit
+        evaluated_at_utc=_NOW,
+        theory_version="v1",
+        engine_version="v1",
+        schema_version="v1",
+        protocol_version="v1",
+    )
+    base.update(overrides)
+    return EvaluationRecord(**base)
+
+
+# ---------------------------------------------------------------------------
+# Enumeration tests
+# ---------------------------------------------------------------------------
+
+
+def test_currency_pair_usdjpy_exists() -> None:
+    assert CurrencyPair.USDJPY == CurrencyPair("USDJPY")
+
+
+def test_strategy_kind_all_values() -> None:
+    expected = {"ugh", "baseline_random_walk", "baseline_prev_day_direction", "baseline_simple_technical"}
+    assert {s.value for s in StrategyKind} == expected
+
+
+def test_forecast_direction_all_values() -> None:
+    assert {d.value for d in ForecastDirection} == {"up", "down", "flat"}
+
+
+def test_event_tag_all_values() -> None:
+    expected = {
+        "fomc", "boj", "cpi_us", "nfp_us", "jp_holiday", "us_holiday",
+        "month_end", "quarter_end", "other_macro", "unscheduled_event",
+    }
+    assert {t.value for t in EventTag} == expected
+
+
+# ---------------------------------------------------------------------------
+# ExpectedRange tests
+# ---------------------------------------------------------------------------
+
+
+def test_expected_range_valid() -> None:
+    r = ExpectedRange(low_price=149.0, high_price=151.0)
+    assert r.low_price == 149.0
+    assert r.high_price == 151.0
+
+
+def test_expected_range_equal_bounds_is_valid() -> None:
+    r = ExpectedRange(low_price=150.0, high_price=150.0)
+    assert r.low_price == r.high_price
+
+
+def test_expected_range_ordering_violated() -> None:
+    with pytest.raises(ValidationError, match="low_price must be <= high_price"):
+        ExpectedRange(low_price=151.0, high_price=149.0)
+
+
+@pytest.mark.parametrize("bad_value", [float("inf"), float("-inf"), float("nan")])
+def test_expected_range_non_finite_low(bad_value: float) -> None:
+    with pytest.raises(ValidationError, match="finite"):
+        ExpectedRange(low_price=bad_value, high_price=151.0)
+
+
+@pytest.mark.parametrize("bad_value", [float("inf"), float("-inf"), float("nan")])
+def test_expected_range_non_finite_high(bad_value: float) -> None:
+    with pytest.raises(ValidationError, match="finite"):
+        ExpectedRange(low_price=149.0, high_price=bad_value)
+
+
+@pytest.mark.parametrize("bad_value", [-1.0, -0.001])
+def test_expected_range_negative_low_price_raises(bad_value: float) -> None:
+    """Negative low_price violates market-price domain and must be rejected."""
+    with pytest.raises(ValidationError, match="price must be positive"):
+        ExpectedRange(low_price=bad_value, high_price=151.0)
+
+
+def test_expected_range_zero_low_price_raises() -> None:
+    """Zero low_price is not a valid market price."""
+    with pytest.raises(ValidationError, match="price must be positive"):
+        ExpectedRange(low_price=0.0, high_price=151.0)
+
+
+def test_expected_range_negative_high_price_raises() -> None:
+    """Negative high_price must be rejected even if >= low_price."""
+    with pytest.raises(ValidationError, match="price must be positive"):
+        ExpectedRange(low_price=-2.0, high_price=-1.0)
+
+
+# ---------------------------------------------------------------------------
+# MarketDataProvenance tests
+# ---------------------------------------------------------------------------
+
+
+def test_market_data_provenance_valid() -> None:
+    p = _provenance()
+    assert p.vendor == "test_vendor"
+    assert p.price_type == "mid"
+    assert p.source_ref is None
+
+
+def test_market_data_provenance_with_source_ref() -> None:
+    p = MarketDataProvenance(
+        vendor="v",
+        feed_name="f",
+        price_type="mid",
+        resolution="1d",
+        timezone="UTC",
+        retrieved_at_utc=_NOW,
+        source_ref="ref_abc",
+    )
+    assert p.source_ref == "ref_abc"
+
+
+def test_market_data_provenance_rejects_non_mid() -> None:
+    with pytest.raises(ValidationError):
+        MarketDataProvenance(  # type: ignore[call-arg]
+            vendor="v",
+            feed_name="f",
+            price_type="ask",  # invalid
+            resolution="1d",
+            timezone="UTC",
+            retrieved_at_utc=_NOW,
+        )
+
+
+# ---------------------------------------------------------------------------
+# DisconfirmerRule tests
+# ---------------------------------------------------------------------------
+
+
+def test_disconfirmer_rule_valid() -> None:
+    d = _disconfirmer()
+    assert d.rule_id == "dc_01"
+    assert d.audit_kind == "event_tag"
+    assert d.threshold_value == "fomc"
+
+
+def test_disconfirmer_rule_none_threshold() -> None:
+    d = DisconfirmerRule(
+        rule_id="dc_02",
+        label="range break",
+        audit_kind="range_break",
+        target_field="realized_range_price",
+        operator="gt",
+        threshold_value=None,
+        window_scope="current",
+    )
+    assert d.threshold_value is None
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — UGH strategy
+# ---------------------------------------------------------------------------
+
+
+def test_forecast_record_window_as_of_after_end_raises() -> None:
+    with pytest.raises(ValidationError, match="as_of_jst must be strictly before window_end_jst"):
+        _ugh_forecast(as_of_jst=_WINDOW_END, window_end_jst=_AS_OF)
+
+
+def test_forecast_record_window_as_of_equal_end_raises() -> None:
+    with pytest.raises(ValidationError, match="as_of_jst must be strictly before window_end_jst"):
+        _ugh_forecast(as_of_jst=_AS_OF, window_end_jst=_AS_OF)
+
+
+def test_forecast_record_ugh_valid() -> None:
+    rec = _ugh_forecast()
+    assert rec.strategy_kind == StrategyKind.ugh
+    assert rec.dominant_state == LifecycleState.fire
+    assert rec.conviction == 0.6
+
+
+def test_forecast_record_ugh_frozen() -> None:
+    rec = _ugh_forecast()
+    with pytest.raises(Exception):
+        rec.conviction = 0.9  # type: ignore[misc]
+
+
+def test_forecast_record_ugh_missing_ugh_field_raises() -> None:
+    with pytest.raises(ValidationError, match="ugh.*requires non-null"):
+        _ugh_forecast(dominant_state=None)
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "dominant_state",
+        "state_probabilities",
+        "q_dir",
+        "q_strength",
+        "s_q",
+        "temporal_score",
+        "grv_raw",
+        "grv_lock",
+        "alignment",
+        "e_star",
+        "mismatch_px",
+        "mismatch_sem",
+        "conviction",
+        "urgency",
+        "input_snapshot_ref",
+        "primary_question",
+        "expected_range",
+    ],
+)
+def test_forecast_record_ugh_each_ugh_field_required(field: str) -> None:
+    """Setting any single UGH field to None must raise a ValidationError."""
+    with pytest.raises(ValidationError):
+        _ugh_forecast(**{field: None})
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — baseline strategies
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_forecast_record_baseline_ugh_fields_nullable(strategy_kind: StrategyKind) -> None:
+    rec = _baseline_forecast(strategy_kind)
+    assert rec.dominant_state is None
+    assert rec.state_probabilities is None
+    assert rec.q_dir is None
+    assert rec.expected_range is None
+    assert rec.input_snapshot_ref is None
+    assert rec.primary_question is None
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_forecast_record_baseline_disconfirmers_empty_allowed(strategy_kind: StrategyKind) -> None:
+    rec = _baseline_forecast(strategy_kind)
+    assert rec.disconfirmers == ()
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_forecast_record_baseline_requires_direction(strategy_kind: StrategyKind) -> None:
+    with pytest.raises((ValidationError, TypeError)):
+        _baseline_forecast(strategy_kind, forecast_direction=None)  # type: ignore[arg-type]
+
+
+def test_forecast_record_extra_field_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _ugh_forecast(unknown_field="x")  # type: ignore[call-arg]
+
+
+# ---------------------------------------------------------------------------
+# OutcomeRecord tests
+# ---------------------------------------------------------------------------
+
+
+def test_outcome_record_valid() -> None:
+    rec = _outcome()
+    assert rec.pair == CurrencyPair.USDJPY
+    assert rec.realized_direction == ForecastDirection.up
+
+
+def test_outcome_record_does_not_have_realized_state_proxy() -> None:
+    rec = _outcome()
+    assert not hasattr(rec, "realized_state_proxy")
+
+
+def test_outcome_record_does_not_have_actual_state_change() -> None:
+    rec = _outcome()
+    assert not hasattr(rec, "actual_state_change")
+
+
+def test_outcome_record_extra_field_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _outcome(realized_state_proxy="fire")  # type: ignore[call-arg]
+
+
+def test_outcome_record_extra_state_field_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _outcome(actual_state_change=True)  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("bad_value", [float("inf"), float("-inf"), float("nan")])
+def test_outcome_record_non_finite_price_raises(bad_value: float) -> None:
+    with pytest.raises(ValidationError, match="finite"):
+        _outcome(realized_close=bad_value)
+
+
+@pytest.mark.parametrize("field", ["realized_open", "realized_high", "realized_low", "realized_close"])
+def test_outcome_record_negative_price_raises(field: str) -> None:
+    with pytest.raises(ValidationError, match="positive"):
+        _outcome(**{field: -1.0})
+
+
+def test_outcome_record_zero_price_raises() -> None:
+    with pytest.raises(ValidationError, match="positive"):
+        _outcome(realized_close=0.0)
+
+
+def test_outcome_record_window_start_after_end_raises() -> None:
+    with pytest.raises(ValidationError, match="window_start_jst must be strictly before window_end_jst"):
+        _outcome(window_start_jst=_WINDOW_END, window_end_jst=_AS_OF)
+
+
+def test_outcome_record_window_start_equal_end_raises() -> None:
+    with pytest.raises(ValidationError, match="window_start_jst must be strictly before window_end_jst"):
+        _outcome(window_start_jst=_AS_OF, window_end_jst=_AS_OF)
+
+
+def test_outcome_record_high_lt_low_raises() -> None:
+    with pytest.raises(ValidationError, match="realized_high must be >= realized_low"):
+        _outcome(realized_high=148.0, realized_low=151.0)
+
+
+def test_outcome_record_open_above_high_raises() -> None:
+    with pytest.raises(ValidationError, match="realized_open must be within"):
+        _outcome(realized_open=152.0, realized_high=150.8, realized_low=149.2, realized_close=150.0)
+
+
+def test_outcome_record_close_below_low_raises() -> None:
+    with pytest.raises(ValidationError, match="realized_close must be within"):
+        _outcome(realized_open=150.0, realized_high=150.8, realized_low=149.2, realized_close=148.0)
+
+
+# --- derived-field cross-validation (r2926594708) ---
+
+
+def test_outcome_record_direction_up_requires_close_gt_open() -> None:
+    # close < open but direction='up'
+    with pytest.raises(ValidationError, match="realized_direction='up' requires realized_close > realized_open"):
+        _outcome(
+            realized_open=150.5,
+            realized_high=150.8,
+            realized_low=149.2,
+            realized_close=149.5,
+            realized_direction=ForecastDirection.up,
+            realized_close_change_bp=1.0,
+            realized_range_price=1.6,
+        )
+
+
+def test_outcome_record_direction_down_requires_close_lt_open() -> None:
+    # close > open but direction='down'
+    with pytest.raises(ValidationError, match="realized_direction='down' requires realized_close < realized_open"):
+        _outcome(
+            realized_open=149.5,
+            realized_high=150.8,
+            realized_low=149.2,
+            realized_close=150.5,
+            realized_direction=ForecastDirection.down,
+            realized_close_change_bp=-1.0,
+            realized_range_price=1.6,
+        )
+
+
+def test_outcome_record_direction_flat_requires_close_eq_open() -> None:
+    # close != open but direction='flat'
+    with pytest.raises(ValidationError, match="realized_direction='flat' requires realized_close == realized_open"):
+        _outcome(
+            realized_open=150.0,
+            realized_high=150.8,
+            realized_low=149.2,
+            realized_close=150.3,
+            realized_direction=ForecastDirection.flat,
+            realized_close_change_bp=0.0,
+            realized_range_price=1.6,
+        )
+
+
+def test_outcome_record_close_change_bp_must_be_positive_when_up() -> None:
+    # direction='up' (default) but close_change_bp is wrong value
+    with pytest.raises(ValidationError, match="realized_close_change_bp must equal"):
+        _outcome(realized_close_change_bp=-10.0)
+
+
+def test_outcome_record_close_change_bp_must_be_negative_when_down() -> None:
+    # direction='down', close < open, but close_change_bp has wrong value
+    _down_open = 150.5
+    _down_close = 149.5
+    _down_bp = (_down_close - _down_open) / _down_open * 10_000  # correct ≈ -66.44
+    with pytest.raises(ValidationError, match="realized_close_change_bp must equal"):
+        _outcome(
+            realized_open=_down_open,
+            realized_high=150.8,
+            realized_low=149.2,
+            realized_close=_down_close,
+            realized_direction=ForecastDirection.down,
+            realized_close_change_bp=10.0,      # wrong: positive when should be negative
+            realized_range_price=1.6,
+        )
+
+
+def test_outcome_record_range_price_must_equal_high_minus_low() -> None:
+    # realized_range_price inconsistent with high - low
+    with pytest.raises(ValidationError, match="realized_range_price must equal realized_high - realized_low"):
+        _outcome(realized_range_price=9.9)
+
+
+def test_outcome_record_derived_fields_valid_flat() -> None:
+    # flat: close == open, change_bp == 0, range_price consistent
+    rec = _outcome(
+        realized_open=150.0,
+        realized_high=150.8,
+        realized_low=149.2,
+        realized_close=150.0,
+        realized_direction=ForecastDirection.flat,
+        realized_close_change_bp=0.0,
+        realized_range_price=1.6,
+    )
+    assert rec.realized_direction == ForecastDirection.flat
+
+
+def test_outcome_record_derived_fields_valid_down() -> None:
+    _down_open = 150.5
+    _down_close = 149.5
+    _down_bp = (_down_close - _down_open) / _down_open * 10_000  # ≈ -66.44
+    rec = _outcome(
+        realized_open=_down_open,
+        realized_high=150.8,
+        realized_low=149.2,
+        realized_close=_down_close,
+        realized_direction=ForecastDirection.down,
+        realized_close_change_bp=_down_bp,
+        realized_range_price=1.6,
+    )
+    assert rec.realized_direction == ForecastDirection.down
+
+
+def test_outcome_record_event_tags() -> None:
+    rec = _outcome(event_happened=True, event_tags=(EventTag.fomc, EventTag.us_holiday))
+    assert EventTag.fomc in rec.event_tags
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord tests
+# ---------------------------------------------------------------------------
+
+
+def test_evaluation_record_valid() -> None:
+    rec = _evaluation()
+    assert rec.direction_hit is True
+    assert rec.range_hit is True
+
+
+def test_evaluation_record_has_realized_state_proxy() -> None:
+    rec = _evaluation(realized_state_proxy="fire")
+    assert rec.realized_state_proxy == "fire"
+
+
+def test_evaluation_record_has_actual_state_change() -> None:
+    rec = _evaluation(actual_state_change=True)
+    assert rec.actual_state_change is True
+
+
+def test_evaluation_record_no_aggregated_metrics() -> None:
+    rec = _evaluation()
+    for field_name in ("mae", "rmse", "mase", "smape"):
+        assert not hasattr(rec, field_name)
+
+
+def test_evaluation_record_disconfirmers_hit_empty() -> None:
+    rec = _evaluation()
+    assert rec.disconfirmers_hit == ()
+
+
+def test_evaluation_record_disconfirmers_hit_with_ids() -> None:
+    rec = _evaluation(direction_hit=False, disconfirmers_hit=("dc_01", "dc_02"), disconfirmer_explained=True)
+    assert "dc_01" in rec.disconfirmers_hit
+    assert rec.disconfirmer_explained is True
+
+
+def test_evaluation_record_extra_field_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _evaluation(mae=0.5)  # type: ignore[call-arg]
+
+
+def test_evaluation_record_range_hit_true() -> None:
+    rec = _evaluation(range_hit=True, close_error_bp=10.0)
+    assert rec.range_hit is True
+    assert rec.close_error_bp == 10.0
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — canonical 08:00 JST window semantics (r2926868689)
+# ---------------------------------------------------------------------------
+
+
+def test_forecast_record_non_canonical_time_as_of_raises() -> None:
+    """as_of_jst not at 08:00:00 must be rejected."""
+    bad_as_of = datetime(2026, 3, 10, 9, 0, 0)          # 09:00, not 08:00
+    bad_window_end = datetime(2026, 3, 11, 9, 0, 0)     # matching non-canonical end
+    with pytest.raises(ValidationError, match="as_of_jst must be at exactly 08:00:00"):
+        _ugh_forecast(as_of_jst=bad_as_of, window_end_jst=bad_window_end)
+
+
+def test_forecast_record_non_canonical_time_window_end_raises() -> None:
+    """window_end_jst not at 08:00:00 must be rejected."""
+    bad_window_end = datetime(2026, 3, 11, 17, 0, 0)    # 17:00, not 08:00
+    with pytest.raises(ValidationError, match="window_end_jst must be at exactly 08:00:00"):
+        _ugh_forecast(as_of_jst=_AS_OF, window_end_jst=bad_window_end)
+
+
+@pytest.mark.parametrize(
+    "weekend_date",
+    [
+        datetime(2026, 3, 14, 8, 0, 0),   # Saturday
+        datetime(2026, 3, 15, 8, 0, 0),   # Sunday
+    ],
+)
+def test_forecast_record_weekend_as_of_raises(weekend_date: datetime) -> None:
+    """as_of_jst on Saturday or Sunday must be rejected."""
+    next_day = datetime(weekend_date.year, weekend_date.month, weekend_date.day + 1, 8, 0, 0)
+    with pytest.raises(ValidationError, match="as_of_jst must be a business day"):
+        _ugh_forecast(as_of_jst=weekend_date, window_end_jst=next_day)
+
+
+def test_forecast_record_non_next_business_day_window_end_raises() -> None:
+    """window_end_jst two days after as_of_jst (instead of one) must be rejected."""
+    # _AS_OF is Tuesday 2026-03-10; next biz day is Wednesday, not Thursday
+    two_days_later = datetime(2026, 3, 12, 8, 0, 0)
+    with pytest.raises(ValidationError, match="window_end_jst must be the next business-day 08:00 JST"):
+        _ugh_forecast(as_of_jst=_AS_OF, window_end_jst=two_days_later)
+
+
+def test_forecast_record_friday_window_end_is_monday() -> None:
+    """Friday as_of_jst must accept Monday window_end_jst (skip weekend)."""
+    friday_as_of = datetime(2026, 3, 13, 8, 0, 0)    # Friday (naive → treated as JST)
+    monday_end = datetime(2026, 3, 16, 8, 0, 0)      # following Monday
+    rec = _ugh_forecast(as_of_jst=friday_as_of, window_end_jst=monday_end)
+    # Stored values are canonicalized to JST-aware datetimes.
+    assert rec.as_of_jst == friday_as_of.replace(tzinfo=_JST)
+    assert rec.window_end_jst == monday_end.replace(tzinfo=_JST)
+
+
+def test_forecast_record_friday_window_end_saturday_raises() -> None:
+    """Friday as_of_jst with Saturday window_end_jst must be rejected (non-business day)."""
+    friday_as_of = datetime(2026, 3, 13, 8, 0, 0)
+    saturday_end = datetime(2026, 3, 14, 8, 0, 0)
+    with pytest.raises(ValidationError, match="window_end_jst must be a business day"):
+        _ugh_forecast(as_of_jst=friday_as_of, window_end_jst=saturday_end)
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — baseline rejects UGH-exclusive fields (r2926868692)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_forecast_record_baseline_rejects_dominant_state(strategy_kind: StrategyKind) -> None:
+    """Baseline records must not carry dominant_state."""
+    with pytest.raises(ValidationError, match="UGH-exclusive fields"):
+        _baseline_forecast(strategy_kind, dominant_state=LifecycleState.fire)
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_forecast_record_baseline_rejects_state_probabilities(strategy_kind: StrategyKind) -> None:
+    """Baseline records must not carry state_probabilities."""
+    with pytest.raises(ValidationError, match="UGH-exclusive fields"):
+        _baseline_forecast(strategy_kind, state_probabilities=_state_probs())
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_forecast_record_baseline_rejects_q_dir(strategy_kind: StrategyKind) -> None:
+    """Baseline records must not carry q_dir."""
+    with pytest.raises(ValidationError, match="UGH-exclusive fields"):
+        _baseline_forecast(strategy_kind, q_dir=QuestionDirection.positive)
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_forecast_record_baseline_rejects_expected_range(strategy_kind: StrategyKind) -> None:
+    """Baseline records must not carry expected_range."""
+    with pytest.raises(ValidationError, match="UGH-exclusive fields"):
+        _baseline_forecast(strategy_kind, expected_range=_expected_range())
+
+
+# ---------------------------------------------------------------------------
+# OutcomeRecord — canonical 08:00 JST window semantics (r2928948831)
+# ---------------------------------------------------------------------------
+
+
+def test_outcome_record_non_canonical_time_window_start_raises() -> None:
+    """window_start_jst not at 08:00:00 must be rejected."""
+    with pytest.raises(ValidationError, match="window_start_jst must be at exactly 08:00:00"):
+        _outcome(window_start_jst=datetime(2026, 3, 10, 12, 0, 0))
+
+
+def test_outcome_record_non_canonical_time_window_end_raises() -> None:
+    """window_end_jst not at 08:00:00 must be rejected."""
+    with pytest.raises(ValidationError, match="window_end_jst must be at exactly 08:00:00"):
+        _outcome(window_end_jst=datetime(2026, 3, 11, 17, 0, 0))
+
+
+@pytest.mark.parametrize(
+    "weekend_start",
+    [
+        datetime(2026, 3, 14, 8, 0, 0),   # Saturday
+        datetime(2026, 3, 15, 8, 0, 0),   # Sunday
+    ],
+)
+def test_outcome_record_weekend_window_start_raises(weekend_start: datetime) -> None:
+    """window_start_jst on Saturday or Sunday must be rejected."""
+    next_day = datetime(weekend_start.year, weekend_start.month, weekend_start.day + 1, 8, 0, 0)
+    with pytest.raises(ValidationError, match="window_start_jst must be a business day"):
+        _outcome(window_start_jst=weekend_start, window_end_jst=next_day)
+
+
+def test_outcome_record_non_next_business_day_window_end_raises() -> None:
+    """window_end_jst two days after window_start_jst must be rejected."""
+    # _AS_OF is Tuesday 2026-03-10; next biz day is Wednesday, not Thursday
+    with pytest.raises(
+        ValidationError, match="window_end_jst must be the next business-day 08:00 JST"
+    ):
+        _outcome(window_start_jst=_AS_OF, window_end_jst=datetime(2026, 3, 12, 8, 0, 0))
+
+
+def test_outcome_record_friday_window_end_is_monday() -> None:
+    """Friday window_start_jst must accept Monday window_end_jst (skip weekend)."""
+    friday_start = datetime(2026, 3, 13, 8, 0, 0)
+    monday_end = datetime(2026, 3, 16, 8, 0, 0)
+    rec = _outcome(window_start_jst=friday_start, window_end_jst=monday_end)
+    # Stored values are canonicalized to JST-aware datetimes.
+    assert rec.window_start_jst == friday_start.replace(tzinfo=_JST)
+    assert rec.window_end_jst == monday_end.replace(tzinfo=_JST)
+
+
+# ---------------------------------------------------------------------------
+# OutcomeRecord — timezone-aware inputs are normalized to JST (r2929000997)
+# ---------------------------------------------------------------------------
+
+
+def test_outcome_record_utc_aware_non_canonical_hour_raises() -> None:
+    """A UTC-aware datetime that maps to 17:00 JST must be rejected even though its raw
+    hour is 8 in UTC.  Before the fix this passed incorrectly."""
+    from datetime import timezone as _tz
+    # 2026-03-10 08:00 UTC == 2026-03-10 17:00 JST — NOT a canonical window open.
+    utc_start = datetime(2026, 3, 10, 8, 0, 0, tzinfo=_tz.utc)
+    utc_end = datetime(2026, 3, 11, 8, 0, 0, tzinfo=_tz.utc)
+    with pytest.raises(ValidationError, match="window_start_jst must be at exactly 08:00:00"):
+        _outcome(window_start_jst=utc_start, window_end_jst=utc_end)
+
+
+def test_outcome_record_jst_aware_canonical_hour_accepted() -> None:
+    """A JST-aware datetime at 08:00 JST is a valid canonical window open."""
+    from zoneinfo import ZoneInfo
+    jst = ZoneInfo("Asia/Tokyo")
+    jst_start = datetime(2026, 3, 10, 8, 0, 0, tzinfo=jst)
+    jst_end = datetime(2026, 3, 11, 8, 0, 0, tzinfo=jst)
+    rec = _outcome(window_start_jst=jst_start, window_end_jst=jst_end)
+    assert rec.window_start_jst == jst_start
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord / OutcomeRecord — *_jst field canonicalization (r2929201648)
+# ---------------------------------------------------------------------------
+
+
+def test_forecast_record_naive_jst_fields_stored_as_jst_aware() -> None:
+    """Naive *_jst inputs are stored as JST-aware datetimes."""
+    rec = _ugh_forecast()
+    assert rec.as_of_jst.tzinfo is not None
+    assert rec.as_of_jst == _AS_OF.replace(tzinfo=_JST)
+    assert rec.window_end_jst.tzinfo is not None
+    assert rec.window_end_jst == _WINDOW_END.replace(tzinfo=_JST)
+
+
+def test_forecast_record_utc_aware_jst_fields_canonicalized_to_jst() -> None:
+    """UTC-aware *_jst inputs are stored as their JST equivalent."""
+    # 2026-03-09 23:00 UTC == 2026-03-10 08:00 JST
+    utc_as_of = datetime(2026, 3, 9, 23, 0, 0, tzinfo=timezone.utc)
+    utc_end = datetime(2026, 3, 10, 23, 0, 0, tzinfo=timezone.utc)
+    rec = _ugh_forecast(as_of_jst=utc_as_of, window_end_jst=utc_end)
+    assert rec.as_of_jst == datetime(2026, 3, 10, 8, 0, 0, tzinfo=_JST)
+    assert rec.window_end_jst == datetime(2026, 3, 11, 8, 0, 0, tzinfo=_JST)
+
+
+def test_outcome_record_naive_jst_fields_stored_as_jst_aware() -> None:
+    """Naive *_jst inputs in OutcomeRecord are stored as JST-aware datetimes."""
+    rec = _outcome()
+    assert rec.window_start_jst.tzinfo is not None
+    assert rec.window_start_jst == _AS_OF.replace(tzinfo=_JST)
+
+
+def test_outcome_record_utc_aware_jst_fields_canonicalized_to_jst() -> None:
+    """UTC-aware *_jst inputs in OutcomeRecord are stored as their JST equivalent."""
+    utc_start = datetime(2026, 3, 9, 23, 0, 0, tzinfo=timezone.utc)
+    utc_end = datetime(2026, 3, 10, 23, 0, 0, tzinfo=timezone.utc)
+    rec = _outcome(window_start_jst=utc_start, window_end_jst=utc_end)
+    assert rec.window_start_jst == datetime(2026, 3, 10, 8, 0, 0, tzinfo=_JST)
+    assert rec.window_end_jst == datetime(2026, 3, 11, 8, 0, 0, tzinfo=_JST)
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — baseline rejects UGH-only diagnostic fields (r2928948835)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_evaluation_record_baseline_rejects_state_proxy_hit(strategy_kind: StrategyKind) -> None:
+    """Baseline evaluations must not carry state_proxy_hit."""
+    with pytest.raises(ValidationError, match="UGH-only evaluation fields"):
+        _evaluation(strategy_kind=strategy_kind, state_proxy_hit=True)
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_evaluation_record_baseline_rejects_mismatch_change_bp(strategy_kind: StrategyKind) -> None:
+    """Baseline evaluations must not carry mismatch_change_bp."""
+    with pytest.raises(ValidationError, match="UGH-only evaluation fields"):
+        _evaluation(strategy_kind=strategy_kind, mismatch_change_bp=5.0)
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_evaluation_record_baseline_rejects_realized_state_proxy(
+    strategy_kind: StrategyKind,
+) -> None:
+    """Baseline evaluations must not carry realized_state_proxy."""
+    with pytest.raises(ValidationError, match="UGH-only evaluation fields"):
+        _evaluation(strategy_kind=strategy_kind, realized_state_proxy="fire")
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_evaluation_record_baseline_rejects_actual_state_change(
+    strategy_kind: StrategyKind,
+) -> None:
+    """Baseline evaluations must not carry actual_state_change."""
+    with pytest.raises(ValidationError, match="UGH-only evaluation fields"):
+        _evaluation(strategy_kind=strategy_kind, actual_state_change=True)
+
+
+def test_evaluation_record_ugh_allows_all_diagnostic_fields() -> None:
+    """UGH evaluations may carry all state-proxy diagnostic fields."""
+    rec = _evaluation(
+        strategy_kind=StrategyKind.ugh,
+        state_proxy_hit=True,
+        mismatch_change_bp=3.5,
+        realized_state_proxy="fire",
+        actual_state_change=False,
+    )
+    assert rec.state_proxy_hit is True
+    assert rec.mismatch_change_bp == 3.5
+    assert rec.realized_state_proxy == "fire"
+    assert rec.actual_state_change is False
+
+
+# ---------------------------------------------------------------------------
+# OutcomeRecord — event flag / tags consistency (r2929027370)
+# ---------------------------------------------------------------------------
+
+
+def test_outcome_record_event_happened_true_with_empty_tags_raises() -> None:
+    """event_happened=True with no tags must be rejected."""
+    with pytest.raises(ValidationError, match="event_happened=True requires at least one entry"):
+        _outcome(event_happened=True, event_tags=())
+
+
+def test_outcome_record_event_happened_false_with_tags_raises() -> None:
+    """event_happened=False with non-empty tags must be rejected."""
+    with pytest.raises(ValidationError, match="event_happened=False must have empty event_tags"):
+        _outcome(event_happened=False, event_tags=(EventTag.fomc,))
+
+
+def test_outcome_record_event_happened_true_with_tags_accepted() -> None:
+    """event_happened=True with matching tags is valid."""
+    rec = _outcome(event_happened=True, event_tags=(EventTag.fomc,))
+    assert rec.event_happened is True
+    assert EventTag.fomc in rec.event_tags
+
+
+def test_outcome_record_event_happened_false_with_empty_tags_accepted() -> None:
+    """event_happened=False with empty tags is valid (default state)."""
+    rec = _outcome(event_happened=False, event_tags=())
+    assert rec.event_happened is False
+    assert rec.event_tags == ()
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — disconfirmer consistency (r2929027374)
+# ---------------------------------------------------------------------------
+
+
+def test_evaluation_record_disconfirmer_explained_without_fired_disconfirmers_raises() -> None:
+    """disconfirmer_explained=True with empty disconfirmers_hit must be rejected."""
+    with pytest.raises(
+        ValidationError,
+        match="disconfirmer_explained=True requires at least one entry in disconfirmers_hit",
+    ):
+        _evaluation(disconfirmer_explained=True, disconfirmers_hit=())
+
+
+def test_evaluation_record_disconfirmer_explained_with_fired_disconfirmers_accepted() -> None:
+    """disconfirmer_explained=True with at least one fired disconfirmer on a miss is valid."""
+    rec = _evaluation(direction_hit=False, disconfirmer_explained=True, disconfirmers_hit=("vol_spike",))
+    assert rec.disconfirmer_explained is True
+    assert "vol_spike" in rec.disconfirmers_hit
+
+
+def test_evaluation_record_disconfirmer_explained_false_with_empty_disconfirmers_accepted() -> None:
+    """disconfirmer_explained=False with no fired disconfirmers is valid."""
+    rec = _evaluation(disconfirmer_explained=False, disconfirmers_hit=())
+    assert rec.disconfirmer_explained is False
+
+
+def test_evaluation_record_disconfirmer_explained_none_with_empty_disconfirmers_accepted() -> None:
+    """disconfirmer_explained=None (unknown) with no fired disconfirmers is valid."""
+    rec = _evaluation(disconfirmer_explained=None, disconfirmers_hit=())
+    assert rec.disconfirmer_explained is None
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — lock-before-open guarantee (r2929053939)
+# ---------------------------------------------------------------------------
+
+
+def test_forecast_record_locked_at_utc_after_as_of_jst_raises() -> None:
+    """locked_at_utc at or after the window open must be rejected."""
+    # _NOW is 08:00 UTC Mar 10 = 17:00 JST, which is after as_of_jst 08:00 JST = 23:00 UTC Mar 9.
+    with pytest.raises(ValidationError, match="locked_at_utc must be strictly before as_of_jst"):
+        _ugh_forecast(locked_at_utc=_NOW)
+
+
+def test_forecast_record_locked_at_utc_equal_as_of_jst_raises() -> None:
+    """locked_at_utc exactly equal to as_of_jst (in UTC terms) must be rejected."""
+    from zoneinfo import ZoneInfo
+    jst = ZoneInfo("Asia/Tokyo")
+    # Convert as_of_jst to UTC-aware so they are exactly equal.
+    as_of_utc = datetime(2026, 3, 10, 8, 0, 0, tzinfo=jst).astimezone(_UTC)
+    with pytest.raises(ValidationError, match="locked_at_utc must be strictly before as_of_jst"):
+        _ugh_forecast(locked_at_utc=as_of_utc)
+
+
+def test_forecast_record_locked_at_utc_before_as_of_jst_accepted() -> None:
+    """locked_at_utc strictly before the window open is valid."""
+    rec = _ugh_forecast(locked_at_utc=_LOCKED_AT)
+    assert rec.locked_at_utc == _LOCKED_AT
+
+
+def test_forecast_record_locked_at_utc_naive_treated_as_utc() -> None:
+    """Naive locked_at_utc is treated as UTC and stored as UTC-aware."""
+    # 2026-03-09 22:00 naive (= UTC) is before 2026-03-09 23:00 UTC (as_of_jst).
+    naive_lock = datetime(2026, 3, 9, 22, 0, 0)
+    rec = _ugh_forecast(locked_at_utc=naive_lock)
+    assert rec.locked_at_utc == naive_lock.replace(tzinfo=_UTC)
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — expected_close_change_bp finiteness (r2929053941)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+def test_forecast_record_expected_close_change_bp_non_finite_raises(bad_value: float) -> None:
+    """NaN/Inf in expected_close_change_bp must be rejected at record construction."""
+    with pytest.raises(ValidationError, match="expected_close_change_bp must be finite"):
+        _ugh_forecast(expected_close_change_bp=bad_value)
+
+
+def test_forecast_record_expected_close_change_bp_zero_accepted() -> None:
+    """Zero is a valid finite value for expected_close_change_bp (flat forecast)."""
+    rec = _baseline_forecast(StrategyKind.baseline_random_walk,
+                             forecast_direction=ForecastDirection.flat,
+                             expected_close_change_bp=0.0)
+    assert rec.expected_close_change_bp == 0.0
+
+
+def test_forecast_record_expected_close_change_bp_negative_accepted() -> None:
+    """Negative finite values are valid (downside forecast)."""
+    rec = _ugh_forecast(forecast_direction=ForecastDirection.down, expected_close_change_bp=-45.5)
+    assert rec.expected_close_change_bp == -45.5
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — UGH numeric features finiteness (r2929100992)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field", [
+    "q_strength", "s_q", "temporal_score", "grv_raw", "grv_lock",
+    "alignment", "e_star", "mismatch_px", "mismatch_sem", "conviction", "urgency",
+])
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+def test_forecast_record_ugh_numeric_feature_non_finite_raises(
+    field: str, bad_value: float
+) -> None:
+    """NaN/Inf in any UGH float diagnostic or projection output must be rejected."""
+    with pytest.raises(ValidationError, match="UGH numeric feature must be finite"):
+        _ugh_forecast(**{field: bad_value})
+
+
+def test_forecast_record_ugh_numeric_features_none_for_baseline_accepted() -> None:
+    """Baseline records correctly leave all UGH float fields as None."""
+    rec = _baseline_forecast(StrategyKind.baseline_random_walk)
+    for field in (
+        "q_strength", "s_q", "temporal_score", "grv_raw", "grv_lock",
+        "alignment", "e_star", "mismatch_px", "mismatch_sem", "conviction", "urgency",
+    ):
+        assert getattr(rec, field) is None
+
+
+@pytest.mark.parametrize("field", [
+    "q_strength", "s_q", "temporal_score", "grv_raw", "grv_lock",
+    "alignment", "e_star", "mismatch_px", "mismatch_sem", "conviction", "urgency",
+])
+def test_forecast_record_ugh_numeric_feature_finite_accepted(field: str) -> None:
+    """A finite float value is accepted for optional UGH float fields."""
+    rec = _ugh_forecast(**{field: 0.5})
+    assert getattr(rec, field) == pytest.approx(0.5)
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — error metric finiteness (r2929100995)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field", ["close_error_bp", "magnitude_error_bp", "mismatch_change_bp"])
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+def test_evaluation_record_error_metric_non_finite_raises(
+    field: str, bad_value: float
+) -> None:
+    """NaN/Inf in evaluation error metrics must be rejected."""
+    with pytest.raises(ValidationError, match="evaluation error metric must be finite"):
+        _evaluation(**{field: bad_value})
+
+
+@pytest.mark.parametrize("field", ["close_error_bp", "magnitude_error_bp", "mismatch_change_bp"])
+def test_evaluation_record_error_metric_none_accepted(field: str) -> None:
+    """None is valid when the metric is not applicable."""
+    rec = _evaluation(**{field: None})
+    assert getattr(rec, field) is None
+
+
+@pytest.mark.parametrize("field", ["close_error_bp", "magnitude_error_bp"])
+def test_evaluation_record_abs_error_metric_positive_accepted(field: str) -> None:
+    """A positive finite value is accepted for absolute error metrics."""
+    rec = _evaluation(**{field: 12.5})
+    assert getattr(rec, field) == pytest.approx(12.5)
+
+
+def test_evaluation_record_mismatch_change_bp_negative_accepted() -> None:
+    """mismatch_change_bp is signed and accepts negative finite values."""
+    rec = _evaluation(mismatch_change_bp=-12.5)
+    assert rec.mismatch_change_bp == pytest.approx(-12.5)
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — direction / bp sign consistency (r2929167108)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bp", [-10.0, -0.001, 0.0])
+def test_forecast_record_up_direction_non_positive_bp_raises(bp: float) -> None:
+    """forecast_direction='up' with non-positive bp must be rejected."""
+    with pytest.raises(ValidationError, match="forecast_direction='up' requires expected_close_change_bp > 0"):
+        _ugh_forecast(forecast_direction=ForecastDirection.up, expected_close_change_bp=bp)
+
+
+@pytest.mark.parametrize("bp", [10.0, 0.001, 0.0])
+def test_forecast_record_down_direction_non_negative_bp_raises(bp: float) -> None:
+    """forecast_direction='down' with non-negative bp must be rejected."""
+    with pytest.raises(ValidationError, match="forecast_direction='down' requires expected_close_change_bp < 0"):
+        _ugh_forecast(forecast_direction=ForecastDirection.down, expected_close_change_bp=bp)
+
+
+@pytest.mark.parametrize("bp", [10.0, -10.0, 0.001])
+def test_forecast_record_flat_direction_non_zero_bp_raises(bp: float) -> None:
+    """forecast_direction='flat' with non-zero bp must be rejected."""
+    with pytest.raises(ValidationError, match="forecast_direction='flat' requires expected_close_change_bp == 0"):
+        _ugh_forecast(forecast_direction=ForecastDirection.flat, expected_close_change_bp=bp)
+
+
+def test_forecast_record_up_direction_positive_bp_accepted() -> None:
+    rec = _ugh_forecast(forecast_direction=ForecastDirection.up, expected_close_change_bp=30.0)
+    assert rec.forecast_direction == ForecastDirection.up
+
+
+def test_forecast_record_down_direction_negative_bp_accepted() -> None:
+    rec = _ugh_forecast(forecast_direction=ForecastDirection.down, expected_close_change_bp=-30.0)
+    assert rec.forecast_direction == ForecastDirection.down
+
+
+def test_forecast_record_flat_direction_zero_bp_accepted() -> None:
+    rec = _baseline_forecast(StrategyKind.baseline_random_walk,
+                             forecast_direction=ForecastDirection.flat,
+                             expected_close_change_bp=0.0)
+    assert rec.forecast_direction == ForecastDirection.flat
+
+
+# ---------------------------------------------------------------------------
+# ExpectedRange — positive price domain (r2929167112)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — baseline range_hit must be None (r2930231140)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("strategy_kind", [
+    StrategyKind.baseline_random_walk,
+    StrategyKind.baseline_prev_day_direction,
+    StrategyKind.baseline_simple_technical,
+])
+@pytest.mark.parametrize("range_hit_value", [True, False])
+def test_evaluation_record_baseline_range_hit_non_none_raises(
+    strategy_kind: StrategyKind, range_hit_value: bool
+) -> None:
+    """Baselines carry no forecast envelope; range_hit must be None."""
+    with pytest.raises(
+        ValidationError,
+        match="range_hit=None",
+    ):
+        _evaluation(strategy_kind=strategy_kind, range_hit=range_hit_value)
+
+
+@pytest.mark.parametrize("strategy_kind", [
+    StrategyKind.baseline_random_walk,
+    StrategyKind.baseline_prev_day_direction,
+    StrategyKind.baseline_simple_technical,
+])
+def test_evaluation_record_baseline_range_hit_none_accepted(
+    strategy_kind: StrategyKind,
+) -> None:
+    """range_hit=None is valid for all baseline strategy kinds."""
+    rec = _evaluation(strategy_kind=strategy_kind, range_hit=None)
+    assert rec.range_hit is None
+
+
+# ---------------------------------------------------------------------------
+# MarketDataProvenance — retrieved_at_utc UTC canonicalization (r2930231146)
+# ---------------------------------------------------------------------------
+
+
+def test_market_data_provenance_naive_retrieved_at_utc_stored_as_utc_aware() -> None:
+    """A naive retrieved_at_utc is treated as UTC and stored as a UTC-aware datetime."""
+    naive = datetime(2026, 3, 10, 8, 0, 0)
+    p = MarketDataProvenance(
+        vendor="test", feed_name="feed", price_type="mid",
+        resolution="1d", timezone="Asia/Tokyo", retrieved_at_utc=naive,
+    )
+    assert p.retrieved_at_utc.tzinfo is not None
+    assert p.retrieved_at_utc == naive.replace(tzinfo=timezone.utc)
+
+
+def test_market_data_provenance_jst_aware_retrieved_at_utc_canonicalized() -> None:
+    """A JST-aware retrieved_at_utc is stored as its UTC equivalent."""
+    jst_dt = datetime(2026, 3, 10, 8, 0, 0, tzinfo=_JST)   # 08:00 JST = 23:00 UTC prev day
+    p = MarketDataProvenance(
+        vendor="test", feed_name="feed", price_type="mid",
+        resolution="1d", timezone="Asia/Tokyo", retrieved_at_utc=jst_dt,
+    )
+    assert p.retrieved_at_utc == datetime(2026, 3, 9, 23, 0, 0, tzinfo=timezone.utc)
+
+
+def test_market_data_provenance_utc_aware_stored_unchanged() -> None:
+    """A UTC-aware retrieved_at_utc is stored as-is."""
+    utc_dt = datetime(2026, 3, 10, 8, 0, 0, tzinfo=timezone.utc)
+    p = MarketDataProvenance(
+        vendor="test", feed_name="feed", price_type="mid",
+        resolution="1d", timezone="Asia/Tokyo", retrieved_at_utc=utc_dt,
+    )
+    assert p.retrieved_at_utc == utc_dt
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — locked_at_utc UTC canonicalization (r2930285070)
+# ---------------------------------------------------------------------------
+
+
+def test_forecast_record_locked_at_utc_utc_aware_stored_unchanged() -> None:
+    """UTC-aware locked_at_utc is stored as-is."""
+    rec = _ugh_forecast(locked_at_utc=_LOCKED_AT)
+    assert rec.locked_at_utc == _LOCKED_AT
+    assert rec.locked_at_utc.tzinfo is not None
+
+
+def test_forecast_record_locked_at_utc_jst_aware_canonicalized_to_utc() -> None:
+    """JST-aware locked_at_utc is converted to its UTC equivalent."""
+    # 2026-03-09 07:00 JST == 2026-03-08 22:00 UTC (well before window open)
+    jst_lock = datetime(2026, 3, 9, 7, 0, 0, tzinfo=_JST)
+    expected_utc = datetime(2026, 3, 8, 22, 0, 0, tzinfo=_UTC)
+    rec = _ugh_forecast(locked_at_utc=jst_lock)
+    assert rec.locked_at_utc == expected_utc
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — evaluated_at_utc UTC canonicalization (r2930285075)
+# ---------------------------------------------------------------------------
+
+
+def test_evaluation_record_naive_evaluated_at_utc_stored_as_utc_aware() -> None:
+    """Naive evaluated_at_utc is treated as UTC and stored as UTC-aware."""
+    naive_ts = datetime(2026, 3, 10, 9, 0, 0)
+    rec = _evaluation(evaluated_at_utc=naive_ts)
+    assert rec.evaluated_at_utc == naive_ts.replace(tzinfo=_UTC)
+    assert rec.evaluated_at_utc.tzinfo is not None
+
+
+def test_evaluation_record_jst_aware_evaluated_at_utc_canonicalized() -> None:
+    """JST-aware evaluated_at_utc is stored as its UTC equivalent."""
+    jst_ts = datetime(2026, 3, 10, 18, 0, 0, tzinfo=_JST)   # 18:00 JST = 09:00 UTC
+    rec = _evaluation(evaluated_at_utc=jst_ts)
+    assert rec.evaluated_at_utc == datetime(2026, 3, 10, 9, 0, 0, tzinfo=_UTC)
+
+
+def test_evaluation_record_utc_aware_evaluated_at_utc_stored_unchanged() -> None:
+    """UTC-aware evaluated_at_utc is stored as-is."""
+    rec = _evaluation(evaluated_at_utc=_NOW)
+    assert rec.evaluated_at_utc == _NOW
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — UGH range_hit required (r2930345104)
+# ---------------------------------------------------------------------------
+
+
+def test_evaluation_record_ugh_range_hit_none_raises() -> None:
+    """UGH evaluations must have a non-None range_hit."""
+    with pytest.raises(
+        ValidationError,
+        match="strategy_kind='ugh' requires range_hit to be set",
+    ):
+        _evaluation(range_hit=None)
+
+
+@pytest.mark.parametrize("range_hit_value", [True, False])
+def test_evaluation_record_ugh_range_hit_set_accepted(range_hit_value: bool) -> None:
+    """range_hit=True or False is valid for UGH evaluations."""
+    rec = _evaluation(range_hit=range_hit_value)
+    assert rec.range_hit is range_hit_value
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — disconfirmer_explained invalid on directional hit (r2930345109)
+# ---------------------------------------------------------------------------
+
+
+def test_evaluation_record_disconfirmer_explained_true_on_hit_raises() -> None:
+    """disconfirmer_explained=True with direction_hit=True must be rejected."""
+    with pytest.raises(
+        ValidationError,
+        match="disconfirmer_explained=True is invalid when direction_hit=True",
+    ):
+        _evaluation(direction_hit=True, disconfirmer_explained=True, disconfirmers_hit=("vol_spike",))
+
+
+def test_evaluation_record_disconfirmer_explained_true_on_miss_accepted() -> None:
+    """disconfirmer_explained=True with direction_hit=False (a miss) is valid."""
+    rec = _evaluation(direction_hit=False, disconfirmer_explained=True, disconfirmers_hit=("vol_spike",))
+    assert rec.disconfirmer_explained is True
+    assert rec.direction_hit is False
+
+
+def test_evaluation_record_disconfirmer_explained_false_on_hit_accepted() -> None:
+    """disconfirmer_explained=False with direction_hit=True is valid."""
+    rec = _evaluation(direction_hit=True, disconfirmer_explained=False)
+    assert rec.disconfirmer_explained is False
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — absolute error metrics non-negative (r2930408765)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field", ["close_error_bp", "magnitude_error_bp"])
+@pytest.mark.parametrize("bad_value", [-0.001, -10.0])
+def test_evaluation_record_abs_error_metric_negative_raises(
+    field: str, bad_value: float
+) -> None:
+    """Negative values for absolute error metrics must be rejected."""
+    with pytest.raises(ValidationError, match="evaluation error metric must be non-negative"):
+        _evaluation(**{field: bad_value})
+
+
+@pytest.mark.parametrize("field", ["close_error_bp", "magnitude_error_bp"])
+def test_evaluation_record_abs_error_metric_zero_accepted(field: str) -> None:
+    """Zero is a valid absolute error (exact prediction)."""
+    rec = _evaluation(**{field: 0.0})
+    assert getattr(rec, field) == 0.0
+
+
+def test_evaluation_record_mismatch_change_bp_negative_not_rejected() -> None:
+    """mismatch_change_bp is signed; negative values must not be rejected."""
+    rec = _evaluation(mismatch_change_bp=-50.0)
+    assert rec.mismatch_change_bp == pytest.approx(-50.0)
