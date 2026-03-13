@@ -11,13 +11,14 @@ def _write_event(
     body: str = "P1 please set range_hit to None",
     updated_at: str = "2024-01-01T00:00:00Z",
     reviewer: str = "bob",
+    head_repo: str = "acme/repo",
 ) -> None:
     payload = {
         "repository": {"full_name": "acme/repo"},
         "pull_request": {
             "number": 12,
             "base": {"ref": "main"},
-            "head": {"ref": "feature", "sha": "abc", "repo": {"full_name": "acme/repo"}},
+            "head": {"ref": "feature", "sha": "abc", "repo": {"full_name": head_repo}},
         },
         "comment": {
             "id": 44,
@@ -88,6 +89,14 @@ class _FakeGithubClient:
         del repo
         del pr_number
         self.markers.add(body.splitlines()[-1])
+
+class _FailingReplyGithubClient(_FakeGithubClient):
+    def reply_to_review_comment(self, repo: str, comment_id: int, body: str) -> None:
+        del repo
+        del comment_id
+        del body
+        raise PermissionError("403 forbidden")
+
 
 
 def _set_common_env(monkeypatch, tmp_path: Path, event_path: Path) -> None:
@@ -391,3 +400,40 @@ def test_propose_only_mode_works_without_allowlist(tmp_path: Path, monkeypatch) 
 
     result = bot.run()
     assert result.reason == "proposed-only"
+
+def test_fork_propose_only_reply_failure_is_non_fatal(tmp_path: Path, monkeypatch) -> None:
+    _FailingReplyGithubClient.markers = set()
+    event_path = tmp_path / "event.json"
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    _write_event(event_path, reviewer="alice", head_repo="fork/repo")
+
+    monkeypatch.setattr(bot, "GithubClient", _FailingReplyGithubClient)
+
+    _set_common_env(monkeypatch, tmp_path, event_path)
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+
+    result = bot.run()
+    assert result.reason == "proposed-only"
+    assert result.pushed is False
+
+
+def test_same_repo_propose_only_reply_failure_remains_fatal(tmp_path: Path, monkeypatch) -> None:
+    _FailingReplyGithubClient.markers = set()
+    event_path = tmp_path / "event.json"
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    _write_event(event_path, reviewer="alice")
+
+    monkeypatch.setattr(bot, "GithubClient", _FailingReplyGithubClient)
+
+    _set_common_env(monkeypatch, tmp_path, event_path)
+    monkeypatch.setenv("BOT_MODE", "propose_only")
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+
+    try:
+        bot.run()
+    except PermissionError as exc:
+        assert "403" in str(exc)
+    else:
+        raise AssertionError("expected PermissionError")

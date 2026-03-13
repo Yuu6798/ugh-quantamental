@@ -122,6 +122,7 @@ def run() -> ProcessResult:
 
     replied = False
     if client is not None:
+        nonfatal_comment_writes = (reason != "pushed") and (classification == Classification.propose_only) and (not context.same_repo)
         if reason == "pushed" and config.bot_mode == "apply_push_and_resolve" and config.auto_resolve and context.review_comment_node_id:
             client.resolve_review_thread(context.review_comment_node_id)
         if reason == "pushed" and config.reply_on_success:
@@ -134,8 +135,12 @@ def run() -> ProcessResult:
         if reason == "pushed" and not replied:
             client.persist_marker(context, marker)
         if reason != "pushed" and config.reply_on_failure:
-            _reply(client, context, f"ℹ️ Auto-fix processed (`{rule.rule_id}`): {reason}. No push was performed.\n\n{marker}")
-            replied = True
+            try:
+                _reply(client, context, f"ℹ️ Auto-fix processed (`{rule.rule_id}`): {reason}. No push was performed.\n\n{marker}")
+                replied = True
+            except Exception:
+                if not nonfatal_comment_writes:
+                    raise
 
     state.mark(key)
     return ProcessResult(key, classification, rule.rule_id, changed, validation_ok, pushed, replied, reason)
