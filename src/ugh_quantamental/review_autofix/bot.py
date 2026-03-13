@@ -121,6 +121,8 @@ def run() -> ProcessResult:
                 f"✅ Auto-fix applied by rule `{rule.rule_id}` and pushed to `{context.head_ref}`.\n\n{marker}",
             )
             replied = True
+        if reason == "pushed" and not replied:
+            client.persist_marker(context, marker)
         if reason != "pushed" and config.reply_on_failure:
             _reply(client, context, f"ℹ️ Auto-fix processed (`{rule.rule_id}`): {reason}. No push was performed.\n\n{marker}")
             replied = True

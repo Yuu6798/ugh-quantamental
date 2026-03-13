@@ -45,6 +45,10 @@ class _FakeGithubClient:
         del context
         return marker in self.markers
 
+    def persist_marker(self, context, marker: str) -> None:
+        del context
+        self.markers.add(marker)
+
     def reply_to_review_comment(self, repo: str, comment_id: int, body: str) -> None:
         del repo
         del comment_id
@@ -153,6 +157,31 @@ def test_durable_duplicate_detection_across_runs(tmp_path: Path, monkeypatch) ->
 
     _set_common_env(monkeypatch, tmp_path, event_path)
     monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state-1.json"))
+
+    first = bot.run()
+    assert first.reason == "pushed"
+
+    monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state-2.json"))
+    second = bot.run()
+    assert second.reason == "duplicate"
+
+
+def test_durable_marker_persists_when_reply_on_success_disabled(tmp_path: Path, monkeypatch) -> None:
+    _FakeGithubClient.markers = set()
+    event_path = tmp_path / "event.json"
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    _write_event(event_path, reviewer="alice")
+
+    monkeypatch.setattr(bot, "GithubClient", _FakeGithubClient)
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    _set_common_env(monkeypatch, tmp_path, event_path)
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setenv("REPLY_ON_SUCCESS", "false")
     monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state-1.json"))
 
     first = bot.run()

@@ -65,12 +65,14 @@ class GithubClient:
             for comment in self.list_review_comments(context.repository, context.pr_number):
                 if comment.get("in_reply_to_id") == context.review_comment_id and marker in comment.get("body", ""):
                     return True
-            return False
 
         for comment in self.list_issue_comments(context.repository, context.pr_number):
             if marker in comment.get("body", ""):
                 return True
         return False
+
+    def persist_marker(self, context: ReviewContext, marker: str) -> None:
+        self.reply_to_pr(context.repository, context.pr_number, marker)
 
     def reply_to_review_comment(self, repo: str, comment_id: int, body: str) -> None:
         self._request("POST", f"/repos/{repo}/pulls/comments/{comment_id}/replies", {"body": body})

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,18 +87,40 @@ class ImportCleanupRule(BaseRule):
             return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", None, "", ""), False, "no file")
         file_path = Path(context.path)
         before = file_path.read_text(encoding="utf-8")
-        lines = [line for line in before.splitlines()]
-        cleaned: list[str] = []
-        for line in lines:
-            if line.strip().startswith("import ") and "  " in line:
-                cleaned.append(" ".join(line.split()))
-            else:
-                cleaned.append(line)
-        after = "\n".join(cleaned) + ("\n" if before.endswith("\n") else "")
-        changed = before != after
-        if changed:
-            file_path.write_text(after, encoding="utf-8")
-        return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), changed, "applied" if changed else "no-op")
+        try:
+            tree = ast.parse(before)
+        except SyntaxError:
+            return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "syntax-error")
+
+        import_lines: set[int] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import) and getattr(node, "lineno", None) is not None:
+                if getattr(node, "end_lineno", node.lineno) == node.lineno:
+                    import_lines.add(node.lineno)
+
+        if not import_lines:
+            return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "no-op")
+
+        lines = before.splitlines()
+        changed = False
+        for line_no in sorted(import_lines):
+            idx = line_no - 1
+            if idx >= len(lines):
+                continue
+            line = lines[idx]
+            if "  " not in line:
+                continue
+            updated = " ".join(line.split())
+            if updated != line:
+                lines[idx] = updated
+                changed = True
+
+        if not changed:
+            return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "no-op")
+
+        after = "\n".join(lines) + ("\n" if before.endswith("\n") else "")
+        file_path.write_text(after, encoding="utf-8")
+        return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), True, "applied")
 
 
 class RuleRegistry:
