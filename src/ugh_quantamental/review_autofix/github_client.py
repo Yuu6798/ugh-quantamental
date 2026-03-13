@@ -80,6 +80,39 @@ class GithubClient:
     def reply_to_pr(self, repo: str, pr_number: int, body: str) -> None:
         self._request("POST", f"/repos/{repo}/issues/{pr_number}/comments", {"body": body})
 
+    def _graphql(self, query: str, variables: dict[str, str]) -> dict:
+        return self._request("POST", "/graphql", {"query": query, "variables": variables})
+
+    def resolve_review_thread(self, comment_node_id: str) -> bool:
+        query = """
+        query($commentId: ID!) {
+          node(id: $commentId) {
+            ... on PullRequestReviewComment {
+              pullRequestReviewThread {
+                id
+                isResolved
+              }
+            }
+          }
+        }
+        """
+        response = self._graphql(query, {"commentId": comment_node_id})
+        thread = (((response.get("data") or {}).get("node") or {}).get("pullRequestReviewThread") or {})
+        thread_id = thread.get("id")
+        if not thread_id or thread.get("isResolved"):
+            return False
+
+        mutation = """
+        mutation($threadId: ID!) {
+          resolveReviewThread(input: {threadId: $threadId}) {
+            thread { id isResolved }
+          }
+        }
+        """
+        result = self._graphql(mutation, {"threadId": thread_id})
+        resolved = (((result.get("data") or {}).get("resolveReviewThread") or {}).get("thread") or {}).get("isResolved")
+        return bool(resolved)
+
 
 def load_event_from_env() -> GithubEvent:
     path = os.environ["GITHUB_EVENT_PATH"]
@@ -140,6 +173,7 @@ def build_review_context(event: GithubEvent) -> ReviewContext:
             line=comment.get("line"),
             start_line=comment.get("start_line"),
             version_discriminator=_build_version_discriminator(comment, body),
+            review_comment_node_id=comment.get("node_id"),
         )
 
     review = payload["review"]

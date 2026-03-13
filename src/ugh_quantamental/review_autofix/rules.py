@@ -45,16 +45,27 @@ class NoneNormalizationRule(BaseRule):
         updated = re.sub(r"^(\s*range_hit\s*=\s*)([^#\n]+)", r"\1None", line)
         return updated, updated != line
 
+    def _fallback_review_body_line(self, lines: list[str]) -> int | None:
+        candidates = [idx for idx, line in enumerate(lines, start=1) if re.match(r"^\s*range_hit\s*=", line)]
+        if len(candidates) == 1:
+            return candidates[0]
+        return None
+
     def apply(self, context: ReviewContext) -> RuleApplication:
         if context.path is None:
             return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", None, "", ""), False, "no file")
         target_line = context.line or context.start_line
-        if target_line is None or target_line <= 0:
-            return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "no reviewed line")
-
         file_path = Path(context.path)
         before = file_path.read_text(encoding="utf-8")
         lines = before.splitlines(keepends=True)
+
+        if target_line is None or target_line <= 0:
+            if context.kind.value != "review_body":
+                return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "no reviewed line")
+            fallback = self._fallback_review_body_line(lines)
+            if fallback is None:
+                return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "no unique fallback")
+            target_line = fallback
         if target_line > len(lines):
             return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "reviewed line out of range")
 

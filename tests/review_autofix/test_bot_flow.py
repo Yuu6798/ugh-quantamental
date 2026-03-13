@@ -29,6 +29,7 @@ def _write_event(
             "line": 1,
             "start_line": 1,
             "updated_at": updated_at,
+            "node_id": "PRRC_node_44",
         },
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -36,6 +37,7 @@ def _write_event(
 
 class _FakeGithubClient:
     markers: set[str] = set()
+    resolved_node_ids: list[str] = []
 
     def __init__(self, token: str, api_url: str = "https://api.github.com") -> None:
         del token
@@ -48,6 +50,10 @@ class _FakeGithubClient:
     def persist_marker(self, context, marker: str) -> None:
         del context
         self.markers.add(marker)
+
+    def resolve_review_thread(self, comment_node_id: str) -> bool:
+        self.resolved_node_ids.append(comment_node_id)
+        return True
 
     def reply_to_review_comment(self, repo: str, comment_id: int, body: str) -> None:
         del repo
@@ -215,6 +221,29 @@ def test_edited_comment_reprocesses_with_new_version(tmp_path: Path, monkeypatch
     monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state-2.json"))
     second = bot.run()
     assert second.reason != "duplicate"
+
+
+def test_apply_push_and_resolve_mode_resolves_thread(tmp_path: Path, monkeypatch) -> None:
+    _FakeGithubClient.markers = set()
+    _FakeGithubClient.resolved_node_ids = []
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="alice")
+
+    monkeypatch.setattr(bot, "GithubClient", _FakeGithubClient)
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    _set_common_env(monkeypatch, tmp_path, event_path)
+    monkeypatch.setenv("BOT_MODE", "apply_push_and_resolve")
+    monkeypatch.setenv("AUTO_RESOLVE", "true")
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+
+    result = bot.run()
+    assert result.reason == "pushed"
+    assert _FakeGithubClient.resolved_node_ids == ["PRRC_node_44"]
 
 
 def test_invalid_bot_mode_fails_closed(tmp_path: Path, monkeypatch) -> None:

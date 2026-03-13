@@ -130,3 +130,50 @@ def test_import_rule_selected_by_explicit_rule_id() -> None:
     rule = registry.match(context)
     assert rule is not None
     assert rule.rule_id == "import-cleanup"
+
+
+def test_none_rule_review_body_fallback_applies_without_line(tmp_path: Path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("x = 1\nrange_hit = 0.5\n", encoding="utf-8")
+    context = ReviewContext(
+        kind=ReviewKind.review_body,
+        repository="acme/repo",
+        pr_number=7,
+        review_id=99,
+        review_comment_id=None,
+        head_sha="sha",
+        base_ref="main",
+        head_ref="feature",
+        same_repo=True,
+        reviewer_login="reviewer",
+        body="file: sample.py\nset range_hit to None",
+        path=str(target),
+        diff_hunk=None,
+        line=None,
+        start_line=None,
+        version_discriminator="v",
+    )
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is True
+    assert target.read_text(encoding="utf-8") == "x = 1\nrange_hit = None\n"
+
+
+def test_none_rule_diff_comment_without_line_still_noop(tmp_path: Path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("range_hit = 0.5\n", encoding="utf-8")
+    context = _context("Please set range_hit to None", str(target), line=1)
+    context = ReviewContext(**{**context.__dict__, "line": None, "start_line": None})
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is False
+    assert result.details == "no reviewed line"
+    assert target.read_text(encoding="utf-8") == "range_hit = 0.5\n"

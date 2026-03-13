@@ -33,6 +33,7 @@ class ReviewContext:
     line: int | None
     start_line: int | None
     version_discriminator: str
+    review_comment_node_id: str | None = None
 
 
 @dataclass(frozen=True)

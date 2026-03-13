@@ -119,6 +119,8 @@ def run() -> ProcessResult:
 
     replied = False
     if client is not None:
+        if reason == "pushed" and config.bot_mode == "apply_push_and_resolve" and config.auto_resolve and context.review_comment_node_id:
+            client.resolve_review_thread(context.review_comment_node_id)
         if reason == "pushed" and config.reply_on_success:
             _reply(
                 client,
