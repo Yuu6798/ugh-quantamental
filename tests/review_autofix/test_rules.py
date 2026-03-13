@@ -76,3 +76,37 @@ def test_import_rule_does_not_modify_multiline_string(tmp_path: Path) -> None:
     result = rule.apply(context)
     assert result.changed is True
     assert target.read_text(encoding="utf-8") == "doc = \"\"\"\nimport  fake\n\"\"\"\nimport os\n"
+
+
+def test_import_rule_preserves_indentation_inside_function(tmp_path: Path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text(
+        "def f():\n    import  os\n    return os.name\n",
+        encoding="utf-8",
+    )
+    context = _context("lint: sort imports", str(target))
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is True
+    assert target.read_text(encoding="utf-8") == "def f():\n    import os\n    return os.name\n"
+
+
+def test_import_rule_preserves_indentation_inside_try_block(tmp_path: Path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text(
+        "try:\n    import  os\nexcept Exception:\n    pass\n",
+        encoding="utf-8",
+    )
+    context = _context("lint: sort imports", str(target))
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is True
+    assert target.read_text(encoding="utf-8") == "try:\n    import os\nexcept Exception:\n    pass\n"

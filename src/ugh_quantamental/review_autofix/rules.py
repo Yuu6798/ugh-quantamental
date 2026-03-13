@@ -110,7 +110,9 @@ class ImportCleanupRule(BaseRule):
             line = lines[idx]
             if "  " not in line:
                 continue
-            updated = " ".join(line.split())
+            leading = line[: len(line) - len(line.lstrip())]
+            stripped = line.lstrip()
+            updated = leading + " ".join(stripped.split())
             if updated != line:
                 lines[idx] = updated
                 changed = True
