@@ -123,7 +123,10 @@ def run() -> ProcessResult:
     if client is not None:
         nonfatal_comment_writes = (reason != "pushed") and (classification == Classification.propose_only) and (not context.same_repo)
         if reason == "pushed" and config.bot_mode == "apply_push_and_resolve" and config.auto_resolve and context.review_comment_node_id:
-            client.resolve_review_thread(context.review_comment_node_id)
+            try:
+                client.resolve_review_thread(context.review_comment_node_id)
+            except Exception:
+                logging.exception("failed to resolve review thread")
         if reason == "pushed" and config.reply_on_success:
             _reply(
                 client,
