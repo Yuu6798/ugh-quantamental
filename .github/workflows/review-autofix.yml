@@ -20,33 +20,46 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - name: Check out PR head branch
+      - name: Check out trusted base revision
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          path: trusted-bot
+
+      - name: Check out PR head branch as data workspace
         uses: actions/checkout@v4
         with:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
+          path: pr-head
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: pip
-          cache-dependency-path: pyproject.toml
+          cache-dependency-path: trusted-bot/pyproject.toml
 
       - name: Install dependencies
+        working-directory: trusted-bot
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
           python -m pip install pytest ruff
 
       - name: Configure git author
+        working-directory: pr-head
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Run review autofix bot
+        working-directory: pr-head
         env:
+          TRUSTED_SRC: ${{ github.workspace }}/trusted-bot/src
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BOT_MODE: ${{ vars.BOT_MODE || 'detect_only' }}
           TARGET_REVIEWERS: ${{ vars.TARGET_REVIEWERS || '' }}
@@ -62,4 +75,13 @@ jobs:
           REPLY_ON_FAILURE: ${{ vars.REPLY_ON_FAILURE || 'true' }}
           AUTO_RESOLVE: ${{ vars.AUTO_RESOLVE || 'false' }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
-        run: python -m ugh_quantamental.review_autofix.bot
+        run: |
+          python - <<'PY'
+          import os
+          import runpy
+          import sys
+
+          trusted_src = os.environ["TRUSTED_SRC"]
+          sys.path = [trusted_src, *[p for p in sys.path if p not in {"", "."}]]
+          runpy.run_module("ugh_quantamental.review_autofix.bot", run_name="__main__")
+          PY
