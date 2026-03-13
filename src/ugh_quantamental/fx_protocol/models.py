@@ -401,6 +401,24 @@ class OutcomeRecord(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _validate_event_consistency(self) -> OutcomeRecord:
+        """Enforce logical consistency between event_happened and event_tags.
+
+        ``event_happened=True`` with no tags and ``event_happened=False`` with non-empty
+        tags are both contradictory and must be rejected.
+        """
+        if self.event_happened and not self.event_tags:
+            raise ValueError(
+                "event_happened=True requires at least one entry in event_tags"
+            )
+        if not self.event_happened and self.event_tags:
+            raise ValueError(
+                "event_happened=False must have empty event_tags; "
+                f"got {list(self.event_tags)}"
+            )
+        return self
+
 
 class EvaluationRecord(BaseModel):
     """Atomic diagnostic evaluation joining a ForecastRecord with an OutcomeRecord.
@@ -464,4 +482,17 @@ class EvaluationRecord(BaseModel):
                     f"baseline strategy_kind='{self.strategy_kind.value}' must not include "
                     f"UGH-only evaluation fields: {set_fields}"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_disconfirmer_consistency(self) -> EvaluationRecord:
+        """Require at least one fired disconfirmer before marking disconfirmer_explained.
+
+        ``disconfirmer_explained=True`` with an empty ``disconfirmers_hit`` tuple is
+        logically impossible and would corrupt miss-attribution summaries.
+        """
+        if self.disconfirmer_explained is True and not self.disconfirmers_hit:
+            raise ValueError(
+                "disconfirmer_explained=True requires at least one entry in disconfirmers_hit"
+            )
         return self

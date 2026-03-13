@@ -920,3 +920,67 @@ def test_evaluation_record_ugh_allows_all_diagnostic_fields() -> None:
     assert rec.mismatch_change_bp == 3.5
     assert rec.realized_state_proxy == "fire"
     assert rec.actual_state_change is False
+
+
+# ---------------------------------------------------------------------------
+# OutcomeRecord — event flag / tags consistency (r2929027370)
+# ---------------------------------------------------------------------------
+
+
+def test_outcome_record_event_happened_true_with_empty_tags_raises() -> None:
+    """event_happened=True with no tags must be rejected."""
+    with pytest.raises(ValidationError, match="event_happened=True requires at least one entry"):
+        _outcome(event_happened=True, event_tags=())
+
+
+def test_outcome_record_event_happened_false_with_tags_raises() -> None:
+    """event_happened=False with non-empty tags must be rejected."""
+    with pytest.raises(ValidationError, match="event_happened=False must have empty event_tags"):
+        _outcome(event_happened=False, event_tags=(EventTag.fomc,))
+
+
+def test_outcome_record_event_happened_true_with_tags_accepted() -> None:
+    """event_happened=True with matching tags is valid."""
+    rec = _outcome(event_happened=True, event_tags=(EventTag.fomc,))
+    assert rec.event_happened is True
+    assert EventTag.fomc in rec.event_tags
+
+
+def test_outcome_record_event_happened_false_with_empty_tags_accepted() -> None:
+    """event_happened=False with empty tags is valid (default state)."""
+    rec = _outcome(event_happened=False, event_tags=())
+    assert rec.event_happened is False
+    assert rec.event_tags == ()
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — disconfirmer consistency (r2929027374)
+# ---------------------------------------------------------------------------
+
+
+def test_evaluation_record_disconfirmer_explained_without_fired_disconfirmers_raises() -> None:
+    """disconfirmer_explained=True with empty disconfirmers_hit must be rejected."""
+    with pytest.raises(
+        ValidationError,
+        match="disconfirmer_explained=True requires at least one entry in disconfirmers_hit",
+    ):
+        _evaluation(disconfirmer_explained=True, disconfirmers_hit=())
+
+
+def test_evaluation_record_disconfirmer_explained_with_fired_disconfirmers_accepted() -> None:
+    """disconfirmer_explained=True with at least one fired disconfirmer is valid."""
+    rec = _evaluation(disconfirmer_explained=True, disconfirmers_hit=("vol_spike",))
+    assert rec.disconfirmer_explained is True
+    assert "vol_spike" in rec.disconfirmers_hit
+
+
+def test_evaluation_record_disconfirmer_explained_false_with_empty_disconfirmers_accepted() -> None:
+    """disconfirmer_explained=False with no fired disconfirmers is valid."""
+    rec = _evaluation(disconfirmer_explained=False, disconfirmers_hit=())
+    assert rec.disconfirmer_explained is False
+
+
+def test_evaluation_record_disconfirmer_explained_none_with_empty_disconfirmers_accepted() -> None:
+    """disconfirmer_explained=None (unknown) with no fired disconfirmers is valid."""
+    rec = _evaluation(disconfirmer_explained=None, disconfirmers_hit=())
+    assert rec.disconfirmer_explained is None
