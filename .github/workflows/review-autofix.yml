@@ -1,0 +1,59 @@
+name: Review Autofix Bot
+
+on:
+  pull_request_review_comment:
+    types: [created, edited]
+  pull_request_review:
+    types: [submitted, edited]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  review-autofix:
+    if: github.event_name != 'pull_request_review' || github.event.review.state != 'approved'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out PR head branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pytest ruff
+
+      - name: Configure git author
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Run review autofix bot
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BOT_MODE: ${{ vars.BOT_MODE || 'detect_only' }}
+          TARGET_REVIEWERS: ${{ vars.TARGET_REVIEWERS || '' }}
+          DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+          ALLOW_PUSH_ON_FORK: ${{ vars.ALLOW_PUSH_ON_FORK || 'false' }}
+          VALIDATION_FORMAT_COMMANDS: ${{ vars.VALIDATION_FORMAT_COMMANDS || '' }}
+          VALIDATION_LINT_COMMANDS: ${{ vars.VALIDATION_LINT_COMMANDS || 'ruff check .' }}
+          VALIDATION_TYPECHECK_COMMANDS: ${{ vars.VALIDATION_TYPECHECK_COMMANDS || '' }}
+          VALIDATION_TEST_COMMANDS: ${{ vars.VALIDATION_TEST_COMMANDS || 'pytest -q' }}
+          REPLY_ON_SUCCESS: ${{ vars.REPLY_ON_SUCCESS || 'true' }}
+          REPLY_ON_FAILURE: ${{ vars.REPLY_ON_FAILURE || 'true' }}
+          AUTO_RESOLVE: ${{ vars.AUTO_RESOLVE || 'false' }}
+          LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+        run: python -m ugh_quantamental.review_autofix.bot
