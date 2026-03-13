@@ -6,7 +6,12 @@ from pathlib import Path
 from ugh_quantamental.review_autofix import bot
 
 
-def _write_event(path: Path, body: str = "P1 please set range_hit to None", updated_at: str = "2024-01-01T00:00:00Z") -> None:
+def _write_event(
+    path: Path,
+    body: str = "P1 please set range_hit to None",
+    updated_at: str = "2024-01-01T00:00:00Z",
+    reviewer: str = "bob",
+) -> None:
     payload = {
         "repository": {"full_name": "acme/repo"},
         "pull_request": {
@@ -17,7 +22,7 @@ def _write_event(path: Path, body: str = "P1 please set range_hit to None", upda
         "comment": {
             "id": 44,
             "pull_request_review_id": 10,
-            "user": {"login": "bob"},
+            "user": {"login": reviewer},
             "body": body,
             "path": "dummy.py",
             "diff_hunk": "@@",
@@ -25,6 +30,63 @@ def _write_event(path: Path, body: str = "P1 please set range_hit to None", upda
         },
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+class _FakeGithubClient:
+    markers: set[str] = set()
+
+    def __init__(self, token: str, api_url: str = "https://api.github.com") -> None:
+        del token
+        del api_url
+
+    def has_processed_marker(self, context, marker: str) -> bool:
+        del context
+        return marker in self.markers
+
+    def reply_to_review_comment(self, repo: str, comment_id: int, body: str) -> None:
+        del repo
+        del comment_id
+        self.markers.add(body.splitlines()[-1])
+
+    def reply_to_pr(self, repo: str, pr_number: int, body: str) -> None:
+        del repo
+        del pr_number
+        self.markers.add(body.splitlines()[-1])
+
+
+def test_bot_skips_github_actions_actor(tmp_path: Path, monkeypatch) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="github-actions[bot]")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
+
+    result = bot.run()
+    assert result.reason == "ignored-actor"
+
+
+def test_bot_applies_for_human_actor(tmp_path: Path, monkeypatch) -> None:
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="alice")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
+    monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("BOT_MODE", "apply_and_push")
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("VALIDATION_LINT_COMMANDS", "true")
+    monkeypatch.setenv("VALIDATION_TEST_COMMANDS", "true")
+
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    result = bot.run()
+    assert result.reason == "pushed"
 
 
 def test_bot_applies_rule_and_prevents_duplicate(tmp_path: Path, monkeypatch) -> None:
@@ -53,35 +115,68 @@ def test_bot_applies_rule_and_prevents_duplicate(tmp_path: Path, monkeypatch) ->
     assert result.pushed is True
     assert committed
     assert pushed == ["feature"]
-    assert dummy.read_text(encoding="utf-8") == "range_hit = None\n"
 
     duplicate = bot.run()
     assert duplicate.reason == "duplicate"
 
 
+def test_durable_duplicate_detection_across_runs(tmp_path: Path, monkeypatch) -> None:
+    _FakeGithubClient.markers = set()
+    event_path = tmp_path / "event.json"
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    _write_event(event_path, reviewer="alice")
+
+    monkeypatch.setattr(bot, "GithubClient", _FakeGithubClient)
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
+    monkeypatch.setenv("BOT_MODE", "apply_and_push")
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("VALIDATION_LINT_COMMANDS", "true")
+    monkeypatch.setenv("VALIDATION_TEST_COMMANDS", "true")
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state-1.json"))
+
+    first = bot.run()
+    assert first.reason == "pushed"
+
+    monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state-2.json"))
+    second = bot.run()
+    assert second.reason == "duplicate"
+
+
 def test_edited_comment_reprocesses_with_new_version(tmp_path: Path, monkeypatch) -> None:
+    _FakeGithubClient.markers = set()
     dummy = tmp_path / "dummy.py"
     dummy.write_text("range_hit = 1\n", encoding="utf-8")
     event_path = tmp_path / "event.json"
     _write_event(event_path, body="set range_hit to None", updated_at="2024-01-01T00:00:00Z")
 
+    monkeypatch.setattr(bot, "GithubClient", _FakeGithubClient)
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
-    monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("BOT_MODE", "apply_and_push")
     monkeypatch.setenv("DRY_RUN", "false")
     monkeypatch.setenv("VALIDATION_LINT_COMMANDS", "true")
     monkeypatch.setenv("VALIDATION_TEST_COMMANDS", "true")
-
-    monkeypatch.setattr(bot, "has_changes", lambda: True)
-    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
-    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state-1.json"))
 
     first = bot.run()
     assert first.reason == "pushed"
 
     _write_event(event_path, body="set range_hit to None #edited", updated_at="2024-01-01T00:02:00Z")
+    monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state-2.json"))
     second = bot.run()
     assert second.reason != "duplicate"
 

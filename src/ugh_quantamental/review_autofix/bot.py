@@ -12,6 +12,16 @@ from .rules import RuleRegistry
 from .state_store import FileStateStore
 from .validator import run_validation
 
+_IGNORED_BOT_ACTORS = {"github-actions[bot]", "chatgpt-codex-connector[bot]"}
+
+
+def _is_ignored_actor(login: str | None) -> bool:
+    if not login:
+        return False
+    if login in _IGNORED_BOT_ACTORS:
+        return True
+    return login.endswith("[bot]")
+
 
 def _processed_key(context) -> str:
     if context.review_comment_id is not None:
@@ -24,6 +34,10 @@ def _reply(client: GithubClient, context, body: str) -> None:
         client.reply_to_review_comment(context.repository, context.review_comment_id, body)
     else:
         client.reply_to_pr(context.repository, context.pr_number, body)
+
+
+def _dedupe_marker(key: str) -> str:
+    return f"<!-- review-autofix-key:{key} -->"
 
 
 def run() -> ProcessResult:
@@ -39,8 +53,18 @@ def run() -> ProcessResult:
     except ValueError:
         return ProcessResult("event:invalid", Classification.skip, None, False, False, False, False, "invalid-event-payload")
 
+    if _is_ignored_actor(context.reviewer_login):
+        return ProcessResult("actor:ignored", Classification.skip, None, False, False, False, False, "ignored-actor")
+
     state = FileStateStore(os.getenv("STATE_STORE_PATH", ".autofix-bot/state.json"))
     key = _processed_key(context)
+    marker = _dedupe_marker(key)
+    token = os.getenv("GITHUB_TOKEN", "")
+    client = GithubClient(token) if token else None
+
+    if client is not None and client.has_processed_marker(context, marker):
+        return ProcessResult(key, Classification.skip, None, False, False, False, False, "duplicate")
+
     if state.seen(key):
         return ProcessResult(key, Classification.skip, None, False, False, False, False, "duplicate")
 
@@ -88,15 +112,17 @@ def run() -> ProcessResult:
                 else:
                     reason = "no-change-after-validation"
 
-    token = os.getenv("GITHUB_TOKEN", "")
     replied = False
-    if token:
-        client = GithubClient(token)
+    if client is not None:
         if reason == "pushed" and config.reply_on_success:
-            _reply(client, context, f"✅ Auto-fix applied by rule `{rule.rule_id}` and pushed to `{context.head_ref}`.")
+            _reply(
+                client,
+                context,
+                f"✅ Auto-fix applied by rule `{rule.rule_id}` and pushed to `{context.head_ref}`.\n\n{marker}",
+            )
             replied = True
         if reason != "pushed" and config.reply_on_failure:
-            _reply(client, context, f"ℹ️ Auto-fix processed (`{rule.rule_id}`): {reason}. No push was performed.")
+            _reply(client, context, f"ℹ️ Auto-fix processed (`{rule.rule_id}`): {reason}. No push was performed.\n\n{marker}")
             replied = True
 
     state.mark(key)

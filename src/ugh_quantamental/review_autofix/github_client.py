@@ -39,6 +39,26 @@ class GithubClient:
             raw = resp.read().decode("utf-8")
             return json.loads(raw) if raw else {}
 
+    def list_review_comments(self, repo: str, pr_number: int) -> tuple[dict, ...]:
+        payload = self._request("GET", f"/repos/{repo}/pulls/{pr_number}/comments?per_page=100")
+        return tuple(payload) if isinstance(payload, list) else ()
+
+    def list_issue_comments(self, repo: str, pr_number: int) -> tuple[dict, ...]:
+        payload = self._request("GET", f"/repos/{repo}/issues/{pr_number}/comments?per_page=100")
+        return tuple(payload) if isinstance(payload, list) else ()
+
+    def has_processed_marker(self, context: ReviewContext, marker: str) -> bool:
+        if context.review_comment_id is not None:
+            for comment in self.list_review_comments(context.repository, context.pr_number):
+                if comment.get("in_reply_to_id") == context.review_comment_id and marker in comment.get("body", ""):
+                    return True
+            return False
+
+        for comment in self.list_issue_comments(context.repository, context.pr_number):
+            if marker in comment.get("body", ""):
+                return True
+        return False
+
     def reply_to_review_comment(self, repo: str, comment_id: int, body: str) -> None:
         self._request("POST", f"/repos/{repo}/pulls/comments/{comment_id}/replies", {"body": body})
 
