@@ -5,7 +5,7 @@ def test_review_autofix_workflow_uses_trusted_execution_and_pr_data_checkout() -
     workflow = Path('.github/workflows/review-autofix.yml').read_text(encoding='utf-8')
     assert "name: Check out trusted base revision" in workflow
     assert 'repository: ${{ github.repository }}' in workflow
-    assert 'ref: ${{ github.sha }}' in workflow
+    assert 'ref: ${{ github.event.pull_request.base.sha || github.sha }}' in workflow
     assert 'path: trusted-bot' in workflow
     assert "name: Check out PR head branch as data workspace" in workflow
     assert 'repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}' in workflow

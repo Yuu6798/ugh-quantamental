@@ -5,7 +5,9 @@ import subprocess
 
 def has_changes() -> bool:
     proc = subprocess.run("git status --porcelain", shell=True, capture_output=True, text=True, check=False)
-    return bool(proc.stdout.strip())
+    lines = [line for line in proc.stdout.splitlines() if line.strip()]
+    commitworthy = [line for line in lines if ".autofix-bot/state.json" not in line]
+    return bool(commitworthy)
 
 
 def commit_changes(message: str) -> None:
@@ -14,4 +16,4 @@ def commit_changes(message: str) -> None:
 
 
 def push_head_branch(branch: str) -> None:
-    subprocess.run(f"git push origin HEAD:{branch}", shell=True, check=True)
+    subprocess.run(["git", "push", "origin", f"HEAD:{branch}"], check=True)
