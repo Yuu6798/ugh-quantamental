@@ -31,15 +31,26 @@ class NoneNormalizationRule(BaseRule):
 
     def match(self, context: ReviewContext) -> RuleMatch | None:
         text = context.body.lower()
-        if ("none" in text or "null" in text) and context.path:
-            return RuleMatch(
-                rule_id=self.rule_id,
-                priority=extract_priority(context.body),
-                target_file=context.path,
-                summary="normalize invalid nullable value to None",
-                validation_scope="project",
-            )
-        return None
+        explicit_rule_id = re.search(r"\brule\s*:\s*none-normalization\b", text) is not None
+        has_target_field = "range_hit" in text
+        has_none_request = re.search(r"\b(none|null)\b", text) is not None
+
+        if context.path is None:
+            return None
+
+        if context.kind.value == "review_body" and (context.line is None and context.start_line is None):
+            if not ((explicit_rule_id or has_target_field) and has_none_request):
+                return None
+        elif not has_none_request:
+            return None
+
+        return RuleMatch(
+            rule_id=self.rule_id,
+            priority=extract_priority(context.body),
+            target_file=context.path,
+            summary="normalize invalid nullable value to None",
+            validation_scope="project",
+        )
 
     def _replace_range_hit_assignment(self, line: str) -> tuple[str, bool]:
         updated = re.sub(r"^(\s*range_hit\s*=\s*)([^#\n]+)", r"\1None", line)
@@ -127,6 +138,8 @@ class ImportCleanupRule(BaseRule):
                 continue
             leading = line[: len(line) - len(line.lstrip())]
             stripped = line.lstrip()
+            if ";" in stripped:
+                continue
             updated = leading + " ".join(stripped.split())
             if updated != line:
                 lines[idx] = updated
