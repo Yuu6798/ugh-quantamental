@@ -291,6 +291,22 @@ class ForecastRecord(BaseModel):
             raise ValueError("expected_close_change_bp must be finite")
         return v
 
+    @field_validator(
+        "q_strength", "s_q", "temporal_score", "grv_raw", "grv_lock",
+        "alignment", "e_star", "mismatch_px", "mismatch_sem", "conviction", "urgency",
+    )
+    @classmethod
+    def _ugh_numeric_features_must_be_finite(cls, v: float | None) -> float | None:
+        """Reject NaN/Inf in UGH float diagnostics and projection outputs.
+
+        ``None`` is valid (baseline records leave these fields unset).  Any non-``None``
+        value must be finite so that deterministic replay comparisons and aggregate
+        metrics cannot be silently corrupted.
+        """
+        if v is not None and not math.isfinite(v):
+            raise ValueError("UGH numeric feature must be finite")
+        return v
+
     @model_validator(mode="after")
     def _validate_window_chronology(self) -> ForecastRecord:
         """Enforce canonical 08:00 JST forecast-window semantics and lock-before-open guarantee.
@@ -494,6 +510,18 @@ class EvaluationRecord(BaseModel):
     engine_version: str = Field(min_length=1)
     schema_version: str = Field(min_length=1)
     protocol_version: str = Field(min_length=1)
+
+    @field_validator("close_error_bp", "magnitude_error_bp", "mismatch_change_bp")
+    @classmethod
+    def _error_metrics_must_be_finite(cls, v: float | None) -> float | None:
+        """Reject NaN/Inf in evaluation error metrics.
+
+        A single non-finite value can poison aggregate reporting and break deterministic
+        regression comparisons.  ``None`` remains valid when the metric is not applicable.
+        """
+        if v is not None and not math.isfinite(v):
+            raise ValueError("evaluation error metric must be finite")
+        return v
 
     @model_validator(mode="after")
     def _validate_eval_strategy_consistency(self) -> EvaluationRecord:

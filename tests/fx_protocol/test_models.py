@@ -1046,3 +1046,70 @@ def test_forecast_record_expected_close_change_bp_negative_accepted() -> None:
     """Negative finite values are valid (downside forecast)."""
     rec = _ugh_forecast(expected_close_change_bp=-45.5)
     assert rec.expected_close_change_bp == -45.5
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — UGH numeric features finiteness (r2929100992)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field", [
+    "q_strength", "s_q", "temporal_score", "grv_raw", "grv_lock",
+    "alignment", "e_star", "mismatch_px", "mismatch_sem", "conviction", "urgency",
+])
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+def test_forecast_record_ugh_numeric_feature_non_finite_raises(
+    field: str, bad_value: float
+) -> None:
+    """NaN/Inf in any UGH float diagnostic or projection output must be rejected."""
+    with pytest.raises(ValidationError, match="UGH numeric feature must be finite"):
+        _ugh_forecast(**{field: bad_value})
+
+
+def test_forecast_record_ugh_numeric_features_none_for_baseline_accepted() -> None:
+    """Baseline records correctly leave all UGH float fields as None."""
+    rec = _baseline_forecast(StrategyKind.baseline_random_walk)
+    for field in (
+        "q_strength", "s_q", "temporal_score", "grv_raw", "grv_lock",
+        "alignment", "e_star", "mismatch_px", "mismatch_sem", "conviction", "urgency",
+    ):
+        assert getattr(rec, field) is None
+
+
+@pytest.mark.parametrize("field", [
+    "q_strength", "s_q", "temporal_score", "grv_raw", "grv_lock",
+    "alignment", "e_star", "mismatch_px", "mismatch_sem", "conviction", "urgency",
+])
+def test_forecast_record_ugh_numeric_feature_finite_accepted(field: str) -> None:
+    """A finite float value is accepted for optional UGH float fields."""
+    rec = _ugh_forecast(**{field: 0.5})
+    assert getattr(rec, field) == pytest.approx(0.5)
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — error metric finiteness (r2929100995)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field", ["close_error_bp", "magnitude_error_bp", "mismatch_change_bp"])
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+def test_evaluation_record_error_metric_non_finite_raises(
+    field: str, bad_value: float
+) -> None:
+    """NaN/Inf in evaluation error metrics must be rejected."""
+    with pytest.raises(ValidationError, match="evaluation error metric must be finite"):
+        _evaluation(**{field: bad_value})
+
+
+@pytest.mark.parametrize("field", ["close_error_bp", "magnitude_error_bp", "mismatch_change_bp"])
+def test_evaluation_record_error_metric_none_accepted(field: str) -> None:
+    """None is valid when the metric is not applicable."""
+    rec = _evaluation(**{field: None})
+    assert getattr(rec, field) is None
+
+
+@pytest.mark.parametrize("field", ["close_error_bp", "magnitude_error_bp", "mismatch_change_bp"])
+def test_evaluation_record_error_metric_finite_accepted(field: str) -> None:
+    """A finite float value is accepted for evaluation error metrics."""
+    rec = _evaluation(**{field: -12.5})
+    assert getattr(rec, field) == pytest.approx(-12.5)
