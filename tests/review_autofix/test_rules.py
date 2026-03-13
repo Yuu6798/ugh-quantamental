@@ -116,7 +116,8 @@ def test_import_rule_is_selectable() -> None:
     assert rule.rule_id == "import-cleanup"
 
 
-def test_import_rule_does_not_modify_multiline_string(tmp_path: Path) -> None:
+def test_import_rule_does_not_modify_multiline_string(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_text(
         "doc = \"\"\"\nimport  fake\n\"\"\"\nimport  os\n",
@@ -134,7 +135,8 @@ def test_import_rule_does_not_modify_multiline_string(tmp_path: Path) -> None:
 
 
 
-def test_import_rule_preserves_lf_newlines(tmp_path: Path) -> None:
+def test_import_rule_preserves_lf_newlines(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_text("import  os\nx = 1\n", encoding="utf-8")
     context = _context("lint: sort imports", str(target))
@@ -148,7 +150,8 @@ def test_import_rule_preserves_lf_newlines(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "import os\nx = 1\n"
 
 
-def test_import_rule_preserves_crlf_newlines(tmp_path: Path) -> None:
+def test_import_rule_preserves_crlf_newlines(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_bytes(b"import  os\r\nx = 1\r\n")
     context = _context("lint: sort imports", str(target))
@@ -161,7 +164,49 @@ def test_import_rule_preserves_crlf_newlines(tmp_path: Path) -> None:
     assert result.changed is True
     assert target.read_bytes() == b"import os\r\nx = 1\r\n"
 
-def test_import_rule_preserves_indentation_inside_function(tmp_path: Path) -> None:
+
+def test_import_rule_skips_symlink_target_resolving_outside_repo(tmp_path: Path, monkeypatch) -> None:
+    outside = tmp_path / "outside.py"
+    outside.write_text("import  os\n", encoding="utf-8")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    link = repo / "linked.py"
+    link.symlink_to(outside)
+
+    monkeypatch.chdir(repo)
+    context = _context("lint: sort imports", str(link))
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is False
+    assert result.details == "unsafe target"
+    assert outside.read_text(encoding="utf-8") == "import  os\n"
+
+
+def test_import_rule_skips_absolute_target_outside_repo_root(tmp_path: Path, monkeypatch) -> None:
+    outside = tmp_path / "outside.py"
+    outside.write_text("import  os\n", encoding="utf-8")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    context = _context("lint: sort imports", str(outside))
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is False
+    assert result.details == "unsafe target"
+    assert outside.read_text(encoding="utf-8") == "import  os\n"
+
+def test_import_rule_preserves_indentation_inside_function(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_text(
         "def f():\n    import  os\n    return os.name\n",
@@ -178,7 +223,8 @@ def test_import_rule_preserves_indentation_inside_function(tmp_path: Path) -> No
     assert target.read_text(encoding="utf-8") == "def f():\n    import os\n    return os.name\n"
 
 
-def test_import_rule_preserves_indentation_inside_try_block(tmp_path: Path) -> None:
+def test_import_rule_preserves_indentation_inside_try_block(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_text(
         "try:\n    import  os\nexcept Exception:\n    pass\n",

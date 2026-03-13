@@ -112,6 +112,18 @@ class NoneNormalizationRule(BaseRule):
 class ImportCleanupRule(BaseRule):
     rule_id = "import-cleanup"
 
+    def _resolve_safe_target(self, path: str) -> Path | None:
+        repo_root = Path.cwd().resolve()
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        try:
+            resolved = candidate.resolve(strict=True)
+            resolved.relative_to(repo_root)
+        except (FileNotFoundError, ValueError):
+            return None
+        return resolved
+
     def match(self, context: ReviewContext) -> RuleMatch | None:
         text = context.body.lower()
         explicit_rule_id = re.search(r"\brule\s*:\s*import-cleanup\b", text) is not None
@@ -131,7 +143,9 @@ class ImportCleanupRule(BaseRule):
     def apply(self, context: ReviewContext) -> RuleApplication:
         if context.path is None:
             return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", None, "", ""), False, "no file")
-        file_path = Path(context.path)
+        file_path = self._resolve_safe_target(context.path)
+        if file_path is None:
+            return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "unsafe target")
         with file_path.open(encoding="utf-8", newline="") as fh:
             before = fh.read()
         try:
