@@ -142,6 +142,50 @@ _BASELINE_STRATEGY_KINDS: frozenset[StrategyKind] = frozenset(
     }
 )
 
+# UGH-only diagnostic fields on EvaluationRecord (must be None for baselines).
+_UGH_EVAL_ONLY_FIELDS: tuple[str, ...] = (
+    "state_proxy_hit",
+    "mismatch_change_bp",
+    "realized_state_proxy",
+    "actual_state_change",
+)
+
+
+def _check_canonical_business_day_window(
+    start: datetime,
+    end: datetime,
+    start_name: str,
+    end_name: str,
+) -> None:
+    """Raise ``ValueError`` if *start*/*end* violate canonical 08:00 JST window rules.
+
+    Rules (in enforcement order):
+    1. Both endpoints must be at exactly 08:00:00.
+    2. Both must fall on Mon–Fri (ISO weekday 1–5).
+    3. *start* must be strictly before *end*.
+    4. *end* must be the immediately-following business-day 08:00 (Fri → Mon).
+    """
+    for field_name, value in ((start_name, start), (end_name, end)):
+        if (value.hour, value.minute, value.second, value.microsecond) != (8, 0, 0, 0):
+            raise ValueError(
+                f"{field_name} must be at exactly 08:00:00 (canonical forecast window open)"
+            )
+    for field_name, value in ((start_name, start), (end_name, end)):
+        if value.isoweekday() not in range(1, 6):
+            raise ValueError(
+                f"{field_name} must be a business day (Monday–Friday); "
+                f"got ISO weekday {value.isoweekday()}"
+            )
+    if start >= end:
+        raise ValueError(f"{start_name} must be strictly before {end_name}")
+    days_ahead = 3 if start.isoweekday() == 5 else 1  # Friday → Monday
+    expected_end = start + timedelta(days=days_ahead)
+    if end != expected_end:
+        raise ValueError(
+            f"{end_name} must be the next business-day 08:00 JST "
+            f"(expected {expected_end}, got {end})"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Core protocol records
@@ -217,46 +261,10 @@ class ForecastRecord(BaseModel):
 
     @model_validator(mode="after")
     def _validate_window_chronology(self) -> ForecastRecord:
-        """Enforce canonical 08:00 JST forecast-window semantics.
-
-        Both ``as_of_jst`` and ``window_end_jst`` must be exactly 08:00:00 on a
-        protocol business day (Mon–Fri ISO 1–5).  ``window_end_jst`` must be the
-        next business-day 08:00 JST after ``as_of_jst``.
-        """
-        # 1. Both endpoints must be at exactly 08:00:00 (canonical window open).
-        for field_name, value in (
-            ("as_of_jst", self.as_of_jst),
-            ("window_end_jst", self.window_end_jst),
-        ):
-            if (value.hour, value.minute, value.second, value.microsecond) != (8, 0, 0, 0):
-                raise ValueError(
-                    f"{field_name} must be at exactly 08:00:00 (canonical forecast window open)"
-                )
-
-        # 2. Both must fall on a protocol business day (Mon–Fri, ISO weekday 1–5).
-        for field_name, value in (
-            ("as_of_jst", self.as_of_jst),
-            ("window_end_jst", self.window_end_jst),
-        ):
-            if value.isoweekday() not in range(1, 6):
-                raise ValueError(
-                    f"{field_name} must be a business day (Monday–Friday); "
-                    f"got ISO weekday {value.isoweekday()}"
-                )
-
-        # 3. Chronological ordering (error message preserved for existing tests).
-        if self.as_of_jst >= self.window_end_jst:
-            raise ValueError("as_of_jst must be strictly before window_end_jst")
-
-        # 4. window_end_jst must be the immediately-following business-day 08:00.
-        days_ahead = 3 if self.as_of_jst.isoweekday() == 5 else 1  # Fri → Mon
-        expected_end = self.as_of_jst + timedelta(days=days_ahead)
-        if self.window_end_jst != expected_end:
-            raise ValueError(
-                f"window_end_jst must be the next business-day 08:00 JST "
-                f"(expected {expected_end}, got {self.window_end_jst})"
-            )
-
+        """Enforce canonical 08:00 JST forecast-window semantics via shared helper."""
+        _check_canonical_business_day_window(
+            self.as_of_jst, self.window_end_jst, "as_of_jst", "window_end_jst"
+        )
         return self
 
     @model_validator(mode="after")
@@ -334,8 +342,9 @@ class OutcomeRecord(BaseModel):
 
     @model_validator(mode="after")
     def _ohlc_ordering(self) -> OutcomeRecord:
-        if self.window_start_jst >= self.window_end_jst:
-            raise ValueError("window_start_jst must be strictly before window_end_jst")
+        _check_canonical_business_day_window(
+            self.window_start_jst, self.window_end_jst, "window_start_jst", "window_end_jst"
+        )
         if self.realized_high < self.realized_low:
             raise ValueError("realized_high must be >= realized_low")
         if not (self.realized_low <= self.realized_open <= self.realized_high):
@@ -422,3 +431,20 @@ class EvaluationRecord(BaseModel):
     engine_version: str = Field(min_length=1)
     schema_version: str = Field(min_length=1)
     protocol_version: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _validate_eval_strategy_consistency(self) -> EvaluationRecord:
+        """Reject UGH-only diagnostic fields on baseline evaluation records.
+
+        ``_UGH_EVAL_ONLY_FIELDS`` (``state_proxy_hit``, ``mismatch_change_bp``,
+        ``realized_state_proxy``, ``actual_state_change``) are meaningful only when
+        ``strategy_kind='ugh'``.  Baseline evaluations must leave them as ``None``.
+        """
+        if self.strategy_kind in _BASELINE_STRATEGY_KINDS:
+            set_fields = [f for f in _UGH_EVAL_ONLY_FIELDS if getattr(self, f) is not None]
+            if set_fields:
+                raise ValueError(
+                    f"baseline strategy_kind='{self.strategy_kind.value}' must not include "
+                    f"UGH-only evaluation fields: {set_fields}"
+                )
+        return self

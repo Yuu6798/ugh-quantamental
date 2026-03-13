@@ -765,3 +765,132 @@ def test_forecast_record_baseline_rejects_expected_range(strategy_kind: Strategy
     """Baseline records must not carry expected_range."""
     with pytest.raises(ValidationError, match="UGH-exclusive fields"):
         _baseline_forecast(strategy_kind, expected_range=_expected_range())
+
+
+# ---------------------------------------------------------------------------
+# OutcomeRecord — canonical 08:00 JST window semantics (r2928948831)
+# ---------------------------------------------------------------------------
+
+
+def test_outcome_record_non_canonical_time_window_start_raises() -> None:
+    """window_start_jst not at 08:00:00 must be rejected."""
+    with pytest.raises(ValidationError, match="window_start_jst must be at exactly 08:00:00"):
+        _outcome(window_start_jst=datetime(2026, 3, 10, 12, 0, 0))
+
+
+def test_outcome_record_non_canonical_time_window_end_raises() -> None:
+    """window_end_jst not at 08:00:00 must be rejected."""
+    with pytest.raises(ValidationError, match="window_end_jst must be at exactly 08:00:00"):
+        _outcome(window_end_jst=datetime(2026, 3, 11, 17, 0, 0))
+
+
+@pytest.mark.parametrize(
+    "weekend_start",
+    [
+        datetime(2026, 3, 14, 8, 0, 0),   # Saturday
+        datetime(2026, 3, 15, 8, 0, 0),   # Sunday
+    ],
+)
+def test_outcome_record_weekend_window_start_raises(weekend_start: datetime) -> None:
+    """window_start_jst on Saturday or Sunday must be rejected."""
+    next_day = datetime(weekend_start.year, weekend_start.month, weekend_start.day + 1, 8, 0, 0)
+    with pytest.raises(ValidationError, match="window_start_jst must be a business day"):
+        _outcome(window_start_jst=weekend_start, window_end_jst=next_day)
+
+
+def test_outcome_record_non_next_business_day_window_end_raises() -> None:
+    """window_end_jst two days after window_start_jst must be rejected."""
+    # _AS_OF is Tuesday 2026-03-10; next biz day is Wednesday, not Thursday
+    with pytest.raises(
+        ValidationError, match="window_end_jst must be the next business-day 08:00 JST"
+    ):
+        _outcome(window_start_jst=_AS_OF, window_end_jst=datetime(2026, 3, 12, 8, 0, 0))
+
+
+def test_outcome_record_friday_window_end_is_monday() -> None:
+    """Friday window_start_jst must accept Monday window_end_jst (skip weekend)."""
+    friday_start = datetime(2026, 3, 13, 8, 0, 0)
+    monday_end = datetime(2026, 3, 16, 8, 0, 0)
+    rec = _outcome(window_start_jst=friday_start, window_end_jst=monday_end)
+    assert rec.window_start_jst == friday_start
+    assert rec.window_end_jst == monday_end
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — baseline rejects UGH-only diagnostic fields (r2928948835)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_evaluation_record_baseline_rejects_state_proxy_hit(strategy_kind: StrategyKind) -> None:
+    """Baseline evaluations must not carry state_proxy_hit."""
+    with pytest.raises(ValidationError, match="UGH-only evaluation fields"):
+        _evaluation(strategy_kind=strategy_kind, state_proxy_hit=True)
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_evaluation_record_baseline_rejects_mismatch_change_bp(strategy_kind: StrategyKind) -> None:
+    """Baseline evaluations must not carry mismatch_change_bp."""
+    with pytest.raises(ValidationError, match="UGH-only evaluation fields"):
+        _evaluation(strategy_kind=strategy_kind, mismatch_change_bp=5.0)
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_evaluation_record_baseline_rejects_realized_state_proxy(
+    strategy_kind: StrategyKind,
+) -> None:
+    """Baseline evaluations must not carry realized_state_proxy."""
+    with pytest.raises(ValidationError, match="UGH-only evaluation fields"):
+        _evaluation(strategy_kind=strategy_kind, realized_state_proxy="fire")
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_evaluation_record_baseline_rejects_actual_state_change(
+    strategy_kind: StrategyKind,
+) -> None:
+    """Baseline evaluations must not carry actual_state_change."""
+    with pytest.raises(ValidationError, match="UGH-only evaluation fields"):
+        _evaluation(strategy_kind=strategy_kind, actual_state_change=True)
+
+
+def test_evaluation_record_ugh_allows_all_diagnostic_fields() -> None:
+    """UGH evaluations may carry all state-proxy diagnostic fields."""
+    rec = _evaluation(
+        strategy_kind=StrategyKind.ugh,
+        state_proxy_hit=True,
+        mismatch_change_bp=3.5,
+        realized_state_proxy="fire",
+        actual_state_change=False,
+    )
+    assert rec.state_proxy_hit is True
+    assert rec.mismatch_change_bp == 3.5
+    assert rec.realized_state_proxy == "fire"
+    assert rec.actual_state_change is False
