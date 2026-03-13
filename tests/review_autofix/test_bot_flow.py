@@ -56,24 +56,7 @@ class _FakeGithubClient:
         self.markers.add(body.splitlines()[-1])
 
 
-def test_bot_skips_github_actions_actor(tmp_path: Path, monkeypatch) -> None:
-    event_path = tmp_path / "event.json"
-    _write_event(event_path, reviewer="github-actions[bot]")
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
-
-    result = bot.run()
-    assert result.reason == "ignored-actor"
-
-
-def test_bot_applies_for_human_actor(tmp_path: Path, monkeypatch) -> None:
-    dummy = tmp_path / "dummy.py"
-    dummy.write_text("range_hit = 1\n", encoding="utf-8")
-    event_path = tmp_path / "event.json"
-    _write_event(event_path, reviewer="alice")
-
+def _set_common_env(monkeypatch, tmp_path: Path, event_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
     monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
@@ -82,6 +65,14 @@ def test_bot_applies_for_human_actor(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("DRY_RUN", "false")
     monkeypatch.setenv("VALIDATION_LINT_COMMANDS", "true")
     monkeypatch.setenv("VALIDATION_TEST_COMMANDS", "true")
+
+
+def test_human_actor_comment_is_processed(tmp_path: Path, monkeypatch) -> None:
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="alice")
+    _set_common_env(monkeypatch, tmp_path, event_path)
 
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
@@ -91,20 +82,46 @@ def test_bot_applies_for_human_actor(tmp_path: Path, monkeypatch) -> None:
     assert result.reason == "pushed"
 
 
+def test_trusted_bot_actor_comment_is_processed(tmp_path: Path, monkeypatch) -> None:
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="trusted-review-bot[bot]")
+    _set_common_env(monkeypatch, tmp_path, event_path)
+    monkeypatch.setenv("ALLOWED_BOT_REVIEWERS", "trusted-review-bot[bot]")
+
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    result = bot.run()
+    assert result.reason == "pushed"
+
+
+def test_untrusted_bot_actor_comment_is_skipped(tmp_path: Path, monkeypatch) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="unknown-bot[bot]")
+    _set_common_env(monkeypatch, tmp_path, event_path)
+
+    result = bot.run()
+    assert result.reason == "ignored-actor"
+
+
+def test_self_bot_actor_comment_is_skipped(tmp_path: Path, monkeypatch) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="github-actions[bot]")
+    _set_common_env(monkeypatch, tmp_path, event_path)
+
+    result = bot.run()
+    assert result.reason == "ignored-actor"
+
+
 def test_bot_applies_rule_and_prevents_duplicate(tmp_path: Path, monkeypatch) -> None:
     dummy = tmp_path / "dummy.py"
     dummy.write_text("range_hit = 1\n", encoding="utf-8")
     event_path = tmp_path / "event.json"
     _write_event(event_path)
-
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
-    monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state.json"))
-    monkeypatch.setenv("BOT_MODE", "apply_and_push")
-    monkeypatch.setenv("DRY_RUN", "false")
-    monkeypatch.setenv("VALIDATION_LINT_COMMANDS", "true")
-    monkeypatch.setenv("VALIDATION_TEST_COMMANDS", "true")
+    _set_common_env(monkeypatch, tmp_path, event_path)
 
     monkeypatch.setattr(bot, "has_changes", lambda: True)
 
@@ -134,13 +151,7 @@ def test_durable_duplicate_detection_across_runs(tmp_path: Path, monkeypatch) ->
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
 
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
-    monkeypatch.setenv("BOT_MODE", "apply_and_push")
-    monkeypatch.setenv("DRY_RUN", "false")
-    monkeypatch.setenv("VALIDATION_LINT_COMMANDS", "true")
-    monkeypatch.setenv("VALIDATION_TEST_COMMANDS", "true")
+    _set_common_env(monkeypatch, tmp_path, event_path)
     monkeypatch.setenv("GITHUB_TOKEN", "x")
     monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state-1.json"))
 
@@ -164,13 +175,7 @@ def test_edited_comment_reprocesses_with_new_version(tmp_path: Path, monkeypatch
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
 
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
-    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
-    monkeypatch.setenv("BOT_MODE", "apply_and_push")
-    monkeypatch.setenv("DRY_RUN", "false")
-    monkeypatch.setenv("VALIDATION_LINT_COMMANDS", "true")
-    monkeypatch.setenv("VALIDATION_TEST_COMMANDS", "true")
+    _set_common_env(monkeypatch, tmp_path, event_path)
     monkeypatch.setenv("GITHUB_TOKEN", "x")
     monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state-1.json"))
 

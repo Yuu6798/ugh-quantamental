@@ -4,7 +4,7 @@ import logging
 import os
 
 from .classifier import classify_review
-from .config import load_config
+from .config import BotConfig, load_config
 from .git_ops import commit_changes, has_changes, push_head_branch
 from .github_client import GithubClient, build_review_context, is_review_event, load_event_from_env
 from .models import Classification, ProcessResult
@@ -12,15 +12,15 @@ from .rules import RuleRegistry
 from .state_store import FileStateStore
 from .validator import run_validation
 
-_IGNORED_BOT_ACTORS = {"github-actions[bot]", "chatgpt-codex-connector[bot]"}
 
-
-def _is_ignored_actor(login: str | None) -> bool:
+def should_process_actor(login: str | None, config: BotConfig) -> bool:
     if not login:
         return False
-    if login in _IGNORED_BOT_ACTORS:
-        return True
-    return login.endswith("[bot]")
+    if login in config.self_bot_actors:
+        return False
+    if login.endswith("[bot]"):
+        return login in config.allowed_bot_reviewers
+    return True
 
 
 def _processed_key(context) -> str:
@@ -53,7 +53,7 @@ def run() -> ProcessResult:
     except ValueError:
         return ProcessResult("event:invalid", Classification.skip, None, False, False, False, False, "invalid-event-payload")
 
-    if _is_ignored_actor(context.reviewer_login):
+    if not should_process_actor(context.reviewer_login, config):
         return ProcessResult("actor:ignored", Classification.skip, None, False, False, False, False, "ignored-actor")
 
     state = FileStateStore(os.getenv("STATE_STORE_PATH", ".autofix-bot/state.json"))

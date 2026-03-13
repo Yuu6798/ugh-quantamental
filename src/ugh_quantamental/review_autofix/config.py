@@ -8,6 +8,8 @@ from dataclasses import dataclass
 class BotConfig:
     bot_mode: str
     target_reviewers: tuple[str, ...]
+    allowed_bot_reviewers: tuple[str, ...]
+    self_bot_actors: tuple[str, ...]
     dry_run: bool
     allow_push_on_fork: bool
     validation_format_commands: tuple[str, ...]
@@ -50,6 +52,8 @@ def load_config() -> BotConfig:
     return BotConfig(
         bot_mode=os.getenv("BOT_MODE", "detect_only"),
         target_reviewers=_parse_csv("TARGET_REVIEWERS"),
+        allowed_bot_reviewers=_parse_csv("ALLOWED_BOT_REVIEWERS"),
+        self_bot_actors=_parse_csv("SELF_BOT_ACTORS", "github-actions[bot],chatgpt-codex-connector[bot]"),
         dry_run=_parse_bool("DRY_RUN", True),
         allow_push_on_fork=_parse_bool("ALLOW_PUSH_ON_FORK", False),
         validation_format_commands=_parse_multiline("VALIDATION_FORMAT_COMMANDS"),
