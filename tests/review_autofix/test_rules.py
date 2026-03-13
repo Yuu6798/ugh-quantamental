@@ -110,3 +110,23 @@ def test_import_rule_preserves_indentation_inside_try_block(tmp_path: Path) -> N
     result = rule.apply(context)
     assert result.changed is True
     assert target.read_text(encoding="utf-8") == "try:\n    import os\nexcept Exception:\n    pass\n"
+
+
+def test_import_rule_not_selected_by_important_word() -> None:
+    context = _context("This is important for docs", "src/file.py")
+    registry = RuleRegistry()
+    assert registry.match(context) is None
+
+
+def test_import_rule_not_selected_by_generic_import_cleanup_mention() -> None:
+    context = _context("We discussed import-cleanup in roadmap", "src/file.py")
+    registry = RuleRegistry()
+    assert registry.match(context) is None
+
+
+def test_import_rule_selected_by_explicit_rule_id() -> None:
+    context = _context("rule: import-cleanup", "src/file.py")
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+    assert rule.rule_id == "import-cleanup"

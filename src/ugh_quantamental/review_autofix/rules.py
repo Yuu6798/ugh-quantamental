@@ -72,7 +72,11 @@ class ImportCleanupRule(BaseRule):
 
     def match(self, context: ReviewContext) -> RuleMatch | None:
         text = context.body.lower()
-        if context.path and ("import" in text or "ruff" in text or "unused" in text or "整理" in text):
+        explicit_rule_id = re.search(r"\brule\s*:\s*import-cleanup\b", text) is not None
+        keyword_text = text.replace("import-cleanup", " ")
+        has_import_keyword = re.search(r"\bimports?\b", keyword_text) is not None
+        has_lint_keyword = any(token in text for token in ("ruff", "unused", "整理"))
+        if context.path and (explicit_rule_id or has_import_keyword or has_lint_keyword):
             return RuleMatch(
                 rule_id=self.rule_id,
                 priority=extract_priority(context.body),
