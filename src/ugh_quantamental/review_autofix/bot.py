@@ -128,12 +128,15 @@ def run() -> ProcessResult:
             except Exception:
                 logging.exception("failed to resolve review thread")
         if reason == "pushed" and config.reply_on_success:
-            _reply(
-                client,
-                context,
-                f"✅ Auto-fix applied by rule `{rule.rule_id}` and pushed to `{context.head_ref}`.\n\n{marker}",
-            )
-            replied = True
+            try:
+                _reply(
+                    client,
+                    context,
+                    f"✅ Auto-fix applied by rule `{rule.rule_id}` and pushed to `{context.head_ref}`.\n\n{marker}",
+                )
+                replied = True
+            except Exception:
+                logging.exception("failed to post success reply")
         if reason == "pushed" and not replied:
             client.persist_marker(context, marker)
         if reason != "pushed" and config.reply_on_failure:

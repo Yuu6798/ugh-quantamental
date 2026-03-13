@@ -98,6 +98,14 @@ class _FailingReplyGithubClient(_FakeGithubClient):
         raise PermissionError("403 forbidden")
 
 
+class _FailingSuccessReplyGithubClient(_FakeGithubClient):
+    def reply_to_review_comment(self, repo: str, comment_id: int, body: str) -> None:
+        del repo
+        del comment_id
+        del body
+        raise RuntimeError("reply failed")
+
+
 class _FailingResolveGithubClient(_FakeGithubClient):
     def resolve_review_thread(self, comment_node_id: str) -> bool:
         self.resolved_node_ids.append(comment_node_id)
@@ -228,6 +236,31 @@ def test_durable_marker_persists_when_reply_on_success_disabled(tmp_path: Path, 
     assert first.reason == "pushed"
 
     monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state-2.json"))
+    second = bot.run()
+    assert second.reason == "duplicate"
+
+
+def test_push_success_with_reply_failure_is_non_fatal_and_marks_processed(tmp_path: Path, monkeypatch) -> None:
+    _FailingSuccessReplyGithubClient.markers = set()
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="chatgpt-codex-connector[bot]")
+
+    monkeypatch.setattr(bot, "GithubClient", _FailingSuccessReplyGithubClient)
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    _set_common_env(monkeypatch, tmp_path, event_path)
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state.json"))
+
+    first = bot.run()
+    assert first.reason == "pushed"
+    assert first.pushed is True
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
     second = bot.run()
     assert second.reason == "duplicate"
 

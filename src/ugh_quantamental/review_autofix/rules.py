@@ -70,8 +70,11 @@ class NoneNormalizationRule(BaseRule):
         if context.path is None:
             return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", None, "", ""), False, "no file")
         file_path = Path(context.path)
-        with file_path.open(encoding="utf-8", newline="") as fh:
-            before = fh.read()
+        try:
+            with file_path.open(encoding="utf-8", newline="") as fh:
+                before = fh.read()
+        except FileNotFoundError:
+            return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "missing file")
         lines = before.splitlines(keepends=True)
         target_line = context.line or context.start_line
         if (
