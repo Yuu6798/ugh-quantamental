@@ -53,7 +53,11 @@ class NoneNormalizationRule(BaseRule):
         )
 
     def _replace_range_hit_assignment(self, line: str) -> tuple[str, bool]:
-        updated = re.sub(r"^(\s*range_hit\s*=\s*)([^#\n]+)", r"\1None", line)
+        match = re.match(r"^(\s*range_hit\s*=\s*)([^;#\r\n]*?)(\s*)([;#].*)?(\r\n|\n|\r)?$", line)
+        if match is None:
+            return line, False
+        prefix, _value, spacing, suffix, line_ending = match.groups()
+        updated = f"{prefix}None{spacing}{suffix or ''}{line_ending or ''}"
         return updated, updated != line
 
     def _fallback_review_body_line(self, lines: list[str]) -> int | None:

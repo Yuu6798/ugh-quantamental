@@ -53,6 +53,48 @@ def test_none_rule_only_rewrites_reviewed_line(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "range_hit = 0.5\nother = 1\nrange_hit = None\ntext = 'range_hit = 0.9'\n"
 
 
+def test_none_rule_preserves_semicolon_suffix_content(tmp_path: Path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("range_hit = 0.5; audit()\n", encoding="utf-8")
+    context = _context("Please set range_hit to None", str(target))
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is True
+    assert target.read_text(encoding="utf-8") == "range_hit = None; audit()\n"
+
+
+def test_none_rule_preserves_inline_comment_suffix(tmp_path: Path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("range_hit = 0.5  # keep note\n", encoding="utf-8")
+    context = _context("Please set range_hit to None", str(target))
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is True
+    assert target.read_text(encoding="utf-8") == "range_hit = None  # keep note\n"
+
+
+def test_none_rule_preserves_unrelated_trailing_text(tmp_path: Path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("range_hit = 0.5; other = range_hit + 1\n", encoding="utf-8")
+    context = _context("Please set range_hit to None", str(target))
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is True
+    assert target.read_text(encoding="utf-8") == "range_hit = None; other = range_hit + 1\n"
+
+
 def test_import_rule_is_selectable() -> None:
     context = _context("lint: sort imports", "src/file.py")
     registry = RuleRegistry()
