@@ -645,3 +645,123 @@ def test_evaluation_record_range_hit_true() -> None:
     rec = _evaluation(range_hit=True, close_error_bp=10.0)
     assert rec.range_hit is True
     assert rec.close_error_bp == 10.0
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — canonical 08:00 JST window semantics (r2926868689)
+# ---------------------------------------------------------------------------
+
+
+def test_forecast_record_non_canonical_time_as_of_raises() -> None:
+    """as_of_jst not at 08:00:00 must be rejected."""
+    bad_as_of = datetime(2026, 3, 10, 9, 0, 0)          # 09:00, not 08:00
+    bad_window_end = datetime(2026, 3, 11, 9, 0, 0)     # matching non-canonical end
+    with pytest.raises(ValidationError, match="as_of_jst must be at exactly 08:00:00"):
+        _ugh_forecast(as_of_jst=bad_as_of, window_end_jst=bad_window_end)
+
+
+def test_forecast_record_non_canonical_time_window_end_raises() -> None:
+    """window_end_jst not at 08:00:00 must be rejected."""
+    bad_window_end = datetime(2026, 3, 11, 17, 0, 0)    # 17:00, not 08:00
+    with pytest.raises(ValidationError, match="window_end_jst must be at exactly 08:00:00"):
+        _ugh_forecast(as_of_jst=_AS_OF, window_end_jst=bad_window_end)
+
+
+@pytest.mark.parametrize(
+    "weekend_date",
+    [
+        datetime(2026, 3, 14, 8, 0, 0),   # Saturday
+        datetime(2026, 3, 15, 8, 0, 0),   # Sunday
+    ],
+)
+def test_forecast_record_weekend_as_of_raises(weekend_date: datetime) -> None:
+    """as_of_jst on Saturday or Sunday must be rejected."""
+    next_day = datetime(weekend_date.year, weekend_date.month, weekend_date.day + 1, 8, 0, 0)
+    with pytest.raises(ValidationError, match="as_of_jst must be a business day"):
+        _ugh_forecast(as_of_jst=weekend_date, window_end_jst=next_day)
+
+
+def test_forecast_record_non_next_business_day_window_end_raises() -> None:
+    """window_end_jst two days after as_of_jst (instead of one) must be rejected."""
+    # _AS_OF is Tuesday 2026-03-10; next biz day is Wednesday, not Thursday
+    two_days_later = datetime(2026, 3, 12, 8, 0, 0)
+    with pytest.raises(ValidationError, match="window_end_jst must be the next business-day 08:00 JST"):
+        _ugh_forecast(as_of_jst=_AS_OF, window_end_jst=two_days_later)
+
+
+def test_forecast_record_friday_window_end_is_monday() -> None:
+    """Friday as_of_jst must accept Monday window_end_jst (skip weekend)."""
+    friday_as_of = datetime(2026, 3, 13, 8, 0, 0)    # Friday
+    monday_end = datetime(2026, 3, 16, 8, 0, 0)      # following Monday
+    rec = _ugh_forecast(as_of_jst=friday_as_of, window_end_jst=monday_end)
+    assert rec.as_of_jst == friday_as_of
+    assert rec.window_end_jst == monday_end
+
+
+def test_forecast_record_friday_window_end_saturday_raises() -> None:
+    """Friday as_of_jst with Saturday window_end_jst must be rejected (non-business day)."""
+    friday_as_of = datetime(2026, 3, 13, 8, 0, 0)
+    saturday_end = datetime(2026, 3, 14, 8, 0, 0)
+    with pytest.raises(ValidationError, match="window_end_jst must be a business day"):
+        _ugh_forecast(as_of_jst=friday_as_of, window_end_jst=saturday_end)
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — baseline rejects UGH-exclusive fields (r2926868692)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_forecast_record_baseline_rejects_dominant_state(strategy_kind: StrategyKind) -> None:
+    """Baseline records must not carry dominant_state."""
+    with pytest.raises(ValidationError, match="UGH-exclusive fields"):
+        _baseline_forecast(strategy_kind, dominant_state=LifecycleState.fire)
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_forecast_record_baseline_rejects_state_probabilities(strategy_kind: StrategyKind) -> None:
+    """Baseline records must not carry state_probabilities."""
+    with pytest.raises(ValidationError, match="UGH-exclusive fields"):
+        _baseline_forecast(strategy_kind, state_probabilities=_state_probs())
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_forecast_record_baseline_rejects_q_dir(strategy_kind: StrategyKind) -> None:
+    """Baseline records must not carry q_dir."""
+    with pytest.raises(ValidationError, match="UGH-exclusive fields"):
+        _baseline_forecast(strategy_kind, q_dir=QuestionDirection.positive)
+
+
+@pytest.mark.parametrize(
+    "strategy_kind",
+    [
+        StrategyKind.baseline_random_walk,
+        StrategyKind.baseline_prev_day_direction,
+        StrategyKind.baseline_simple_technical,
+    ],
+)
+def test_forecast_record_baseline_rejects_expected_range(strategy_kind: StrategyKind) -> None:
+    """Baseline records must not carry expected_range."""
+    with pytest.raises(ValidationError, match="UGH-exclusive fields"):
+        _baseline_forecast(strategy_kind, expected_range=_expected_range())

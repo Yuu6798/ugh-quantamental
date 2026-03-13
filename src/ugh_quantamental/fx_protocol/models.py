@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import Enum
 from typing import Literal
 
@@ -217,17 +217,68 @@ class ForecastRecord(BaseModel):
 
     @model_validator(mode="after")
     def _validate_window_chronology(self) -> ForecastRecord:
+        """Enforce canonical 08:00 JST forecast-window semantics.
+
+        Both ``as_of_jst`` and ``window_end_jst`` must be exactly 08:00:00 on a
+        protocol business day (Mon–Fri ISO 1–5).  ``window_end_jst`` must be the
+        next business-day 08:00 JST after ``as_of_jst``.
+        """
+        # 1. Both endpoints must be at exactly 08:00:00 (canonical window open).
+        for field_name, value in (
+            ("as_of_jst", self.as_of_jst),
+            ("window_end_jst", self.window_end_jst),
+        ):
+            if (value.hour, value.minute, value.second, value.microsecond) != (8, 0, 0, 0):
+                raise ValueError(
+                    f"{field_name} must be at exactly 08:00:00 (canonical forecast window open)"
+                )
+
+        # 2. Both must fall on a protocol business day (Mon–Fri, ISO weekday 1–5).
+        for field_name, value in (
+            ("as_of_jst", self.as_of_jst),
+            ("window_end_jst", self.window_end_jst),
+        ):
+            if value.isoweekday() not in range(1, 6):
+                raise ValueError(
+                    f"{field_name} must be a business day (Monday–Friday); "
+                    f"got ISO weekday {value.isoweekday()}"
+                )
+
+        # 3. Chronological ordering (error message preserved for existing tests).
         if self.as_of_jst >= self.window_end_jst:
             raise ValueError("as_of_jst must be strictly before window_end_jst")
+
+        # 4. window_end_jst must be the immediately-following business-day 08:00.
+        days_ahead = 3 if self.as_of_jst.isoweekday() == 5 else 1  # Fri → Mon
+        expected_end = self.as_of_jst + timedelta(days=days_ahead)
+        if self.window_end_jst != expected_end:
+            raise ValueError(
+                f"window_end_jst must be the next business-day 08:00 JST "
+                f"(expected {expected_end}, got {self.window_end_jst})"
+            )
+
         return self
 
     @model_validator(mode="after")
     def _validate_strategy_consistency(self) -> ForecastRecord:
+        """Enforce UGH / baseline field-presence contract.
+
+        * ``strategy_kind='ugh'``: all ``_UGH_REQUIRED_FIELDS`` must be non-null.
+        * Baseline strategy kinds: all ``_UGH_REQUIRED_FIELDS`` must be ``None``
+          so that UGH-exclusive data cannot contaminate baseline records.
+        """
         if self.strategy_kind == StrategyKind.ugh:
             null_fields = [f for f in _UGH_REQUIRED_FIELDS if getattr(self, f) is None]
             if null_fields:
                 raise ValueError(
                     f"strategy_kind='ugh' requires non-null fields: {null_fields}"
+                )
+        elif self.strategy_kind in _BASELINE_STRATEGY_KINDS:
+            set_fields = [f for f in _UGH_REQUIRED_FIELDS if getattr(self, f) is not None]
+            if set_fields:
+                raise ValueError(
+                    f"baseline strategy_kind='{self.strategy_kind.value}' must not include "
+                    f"UGH-exclusive fields: {set_fields}"
                 )
         return self
 
