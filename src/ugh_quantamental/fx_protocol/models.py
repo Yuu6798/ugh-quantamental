@@ -285,6 +285,18 @@ class ForecastRecord(BaseModel):
     schema_version: str = Field(min_length=1)
     protocol_version: str = Field(min_length=1)
 
+    @field_validator("as_of_jst", "window_end_jst")
+    @classmethod
+    def _normalize_jst_timestamps(cls, v: datetime) -> datetime:
+        """Canonicalize *_jst fields to JST-aware datetimes on ingestion.
+
+        Without this, the same logical window stored as ``2026-03-09T23:00+00:00``
+        (UTC) vs ``2026-03-10T08:00+09:00`` (JST) would serialize differently,
+        creating false diffs in deterministic replay and baseline comparisons.
+        Naive inputs are treated as already in JST (matching the ``ids.py`` policy).
+        """
+        return _to_jst(v)
+
     @field_validator("expected_close_change_bp")
     @classmethod
     def _expected_close_change_bp_must_be_finite(cls, v: float) -> float:
@@ -416,6 +428,17 @@ class OutcomeRecord(BaseModel):
     # --- version metadata ---
     schema_version: str = Field(min_length=1)
     protocol_version: str = Field(min_length=1)
+
+    @field_validator("window_start_jst", "window_end_jst")
+    @classmethod
+    def _normalize_jst_timestamps(cls, v: datetime) -> datetime:
+        """Canonicalize *_jst fields to JST-aware datetimes on ingestion.
+
+        Ensures that the same logical window is always stored identically regardless
+        of whether the caller supplied a UTC-aware, JST-aware, or naive datetime.
+        Naive inputs are treated as already in JST (matching the ``ids.py`` policy).
+        """
+        return _to_jst(v)
 
     @field_validator("realized_open", "realized_high", "realized_low", "realized_close")
     @classmethod

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import ValidationError
@@ -27,6 +28,7 @@ from ugh_quantamental.schemas.market_svp import StateProbabilities
 # ---------------------------------------------------------------------------
 
 _UTC = timezone.utc
+_JST = ZoneInfo("Asia/Tokyo")
 _NOW = datetime(2026, 3, 10, 8, 0, 0, tzinfo=_UTC)
 # as_of_jst 08:00 JST = 23:00 UTC Mar 9; locked_at_utc must be strictly before that.
 _LOCKED_AT = datetime(2026, 3, 9, 22, 0, 0, tzinfo=_UTC)
@@ -712,11 +714,12 @@ def test_forecast_record_non_next_business_day_window_end_raises() -> None:
 
 def test_forecast_record_friday_window_end_is_monday() -> None:
     """Friday as_of_jst must accept Monday window_end_jst (skip weekend)."""
-    friday_as_of = datetime(2026, 3, 13, 8, 0, 0)    # Friday
+    friday_as_of = datetime(2026, 3, 13, 8, 0, 0)    # Friday (naive → treated as JST)
     monday_end = datetime(2026, 3, 16, 8, 0, 0)      # following Monday
     rec = _ugh_forecast(as_of_jst=friday_as_of, window_end_jst=monday_end)
-    assert rec.as_of_jst == friday_as_of
-    assert rec.window_end_jst == monday_end
+    # Stored values are canonicalized to JST-aware datetimes.
+    assert rec.as_of_jst == friday_as_of.replace(tzinfo=_JST)
+    assert rec.window_end_jst == monday_end.replace(tzinfo=_JST)
 
 
 def test_forecast_record_friday_window_end_saturday_raises() -> None:
@@ -833,8 +836,9 @@ def test_outcome_record_friday_window_end_is_monday() -> None:
     friday_start = datetime(2026, 3, 13, 8, 0, 0)
     monday_end = datetime(2026, 3, 16, 8, 0, 0)
     rec = _outcome(window_start_jst=friday_start, window_end_jst=monday_end)
-    assert rec.window_start_jst == friday_start
-    assert rec.window_end_jst == monday_end
+    # Stored values are canonicalized to JST-aware datetimes.
+    assert rec.window_start_jst == friday_start.replace(tzinfo=_JST)
+    assert rec.window_end_jst == monday_end.replace(tzinfo=_JST)
 
 
 # ---------------------------------------------------------------------------
@@ -861,6 +865,46 @@ def test_outcome_record_jst_aware_canonical_hour_accepted() -> None:
     jst_end = datetime(2026, 3, 11, 8, 0, 0, tzinfo=jst)
     rec = _outcome(window_start_jst=jst_start, window_end_jst=jst_end)
     assert rec.window_start_jst == jst_start
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord / OutcomeRecord — *_jst field canonicalization (r2929201648)
+# ---------------------------------------------------------------------------
+
+
+def test_forecast_record_naive_jst_fields_stored_as_jst_aware() -> None:
+    """Naive *_jst inputs are stored as JST-aware datetimes."""
+    rec = _ugh_forecast()
+    assert rec.as_of_jst.tzinfo is not None
+    assert rec.as_of_jst == _AS_OF.replace(tzinfo=_JST)
+    assert rec.window_end_jst.tzinfo is not None
+    assert rec.window_end_jst == _WINDOW_END.replace(tzinfo=_JST)
+
+
+def test_forecast_record_utc_aware_jst_fields_canonicalized_to_jst() -> None:
+    """UTC-aware *_jst inputs are stored as their JST equivalent."""
+    # 2026-03-09 23:00 UTC == 2026-03-10 08:00 JST
+    utc_as_of = datetime(2026, 3, 9, 23, 0, 0, tzinfo=timezone.utc)
+    utc_end = datetime(2026, 3, 10, 23, 0, 0, tzinfo=timezone.utc)
+    rec = _ugh_forecast(as_of_jst=utc_as_of, window_end_jst=utc_end)
+    assert rec.as_of_jst == datetime(2026, 3, 10, 8, 0, 0, tzinfo=_JST)
+    assert rec.window_end_jst == datetime(2026, 3, 11, 8, 0, 0, tzinfo=_JST)
+
+
+def test_outcome_record_naive_jst_fields_stored_as_jst_aware() -> None:
+    """Naive *_jst inputs in OutcomeRecord are stored as JST-aware datetimes."""
+    rec = _outcome()
+    assert rec.window_start_jst.tzinfo is not None
+    assert rec.window_start_jst == _AS_OF.replace(tzinfo=_JST)
+
+
+def test_outcome_record_utc_aware_jst_fields_canonicalized_to_jst() -> None:
+    """UTC-aware *_jst inputs in OutcomeRecord are stored as their JST equivalent."""
+    utc_start = datetime(2026, 3, 9, 23, 0, 0, tzinfo=timezone.utc)
+    utc_end = datetime(2026, 3, 10, 23, 0, 0, tzinfo=timezone.utc)
+    rec = _outcome(window_start_jst=utc_start, window_end_jst=utc_end)
+    assert rec.window_start_jst == datetime(2026, 3, 10, 8, 0, 0, tzinfo=_JST)
+    assert rec.window_end_jst == datetime(2026, 3, 11, 8, 0, 0, tzinfo=_JST)
 
 
 # ---------------------------------------------------------------------------
