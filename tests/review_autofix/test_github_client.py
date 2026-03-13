@@ -17,6 +17,28 @@ def test_build_review_context_raises_for_non_review_event() -> None:
         raise AssertionError("expected ValueError")
 
 
+
+def _review_body_event(body: str) -> GithubEvent:
+    return GithubEvent(
+        delivery_id="",
+        event_name="pull_request_review",
+        payload={
+            "repository": {"full_name": "acme/repo"},
+            "pull_request": {
+                "number": 1,
+                "base": {"ref": "main"},
+                "head": {"ref": "feature", "sha": "sha", "repo": {"full_name": "acme/repo"}},
+            },
+            "review": {
+                "id": 10,
+                "user": {"login": "alice"},
+                "body": body,
+                "submitted_at": "2024-01-01T00:00:00Z",
+            },
+        },
+    )
+
+
 def _diff_context() -> ReviewContext:
     return ReviewContext(
         kind=ReviewKind.diff_comment,
@@ -73,3 +95,18 @@ def test_list_paginated_fetches_multiple_pages() -> None:
     client._request = fake_request  # type: ignore[method-assign]
     items = client.list_issue_comments("acme/repo", 7)
     assert len(items) == 101
+
+def test_build_review_context_accepts_valid_review_body_file_hint() -> None:
+    context = build_review_context(_review_body_event("file: src/module.py\nset range_hit to None"))
+    assert context.kind == ReviewKind.review_body
+    assert context.path == "src/module.py"
+
+
+def test_build_review_context_rejects_absolute_review_body_file_hint() -> None:
+    context = build_review_context(_review_body_event("file: /tmp/x.py\nset range_hit to None"))
+    assert context.path is None
+
+
+def test_build_review_context_rejects_traversal_review_body_file_hint() -> None:
+    context = build_review_context(_review_body_event("file: ../tmp/x.py\nset range_hit to None"))
+    assert context.path is None

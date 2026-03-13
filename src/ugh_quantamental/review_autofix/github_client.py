@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import posixpath
 import urllib.request
 from dataclasses import dataclass
 
@@ -158,6 +159,22 @@ def _build_version_discriminator(item: dict, body: str) -> str:
     timestamp = item.get("updated_at") or item.get("submitted_at") or item.get("created_at") or ""
     return f"{timestamp}:{_body_hash(body)}"
 
+def _sanitize_review_body_path_hint(raw: str) -> str | None:
+    candidate = raw.strip()
+    if not candidate:
+        return None
+    if candidate.startswith("/"):
+        return None
+    normalized = posixpath.normpath(candidate)
+    if normalized in {".", ""}:
+        return None
+    parts = normalized.split("/")
+    if any(part == ".." for part in parts):
+        return None
+    if normalized.startswith("../"):
+        return None
+    return normalized
+
 
 def build_review_context(event: GithubEvent) -> ReviewContext:
     if not is_review_event(event):
@@ -203,7 +220,7 @@ def build_review_context(event: GithubEvent) -> ReviewContext:
     for line in body.splitlines():
         lower = line.lower()
         if lower.startswith("file:") or lower.startswith("path:"):
-            path = line.split(":", 1)[1].strip()
+            path = _sanitize_review_body_path_hint(line.split(":", 1)[1])
             break
     return ReviewContext(
         kind=ReviewKind.review_body,

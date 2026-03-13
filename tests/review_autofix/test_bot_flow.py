@@ -35,6 +35,30 @@ def _write_event(
     path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+
+def _write_review_event(
+    path: Path,
+    body: str = "file: dummy.py\nP1 please set range_hit to None",
+    submitted_at: str = "2024-01-01T00:00:00Z",
+    reviewer: str = "bob",
+) -> None:
+    payload = {
+        "repository": {"full_name": "acme/repo"},
+        "pull_request": {
+            "number": 12,
+            "base": {"ref": "main"},
+            "head": {"ref": "feature", "sha": "abc", "repo": {"full_name": "acme/repo"}},
+        },
+        "review": {
+            "id": 10,
+            "user": {"login": reviewer},
+            "body": body,
+            "submitted_at": submitted_at,
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 class _FakeGithubClient:
     markers: set[str] = set()
     resolved_node_ids: list[str] = []
@@ -296,3 +320,21 @@ def test_validation_failure_does_not_push(tmp_path: Path, monkeypatch) -> None:
     result = bot.run()
     assert result.reason == "validation-failed"
     assert result.pushed is False
+
+def test_invalid_review_body_file_hint_does_not_apply_or_push(tmp_path: Path, monkeypatch) -> None:
+    event_path = tmp_path / "event.json"
+    _write_review_event(event_path, body="file: ../tmp/x.py\nP1 please set range_hit to None", reviewer="alice")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review")
+    monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("BOT_MODE", "apply_and_push")
+    monkeypatch.setenv("DRY_RUN", "false")
+
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: (_ for _ in ()).throw(AssertionError("should not commit")))
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: (_ for _ in ()).throw(AssertionError("should not push")))
+
+    result = bot.run()
+    assert result.reason == "no-matching-rule"
+    assert result.matched_rule is None
