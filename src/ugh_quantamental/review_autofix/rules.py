@@ -65,10 +65,22 @@ class NoneNormalizationRule(BaseRule):
     def apply(self, context: ReviewContext) -> RuleApplication:
         if context.path is None:
             return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", None, "", ""), False, "no file")
-        target_line = context.line or context.start_line
         file_path = Path(context.path)
         before = file_path.read_text(encoding="utf-8")
         lines = before.splitlines(keepends=True)
+        target_line = context.line or context.start_line
+        if (
+            context.kind.value == "diff_comment"
+            and context.start_line is not None
+            and context.line is not None
+            and context.start_line < context.line
+        ):
+            for candidate in range(context.start_line, context.line + 1):
+                if candidate <= 0 or candidate > len(lines):
+                    continue
+                if re.match(r"^\s*range_hit\s*=", lines[candidate - 1]):
+                    target_line = candidate
+                    break
 
         if target_line is None or target_line <= 0:
             if context.kind.value != "review_body":
@@ -97,8 +109,8 @@ class ImportCleanupRule(BaseRule):
         explicit_rule_id = re.search(r"\brule\s*:\s*import-cleanup\b", text) is not None
         keyword_text = text.replace("import-cleanup", " ")
         has_import_keyword = re.search(r"\bimports?\b", keyword_text) is not None
-        has_lint_keyword = any(token in text for token in ("ruff", "unused", "整理"))
-        if context.path and (explicit_rule_id or has_import_keyword or has_lint_keyword):
+        has_import_phrase = re.search(r"\b(sort\s+imports?|import\s+order|unused\s+imports?)\b", text) is not None
+        if context.path and (explicit_rule_id or has_import_keyword or has_import_phrase):
             return RuleMatch(
                 rule_id=self.rule_id,
                 priority=extract_priority(context.body),

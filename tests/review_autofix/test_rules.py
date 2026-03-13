@@ -124,6 +124,21 @@ def test_import_rule_not_selected_by_generic_import_cleanup_mention() -> None:
     assert registry.match(context) is None
 
 
+
+def test_import_rule_not_selected_by_generic_unused_feedback() -> None:
+    context = _context("There is an unused variable in this function", "src/file.py")
+    registry = RuleRegistry()
+    assert registry.match(context) is None
+
+
+def test_import_rule_selected_by_unused_imports_feedback() -> None:
+    context = _context("Please remove unused imports", "src/file.py")
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+    assert rule.rule_id == "import-cleanup"
+
+
 def test_import_rule_selected_by_explicit_rule_id() -> None:
     context = _context("rule: import-cleanup", "src/file.py")
     registry = RuleRegistry()
@@ -231,3 +246,32 @@ def test_none_rule_diff_comment_explicit_intent_still_matches() -> None:
     rule = registry.match(context)
     assert rule is not None
     assert rule.rule_id == "none-normalization"
+
+def test_none_rule_multiline_diff_uses_start_line_when_targeted(tmp_path: Path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("range_hit = 0.5\nother = 1\n", encoding="utf-8")
+    context = _context("Please set range_hit to None", str(target), line=2)
+    context = ReviewContext(**{**context.__dict__, "start_line": 1})
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is True
+    assert target.read_text(encoding="utf-8") == "range_hit = None\nother = 1\n"
+
+
+def test_none_rule_single_line_still_respects_reviewed_line(tmp_path: Path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("range_hit = 0.5\nother = 1\n", encoding="utf-8")
+    context = _context("Please set range_hit to None", str(target), line=2)
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is False
+    assert result.details == "no-op"
+    assert target.read_text(encoding="utf-8") == "range_hit = 0.5\nother = 1\n"
