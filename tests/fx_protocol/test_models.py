@@ -1226,3 +1226,73 @@ def test_forecast_record_flat_direction_zero_bp_accepted() -> None:
 # ---------------------------------------------------------------------------
 # ExpectedRange — positive price domain (r2929167112)
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — baseline range_hit must be None (r2930231140)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("strategy_kind", [
+    StrategyKind.baseline_random_walk,
+    StrategyKind.baseline_prev_day_direction,
+    StrategyKind.baseline_simple_technical,
+])
+@pytest.mark.parametrize("range_hit_value", [True, False])
+def test_evaluation_record_baseline_range_hit_non_none_raises(
+    strategy_kind: StrategyKind, range_hit_value: bool
+) -> None:
+    """Baselines carry no forecast envelope; range_hit must be None."""
+    with pytest.raises(
+        ValidationError,
+        match="range_hit=None",
+    ):
+        _evaluation(strategy_kind=strategy_kind, range_hit=range_hit_value)
+
+
+@pytest.mark.parametrize("strategy_kind", [
+    StrategyKind.baseline_random_walk,
+    StrategyKind.baseline_prev_day_direction,
+    StrategyKind.baseline_simple_technical,
+])
+def test_evaluation_record_baseline_range_hit_none_accepted(
+    strategy_kind: StrategyKind,
+) -> None:
+    """range_hit=None is valid for all baseline strategy kinds."""
+    rec = _evaluation(strategy_kind=strategy_kind)
+    assert rec.range_hit is None
+
+
+# ---------------------------------------------------------------------------
+# MarketDataProvenance — retrieved_at_utc UTC canonicalization (r2930231146)
+# ---------------------------------------------------------------------------
+
+
+def test_market_data_provenance_naive_retrieved_at_utc_stored_as_utc_aware() -> None:
+    """A naive retrieved_at_utc is treated as UTC and stored as a UTC-aware datetime."""
+    naive = datetime(2026, 3, 10, 8, 0, 0)
+    p = MarketDataProvenance(
+        vendor="test", feed_name="feed", price_type="mid",
+        resolution="1d", timezone="Asia/Tokyo", retrieved_at_utc=naive,
+    )
+    assert p.retrieved_at_utc.tzinfo is not None
+    assert p.retrieved_at_utc == naive.replace(tzinfo=timezone.utc)
+
+
+def test_market_data_provenance_jst_aware_retrieved_at_utc_canonicalized() -> None:
+    """A JST-aware retrieved_at_utc is stored as its UTC equivalent."""
+    jst_dt = datetime(2026, 3, 10, 8, 0, 0, tzinfo=_JST)   # 08:00 JST = 23:00 UTC prev day
+    p = MarketDataProvenance(
+        vendor="test", feed_name="feed", price_type="mid",
+        resolution="1d", timezone="Asia/Tokyo", retrieved_at_utc=jst_dt,
+    )
+    assert p.retrieved_at_utc == datetime(2026, 3, 9, 23, 0, 0, tzinfo=timezone.utc)
+
+
+def test_market_data_provenance_utc_aware_stored_unchanged() -> None:
+    """A UTC-aware retrieved_at_utc is stored as-is."""
+    utc_dt = datetime(2026, 3, 10, 8, 0, 0, tzinfo=timezone.utc)
+    p = MarketDataProvenance(
+        vendor="test", feed_name="feed", price_type="mid",
+        resolution="1d", timezone="Asia/Tokyo", retrieved_at_utc=utc_dt,
+    )
+    assert p.retrieved_at_utc == utc_dt

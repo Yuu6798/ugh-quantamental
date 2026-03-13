@@ -74,6 +74,19 @@ class MarketDataProvenance(BaseModel):
     retrieved_at_utc: datetime
     source_ref: str | None = None
 
+    @field_validator("retrieved_at_utc")
+    @classmethod
+    def _normalize_retrieved_at_utc(cls, v: datetime) -> datetime:
+        """Canonicalize retrieved_at_utc to a UTC-aware datetime on ingestion.
+
+        A field explicitly named ``*_utc`` must always store a timezone-aware UTC
+        datetime.  Mixed ingestion paths (e.g. naive vs. JST-aware) would otherwise
+        serialize the same instant differently, producing false diffs in deterministic
+        replay and baseline comparisons.  Naive inputs are treated as UTC, matching
+        the ``_normalize_created_at`` policy in the persistence layer.
+        """
+        return _to_aware_utc(v)
+
 
 class ExpectedRange(BaseModel):
     """Canonical price-envelope forecast: low_price must be <= high_price."""
@@ -578,6 +591,10 @@ class EvaluationRecord(BaseModel):
         ``_UGH_EVAL_ONLY_FIELDS`` (``state_proxy_hit``, ``mismatch_change_bp``,
         ``realized_state_proxy``, ``actual_state_change``) are meaningful only when
         ``strategy_kind='ugh'``.  Baseline evaluations must leave them as ``None``.
+
+        ``range_hit`` is also rejected for baselines: baselines carry no forecast price
+        envelope, so a non-``None`` value is semantically invalid and would skew
+        downstream range-hit metrics.
         """
         if self.strategy_kind in _BASELINE_STRATEGY_KINDS:
             set_fields = [f for f in _UGH_EVAL_ONLY_FIELDS if getattr(self, f) is not None]
@@ -585,6 +602,11 @@ class EvaluationRecord(BaseModel):
                 raise ValueError(
                     f"baseline strategy_kind='{self.strategy_kind.value}' must not include "
                     f"UGH-only evaluation fields: {set_fields}"
+                )
+            if self.range_hit is not None:
+                raise ValueError(
+                    f"baseline strategy_kind='{self.strategy_kind.value}' must have "
+                    "range_hit=None (no forecast envelope exists for baselines)"
                 )
         return self
 
