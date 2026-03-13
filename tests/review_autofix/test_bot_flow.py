@@ -217,6 +217,22 @@ def test_edited_comment_reprocesses_with_new_version(tmp_path: Path, monkeypatch
     assert second.reason != "duplicate"
 
 
+def test_invalid_bot_mode_fails_closed(tmp_path: Path, monkeypatch) -> None:
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="alice")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review_comment")
+    monkeypatch.setenv("BOT_MODE", "apply_and_push_typo")
+
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: (_ for _ in ()).throw(AssertionError("should not commit")))
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: (_ for _ in ()).throw(AssertionError("should not push")))
+
+    result = bot.run()
+    assert result.reason == "invalid-bot-mode"
+
+
 def test_non_review_event_is_noop(tmp_path: Path, monkeypatch) -> None:
     event_path = tmp_path / "event.json"
     event_path.write_text("{}", encoding="utf-8")

@@ -9,7 +9,7 @@ def has_changes() -> bool:
 
 
 def commit_changes(message: str) -> None:
-    subprocess.run("git add -A", shell=True, check=True)
+    subprocess.run("git add -A -- . ':(exclude).autofix-bot/**'", shell=True, check=True)
     subprocess.run(f"git commit -m {message!r}", shell=True, check=True)
 
 

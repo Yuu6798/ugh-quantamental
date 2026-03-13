@@ -12,6 +12,8 @@ from .rules import RuleRegistry
 from .state_store import FileStateStore
 from .validator import run_validation
 
+_VALID_BOT_MODES = {"detect_only", "propose_only", "apply_and_push", "apply_push_and_resolve"}
+
 
 def should_process_actor(login: str | None, config: BotConfig) -> bool:
     if not login:
@@ -55,6 +57,9 @@ def run() -> ProcessResult:
 
     if not should_process_actor(context.reviewer_login, config):
         return ProcessResult("actor:ignored", Classification.skip, None, False, False, False, False, "ignored-actor")
+
+    if config.bot_mode not in _VALID_BOT_MODES:
+        return ProcessResult("mode:invalid", Classification.skip, None, False, False, False, False, "invalid-bot-mode")
 
     state = FileStateStore(os.getenv("STATE_STORE_PATH", ".autofix-bot/state.json"))
     key = _processed_key(context)
