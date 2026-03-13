@@ -1174,11 +1174,17 @@ def test_evaluation_record_error_metric_none_accepted(field: str) -> None:
     assert getattr(rec, field) is None
 
 
-@pytest.mark.parametrize("field", ["close_error_bp", "magnitude_error_bp", "mismatch_change_bp"])
-def test_evaluation_record_error_metric_finite_accepted(field: str) -> None:
-    """A finite float value is accepted for evaluation error metrics."""
-    rec = _evaluation(**{field: -12.5})
-    assert getattr(rec, field) == pytest.approx(-12.5)
+@pytest.mark.parametrize("field", ["close_error_bp", "magnitude_error_bp"])
+def test_evaluation_record_abs_error_metric_positive_accepted(field: str) -> None:
+    """A positive finite value is accepted for absolute error metrics."""
+    rec = _evaluation(**{field: 12.5})
+    assert getattr(rec, field) == pytest.approx(12.5)
+
+
+def test_evaluation_record_mismatch_change_bp_negative_accepted() -> None:
+    """mismatch_change_bp is signed and accepts negative finite values."""
+    rec = _evaluation(mismatch_change_bp=-12.5)
+    assert rec.mismatch_change_bp == pytest.approx(-12.5)
 
 
 # ---------------------------------------------------------------------------
@@ -1392,3 +1398,31 @@ def test_evaluation_record_disconfirmer_explained_false_on_hit_accepted() -> Non
     """disconfirmer_explained=False with direction_hit=True is valid."""
     rec = _evaluation(direction_hit=True, disconfirmer_explained=False)
     assert rec.disconfirmer_explained is False
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — absolute error metrics non-negative (r2930408765)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("field", ["close_error_bp", "magnitude_error_bp"])
+@pytest.mark.parametrize("bad_value", [-0.001, -10.0])
+def test_evaluation_record_abs_error_metric_negative_raises(
+    field: str, bad_value: float
+) -> None:
+    """Negative values for absolute error metrics must be rejected."""
+    with pytest.raises(ValidationError, match="evaluation error metric must be non-negative"):
+        _evaluation(**{field: bad_value})
+
+
+@pytest.mark.parametrize("field", ["close_error_bp", "magnitude_error_bp"])
+def test_evaluation_record_abs_error_metric_zero_accepted(field: str) -> None:
+    """Zero is a valid absolute error (exact prediction)."""
+    rec = _evaluation(**{field: 0.0})
+    assert getattr(rec, field) == 0.0
+
+
+def test_evaluation_record_mismatch_change_bp_negative_not_rejected() -> None:
+    """mismatch_change_bp is signed; negative values must not be rejected."""
+    rec = _evaluation(mismatch_change_bp=-50.0)
+    assert rec.mismatch_change_bp == pytest.approx(-50.0)

@@ -595,13 +595,30 @@ class EvaluationRecord(BaseModel):
         """
         return _to_aware_utc(v)
 
-    @field_validator("close_error_bp", "magnitude_error_bp", "mismatch_change_bp")
+    @field_validator("close_error_bp", "magnitude_error_bp")
     @classmethod
-    def _error_metrics_must_be_finite(cls, v: float | None) -> float | None:
-        """Reject NaN/Inf in evaluation error metrics.
+    def _abs_error_metrics_must_be_finite_and_non_negative(cls, v: float | None) -> float | None:
+        """Reject NaN/Inf and negative values for absolute error metrics.
 
-        A single non-finite value can poison aggregate reporting and break deterministic
-        regression comparisons.  ``None`` remains valid when the metric is not applicable.
+        ``close_error_bp`` and ``magnitude_error_bp`` represent absolute errors and are
+        always non-negative by definition.  Negative values indicate a buggy evaluator
+        and must be rejected before they skew aggregate summary calculations.
+        ``None`` remains valid when the metric is not applicable.
+        """
+        if v is not None:
+            if not math.isfinite(v):
+                raise ValueError("evaluation error metric must be finite")
+            if v < 0:
+                raise ValueError("evaluation error metric must be non-negative")
+        return v
+
+    @field_validator("mismatch_change_bp")
+    @classmethod
+    def _mismatch_change_bp_must_be_finite(cls, v: float | None) -> float | None:
+        """Reject NaN/Inf in mismatch_change_bp.
+
+        This is a signed value (positive or negative), so only finiteness is enforced.
+        ``None`` remains valid when not applicable.
         """
         if v is not None and not math.isfinite(v):
             raise ValueError("evaluation error metric must be finite")
