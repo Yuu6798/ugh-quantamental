@@ -133,23 +133,27 @@ def make_outcome_id(
     return f"oc_{pair.value}_{start_str}_{end_str}_{schema_version}_{hash_part}"
 
 
-def make_evaluation_id(forecast_id: str, schema_version: str) -> str:
+def make_evaluation_id(forecast_id: str, outcome_id: str, schema_version: str) -> str:
     """Return a deterministic evaluation ID.
 
-    One evaluation ID is produced per ``(forecast_id, schema_version)`` combination.
-    Since ``forecast_id`` already encodes pair, as-of, strategy, and protocol version,
-    no additional fields are needed.
+    One evaluation ID is produced per ``(forecast_id, outcome_id, schema_version)``
+    combination.  Both ``forecast_id`` and ``outcome_id`` are required inputs so
+    that re-evaluating the same forecast against a different outcome (e.g. after an
+    outcome correction) yields a distinct ID and cannot silently collide with or
+    overwrite an existing evaluation record.
 
     Format::
 
-        ev_{forecast_id}_{schema_version}_{hash16}
+        ev_{forecast_id}_{outcome_id}_{schema_version}_{hash16}
 
     Parameters
     ----------
     forecast_id:
         The forecast ID produced by :func:`make_forecast_id`.
+    outcome_id:
+        The outcome ID produced by :func:`make_outcome_id`.
     schema_version:
         Schema version string.
     """
-    hash_part = _digest(forecast_id, schema_version)
-    return f"ev_{forecast_id}_{schema_version}_{hash_part}"
+    hash_part = _digest(forecast_id, outcome_id, schema_version)
+    return f"ev_{forecast_id}_{outcome_id}_{schema_version}_{hash_part}"

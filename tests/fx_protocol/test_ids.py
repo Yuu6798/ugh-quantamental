@@ -165,38 +165,51 @@ def test_outcome_id_differs_by_schema_version() -> None:
 # make_evaluation_id
 # ---------------------------------------------------------------------------
 
+_OC_ID = make_outcome_id(_PAIR, _WINDOW_START, _WINDOW_END, _SCHEMA_VER)
+
 
 def test_evaluation_id_is_stable() -> None:
     fc_id = make_forecast_id(_PAIR, _AS_OF, _PROTO_VER, StrategyKind.ugh)
-    ev1 = make_evaluation_id(fc_id, _SCHEMA_VER)
-    ev2 = make_evaluation_id(fc_id, _SCHEMA_VER)
+    ev1 = make_evaluation_id(fc_id, _OC_ID, _SCHEMA_VER)
+    ev2 = make_evaluation_id(fc_id, _OC_ID, _SCHEMA_VER)
     assert ev1 == ev2
 
 
 def test_evaluation_id_starts_with_prefix() -> None:
     fc_id = make_forecast_id(_PAIR, _AS_OF, _PROTO_VER, StrategyKind.ugh)
-    ev = make_evaluation_id(fc_id, _SCHEMA_VER)
+    ev = make_evaluation_id(fc_id, _OC_ID, _SCHEMA_VER)
     assert ev.startswith("ev_")
 
 
 def test_evaluation_id_contains_forecast_id() -> None:
     fc_id = make_forecast_id(_PAIR, _AS_OF, _PROTO_VER, StrategyKind.ugh)
-    ev = make_evaluation_id(fc_id, _SCHEMA_VER)
+    ev = make_evaluation_id(fc_id, _OC_ID, _SCHEMA_VER)
     assert fc_id in ev
 
 
 def test_evaluation_id_differs_by_schema_version() -> None:
     fc_id = make_forecast_id(_PAIR, _AS_OF, _PROTO_VER, StrategyKind.ugh)
-    ev1 = make_evaluation_id(fc_id, "v1")
-    ev2 = make_evaluation_id(fc_id, "v2")
+    ev1 = make_evaluation_id(fc_id, _OC_ID, "v1")
+    ev2 = make_evaluation_id(fc_id, _OC_ID, "v2")
     assert ev1 != ev2
 
 
 def test_evaluation_id_differs_by_forecast_id() -> None:
     fc1 = make_forecast_id(_PAIR, _AS_OF, _PROTO_VER, StrategyKind.ugh)
     fc2 = make_forecast_id(_PAIR, _AS_OF, _PROTO_VER, StrategyKind.baseline_random_walk)
-    ev1 = make_evaluation_id(fc1, _SCHEMA_VER)
-    ev2 = make_evaluation_id(fc2, _SCHEMA_VER)
+    ev1 = make_evaluation_id(fc1, _OC_ID, _SCHEMA_VER)
+    ev2 = make_evaluation_id(fc2, _OC_ID, _SCHEMA_VER)
+    assert ev1 != ev2
+
+
+def test_evaluation_id_differs_by_outcome_id() -> None:
+    """Same forecast evaluated against two different outcomes must produce distinct IDs."""
+    fc_id = make_forecast_id(_PAIR, _AS_OF, _PROTO_VER, StrategyKind.ugh)
+    oc_id_a = make_outcome_id(_PAIR, _WINDOW_START, _WINDOW_END, "v1")
+    oc_id_b = make_outcome_id(_PAIR, datetime(2026, 3, 11, 8, 0, 0, tzinfo=JST),
+                              datetime(2026, 3, 12, 8, 0, 0, tzinfo=JST), "v1")
+    ev1 = make_evaluation_id(fc_id, oc_id_a, _SCHEMA_VER)
+    ev2 = make_evaluation_id(fc_id, oc_id_b, _SCHEMA_VER)
     assert ev1 != ev2
 
 
@@ -217,7 +230,7 @@ def test_forecast_batch_and_forecast_ids_are_distinct() -> None:
 def test_outcome_and_evaluation_ids_are_distinct() -> None:
     oc = make_outcome_id(_PAIR, _WINDOW_START, _WINDOW_END, _SCHEMA_VER)
     fc_id = make_forecast_id(_PAIR, _AS_OF, _PROTO_VER, StrategyKind.ugh)
-    ev = make_evaluation_id(fc_id, _SCHEMA_VER)
+    ev = make_evaluation_id(fc_id, oc, _SCHEMA_VER)
     assert oc != ev
     assert oc.startswith("oc_")
     assert ev.startswith("ev_")
@@ -252,7 +265,7 @@ def test_all_four_id_types_have_distinct_prefixes() -> None:
     fc = make_forecast_id(_PAIR, _AS_OF, _PROTO_VER, StrategyKind.ugh)
     oc = make_outcome_id(_PAIR, _WINDOW_START, _WINDOW_END, _SCHEMA_VER)
     fc_id = make_forecast_id(_PAIR, _AS_OF, _PROTO_VER, StrategyKind.ugh)
-    ev = make_evaluation_id(fc_id, _SCHEMA_VER)
+    ev = make_evaluation_id(fc_id, oc, _SCHEMA_VER)
 
     prefixes = {fb[:3], fc[:3], oc[:3], ev[:3]}
     assert len(prefixes) == 4
