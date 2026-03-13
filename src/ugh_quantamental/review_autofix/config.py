@@ -35,7 +35,15 @@ def _parse_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
         return default
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
+    value = raw.strip().lower()
+    true_tokens = {"1", "true", "yes", "on"}
+    false_tokens = {"0", "false", "no", "off"}
+    if value in true_tokens:
+        return True
+    if value in false_tokens:
+        return False
+    allowed = ", ".join(sorted(true_tokens | false_tokens))
+    raise ValueError(f"invalid boolean env {name}={raw!r}; expected one of: {allowed}")
 
 
 def _parse_csv(name: str, default: str = "") -> tuple[str, ...]:
