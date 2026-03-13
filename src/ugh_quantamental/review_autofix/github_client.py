@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
 from .models import ReviewContext, ReviewKind
+
+_REVIEW_EVENTS = {"pull_request_review_comment", "pull_request_review"}
 
 
 @dataclass(frozen=True)
@@ -55,8 +57,27 @@ def load_event_from_env() -> GithubEvent:
     )
 
 
+def is_review_event(event: GithubEvent) -> bool:
+    return event.event_name in _REVIEW_EVENTS
+
+
+def _body_hash(body: str) -> str:
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+
+
+def _build_version_discriminator(item: dict, body: str) -> str:
+    timestamp = item.get("updated_at") or item.get("submitted_at") or item.get("created_at") or ""
+    return f"{timestamp}:{_body_hash(body)}"
+
+
 def build_review_context(event: GithubEvent) -> ReviewContext:
+    if not is_review_event(event):
+        raise ValueError(f"unsupported event: {event.event_name}")
+
     payload = event.payload
+    if "pull_request" not in payload:
+        raise ValueError("missing pull_request payload")
+
     repo = payload["repository"]["full_name"]
     pr = payload["pull_request"]
     base_ref = pr["base"]["ref"]
@@ -66,6 +87,7 @@ def build_review_context(event: GithubEvent) -> ReviewContext:
 
     if event.event_name == "pull_request_review_comment":
         comment = payload["comment"]
+        body = comment.get("body", "")
         return ReviewContext(
             kind=ReviewKind.diff_comment,
             repository=repo,
@@ -77,9 +99,10 @@ def build_review_context(event: GithubEvent) -> ReviewContext:
             head_ref=head_ref,
             same_repo=same_repo,
             reviewer_login=comment.get("user", {}).get("login"),
-            body=comment.get("body", ""),
+            body=body,
             path=comment.get("path"),
             diff_hunk=comment.get("diff_hunk"),
+            version_discriminator=_build_version_discriminator(comment, body),
         )
 
     review = payload["review"]
@@ -104,4 +127,5 @@ def build_review_context(event: GithubEvent) -> ReviewContext:
         body=body,
         path=path,
         diff_hunk=None,
+        version_discriminator=_build_version_discriminator(review, body),
     )

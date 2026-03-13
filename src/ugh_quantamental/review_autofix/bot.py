@@ -6,7 +6,7 @@ import os
 from .classifier import classify_review
 from .config import load_config
 from .git_ops import commit_changes, has_changes, push_head_branch
-from .github_client import GithubClient, build_review_context, load_event_from_env
+from .github_client import GithubClient, build_review_context, is_review_event, load_event_from_env
 from .models import Classification, ProcessResult
 from .rules import RuleRegistry
 from .state_store import FileStateStore
@@ -15,8 +15,8 @@ from .validator import run_validation
 
 def _processed_key(context) -> str:
     if context.review_comment_id is not None:
-        return f"review_comment:{context.review_comment_id}:{context.head_sha}"
-    return f"review:{context.review_id}:{context.head_sha}"
+        return f"review_comment:{context.review_comment_id}:{context.head_sha}:{context.version_discriminator}"
+    return f"review:{context.review_id}:{context.head_sha}:{context.version_discriminator}"
 
 
 def _reply(client: GithubClient, context, body: str) -> None:
@@ -30,7 +30,15 @@ def run() -> ProcessResult:
     config = load_config()
     logging.basicConfig(level=config.log_level)
     event = load_event_from_env()
-    context = build_review_context(event)
+
+    if not is_review_event(event):
+        return ProcessResult("event:unsupported", Classification.skip, None, False, False, False, False, "unsupported-event")
+
+    try:
+        context = build_review_context(event)
+    except ValueError:
+        return ProcessResult("event:invalid", Classification.skip, None, False, False, False, False, "invalid-event-payload")
+
     state = FileStateStore(os.getenv("STATE_STORE_PATH", ".autofix-bot/state.json"))
     key = _processed_key(context)
     if state.seen(key):

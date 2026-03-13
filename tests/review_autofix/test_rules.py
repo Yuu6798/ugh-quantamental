@@ -19,6 +19,7 @@ def _context(body: str, path: str) -> ReviewContext:
         body=body,
         path=path,
         diff_hunk="@@",
+        version_discriminator="2024-01-01T00:00:00Z:deadbeef",
     )
 
 

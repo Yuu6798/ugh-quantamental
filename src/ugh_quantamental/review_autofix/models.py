@@ -30,6 +30,7 @@ class ReviewContext:
     body: str
     path: str | None
     diff_hunk: str | None
+    version_discriminator: str
 
 
 @dataclass(frozen=True)
