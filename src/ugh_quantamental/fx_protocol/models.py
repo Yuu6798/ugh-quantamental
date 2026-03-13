@@ -618,6 +618,10 @@ class EvaluationRecord(BaseModel):
         ``range_hit`` is also rejected for baselines: baselines carry no forecast price
         envelope, so a non-``None`` value is semantically invalid and would skew
         downstream range-hit metrics.
+
+        For UGH evaluations, ``range_hit`` must be non-``None``: UGH forecasts always
+        produce an ``expected_range``, so a ``None`` value means range-hit computation
+        was skipped and the record is incomplete.
         """
         if self.strategy_kind in _BASELINE_STRATEGY_KINDS:
             set_fields = [f for f in _UGH_EVAL_ONLY_FIELDS if getattr(self, f) is not None]
@@ -631,17 +635,31 @@ class EvaluationRecord(BaseModel):
                     f"baseline strategy_kind='{self.strategy_kind.value}' must have "
                     "range_hit=None (no forecast envelope exists for baselines)"
                 )
+        elif self.strategy_kind == StrategyKind.ugh:
+            if self.range_hit is None:
+                raise ValueError(
+                    "strategy_kind='ugh' requires range_hit to be set "
+                    "(UGH forecasts always include expected_range)"
+                )
         return self
 
     @model_validator(mode="after")
     def _validate_disconfirmer_consistency(self) -> EvaluationRecord:
-        """Require at least one fired disconfirmer before marking disconfirmer_explained.
+        """Enforce logical constraints on disconfirmer fields.
 
-        ``disconfirmer_explained=True`` with an empty ``disconfirmers_hit`` tuple is
-        logically impossible and would corrupt miss-attribution summaries.
+        1. ``disconfirmer_explained=True`` with an empty ``disconfirmers_hit`` tuple is
+           logically impossible and would corrupt miss-attribution summaries.
+        2. ``disconfirmer_explained=True`` on a directional hit (``direction_hit=True``)
+           is impossible: disconfirmers explain misses, not hits.  Allowing it produces
+           invalid miss-attribution data and skews downstream reporting.
         """
         if self.disconfirmer_explained is True and not self.disconfirmers_hit:
             raise ValueError(
                 "disconfirmer_explained=True requires at least one entry in disconfirmers_hit"
+            )
+        if self.disconfirmer_explained is True and self.direction_hit is True:
+            raise ValueError(
+                "disconfirmer_explained=True is invalid when direction_hit=True "
+                "(disconfirmers explain misses only)"
             )
         return self

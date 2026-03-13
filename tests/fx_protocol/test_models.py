@@ -174,6 +174,7 @@ def _evaluation(**overrides) -> EvaluationRecord:
         pair=CurrencyPair.USDJPY,
         strategy_kind=StrategyKind.ugh,
         direction_hit=True,
+        range_hit=True,          # UGH evaluations always require a non-None range_hit
         evaluated_at_utc=_NOW,
         theory_version="v1",
         engine_version="v1",
@@ -629,7 +630,7 @@ def test_outcome_record_event_tags() -> None:
 def test_evaluation_record_valid() -> None:
     rec = _evaluation()
     assert rec.direction_hit is True
-    assert rec.range_hit is None
+    assert rec.range_hit is True
 
 
 def test_evaluation_record_has_realized_state_proxy() -> None:
@@ -654,7 +655,7 @@ def test_evaluation_record_disconfirmers_hit_empty() -> None:
 
 
 def test_evaluation_record_disconfirmers_hit_with_ids() -> None:
-    rec = _evaluation(disconfirmers_hit=("dc_01", "dc_02"), disconfirmer_explained=True)
+    rec = _evaluation(direction_hit=False, disconfirmers_hit=("dc_01", "dc_02"), disconfirmer_explained=True)
     assert "dc_01" in rec.disconfirmers_hit
     assert rec.disconfirmer_explained is True
 
@@ -1033,8 +1034,8 @@ def test_evaluation_record_disconfirmer_explained_without_fired_disconfirmers_ra
 
 
 def test_evaluation_record_disconfirmer_explained_with_fired_disconfirmers_accepted() -> None:
-    """disconfirmer_explained=True with at least one fired disconfirmer is valid."""
-    rec = _evaluation(disconfirmer_explained=True, disconfirmers_hit=("vol_spike",))
+    """disconfirmer_explained=True with at least one fired disconfirmer on a miss is valid."""
+    rec = _evaluation(direction_hit=False, disconfirmer_explained=True, disconfirmers_hit=("vol_spike",))
     assert rec.disconfirmer_explained is True
     assert "vol_spike" in rec.disconfirmers_hit
 
@@ -1258,7 +1259,7 @@ def test_evaluation_record_baseline_range_hit_none_accepted(
     strategy_kind: StrategyKind,
 ) -> None:
     """range_hit=None is valid for all baseline strategy kinds."""
-    rec = _evaluation(strategy_kind=strategy_kind)
+    rec = _evaluation(strategy_kind=strategy_kind, range_hit=None)
     assert rec.range_hit is None
 
 
@@ -1343,3 +1344,51 @@ def test_evaluation_record_utc_aware_evaluated_at_utc_stored_unchanged() -> None
     """UTC-aware evaluated_at_utc is stored as-is."""
     rec = _evaluation(evaluated_at_utc=_NOW)
     assert rec.evaluated_at_utc == _NOW
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — UGH range_hit required (r2930345104)
+# ---------------------------------------------------------------------------
+
+
+def test_evaluation_record_ugh_range_hit_none_raises() -> None:
+    """UGH evaluations must have a non-None range_hit."""
+    with pytest.raises(
+        ValidationError,
+        match="strategy_kind='ugh' requires range_hit to be set",
+    ):
+        _evaluation(range_hit=None)
+
+
+@pytest.mark.parametrize("range_hit_value", [True, False])
+def test_evaluation_record_ugh_range_hit_set_accepted(range_hit_value: bool) -> None:
+    """range_hit=True or False is valid for UGH evaluations."""
+    rec = _evaluation(range_hit=range_hit_value)
+    assert rec.range_hit is range_hit_value
+
+
+# ---------------------------------------------------------------------------
+# EvaluationRecord — disconfirmer_explained invalid on directional hit (r2930345109)
+# ---------------------------------------------------------------------------
+
+
+def test_evaluation_record_disconfirmer_explained_true_on_hit_raises() -> None:
+    """disconfirmer_explained=True with direction_hit=True must be rejected."""
+    with pytest.raises(
+        ValidationError,
+        match="disconfirmer_explained=True is invalid when direction_hit=True",
+    ):
+        _evaluation(direction_hit=True, disconfirmer_explained=True, disconfirmers_hit=("vol_spike",))
+
+
+def test_evaluation_record_disconfirmer_explained_true_on_miss_accepted() -> None:
+    """disconfirmer_explained=True with direction_hit=False (a miss) is valid."""
+    rec = _evaluation(direction_hit=False, disconfirmer_explained=True, disconfirmers_hit=("vol_spike",))
+    assert rec.disconfirmer_explained is True
+    assert rec.direction_hit is False
+
+
+def test_evaluation_record_disconfirmer_explained_false_on_hit_accepted() -> None:
+    """disconfirmer_explained=False with direction_hit=True is valid."""
+    rec = _evaluation(direction_hit=True, disconfirmer_explained=False)
+    assert rec.disconfirmer_explained is False
