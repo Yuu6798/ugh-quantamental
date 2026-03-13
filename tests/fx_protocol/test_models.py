@@ -241,6 +241,25 @@ def test_expected_range_non_finite_high(bad_value: float) -> None:
         ExpectedRange(low_price=149.0, high_price=bad_value)
 
 
+@pytest.mark.parametrize("bad_value", [-1.0, -0.001])
+def test_expected_range_negative_low_price_raises(bad_value: float) -> None:
+    """Negative low_price violates market-price domain and must be rejected."""
+    with pytest.raises(ValidationError, match="price must be positive"):
+        ExpectedRange(low_price=bad_value, high_price=151.0)
+
+
+def test_expected_range_zero_low_price_raises() -> None:
+    """Zero low_price is not a valid market price."""
+    with pytest.raises(ValidationError, match="price must be positive"):
+        ExpectedRange(low_price=0.0, high_price=151.0)
+
+
+def test_expected_range_negative_high_price_raises() -> None:
+    """Negative high_price must be rejected even if >= low_price."""
+    with pytest.raises(ValidationError, match="price must be positive"):
+        ExpectedRange(low_price=-2.0, high_price=-1.0)
+
+
 # ---------------------------------------------------------------------------
 # MarketDataProvenance tests
 # ---------------------------------------------------------------------------
@@ -1038,13 +1057,15 @@ def test_forecast_record_expected_close_change_bp_non_finite_raises(bad_value: f
 
 def test_forecast_record_expected_close_change_bp_zero_accepted() -> None:
     """Zero is a valid finite value for expected_close_change_bp (flat forecast)."""
-    rec = _ugh_forecast(expected_close_change_bp=0.0)
+    rec = _baseline_forecast(StrategyKind.baseline_random_walk,
+                             forecast_direction=ForecastDirection.flat,
+                             expected_close_change_bp=0.0)
     assert rec.expected_close_change_bp == 0.0
 
 
 def test_forecast_record_expected_close_change_bp_negative_accepted() -> None:
     """Negative finite values are valid (downside forecast)."""
-    rec = _ugh_forecast(expected_close_change_bp=-45.5)
+    rec = _ugh_forecast(forecast_direction=ForecastDirection.down, expected_close_change_bp=-45.5)
     assert rec.expected_close_change_bp == -45.5
 
 
@@ -1113,3 +1134,51 @@ def test_evaluation_record_error_metric_finite_accepted(field: str) -> None:
     """A finite float value is accepted for evaluation error metrics."""
     rec = _evaluation(**{field: -12.5})
     assert getattr(rec, field) == pytest.approx(-12.5)
+
+
+# ---------------------------------------------------------------------------
+# ForecastRecord — direction / bp sign consistency (r2929167108)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bp", [-10.0, -0.001, 0.0])
+def test_forecast_record_up_direction_non_positive_bp_raises(bp: float) -> None:
+    """forecast_direction='up' with non-positive bp must be rejected."""
+    with pytest.raises(ValidationError, match="forecast_direction='up' requires expected_close_change_bp > 0"):
+        _ugh_forecast(forecast_direction=ForecastDirection.up, expected_close_change_bp=bp)
+
+
+@pytest.mark.parametrize("bp", [10.0, 0.001, 0.0])
+def test_forecast_record_down_direction_non_negative_bp_raises(bp: float) -> None:
+    """forecast_direction='down' with non-negative bp must be rejected."""
+    with pytest.raises(ValidationError, match="forecast_direction='down' requires expected_close_change_bp < 0"):
+        _ugh_forecast(forecast_direction=ForecastDirection.down, expected_close_change_bp=bp)
+
+
+@pytest.mark.parametrize("bp", [10.0, -10.0, 0.001])
+def test_forecast_record_flat_direction_non_zero_bp_raises(bp: float) -> None:
+    """forecast_direction='flat' with non-zero bp must be rejected."""
+    with pytest.raises(ValidationError, match="forecast_direction='flat' requires expected_close_change_bp == 0"):
+        _ugh_forecast(forecast_direction=ForecastDirection.flat, expected_close_change_bp=bp)
+
+
+def test_forecast_record_up_direction_positive_bp_accepted() -> None:
+    rec = _ugh_forecast(forecast_direction=ForecastDirection.up, expected_close_change_bp=30.0)
+    assert rec.forecast_direction == ForecastDirection.up
+
+
+def test_forecast_record_down_direction_negative_bp_accepted() -> None:
+    rec = _ugh_forecast(forecast_direction=ForecastDirection.down, expected_close_change_bp=-30.0)
+    assert rec.forecast_direction == ForecastDirection.down
+
+
+def test_forecast_record_flat_direction_zero_bp_accepted() -> None:
+    rec = _baseline_forecast(StrategyKind.baseline_random_walk,
+                             forecast_direction=ForecastDirection.flat,
+                             expected_close_change_bp=0.0)
+    assert rec.forecast_direction == ForecastDirection.flat
+
+
+# ---------------------------------------------------------------------------
+# ExpectedRange — positive price domain (r2929167112)
+# ---------------------------------------------------------------------------

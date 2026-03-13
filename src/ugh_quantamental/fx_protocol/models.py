@@ -85,9 +85,11 @@ class ExpectedRange(BaseModel):
 
     @field_validator("low_price", "high_price")
     @classmethod
-    def _must_be_finite(cls, v: float) -> float:
+    def _must_be_finite_and_positive(cls, v: float) -> float:
         if not math.isfinite(v):
             raise ValueError("price must be finite")
+        if v <= 0:
+            raise ValueError("price must be positive")
         return v
 
     @model_validator(mode="after")
@@ -349,6 +351,29 @@ class ForecastRecord(BaseModel):
                     f"baseline strategy_kind='{self.strategy_kind.value}' must not include "
                     f"UGH-exclusive fields: {set_fields}"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_direction_bp_consistency(self) -> ForecastRecord:
+        """Enforce sign consistency between forecast_direction and expected_close_change_bp.
+
+        Inconsistent records (e.g. direction='up' with a negative bp) produce misleading
+        diagnostics because directional accuracy and magnitude metrics derive from
+        conflicting signals.
+        """
+        bp = self.expected_close_change_bp
+        if self.forecast_direction == ForecastDirection.up and bp <= 0:
+            raise ValueError(
+                "forecast_direction='up' requires expected_close_change_bp > 0"
+            )
+        if self.forecast_direction == ForecastDirection.down and bp >= 0:
+            raise ValueError(
+                "forecast_direction='down' requires expected_close_change_bp < 0"
+            )
+        if self.forecast_direction == ForecastDirection.flat and bp != 0.0:
+            raise ValueError(
+                "forecast_direction='flat' requires expected_close_change_bp == 0"
+            )
         return self
 
 
