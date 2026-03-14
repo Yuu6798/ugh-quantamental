@@ -63,7 +63,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BOT_MODE: ${{ vars.BOT_MODE || 'detect_only' }}
           TARGET_REVIEWERS: ${{ vars.TARGET_REVIEWERS || '' }}
-          ALLOWED_BOT_REVIEWERS: ${{ vars.ALLOWED_BOT_REVIEWERS || '' }}
+          ALLOWED_BOT_REVIEWERS: ${{ vars.ALLOWED_BOT_REVIEWERS || 'chatgpt-codex-connector[bot]' }}
           SELF_BOT_ACTORS: ${{ vars.SELF_BOT_ACTORS || 'github-actions[bot]' }}
           DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
           ALLOW_PUSH_ON_FORK: ${{ vars.ALLOW_PUSH_ON_FORK || 'false' }}
