@@ -238,10 +238,13 @@ def run_fx_daily_protocol_once(
         from ugh_quantamental.persistence.repositories import FxForecastRepository
 
         existing = FxForecastRepository.load_fx_forecast_batch(session, expected_batch_id)
-        if existing is not None:
+        if existing is not None and len(existing.forecasts) == 4:
+            # Complete batch already exists — idempotent skip.
             forecast_batch_id = existing.forecast_batch_id
             forecast_created = False
         else:
+            # Either no batch or a partial batch: delegate to the workflow which
+            # enforces completeness and raises on partial-batch corruption.
             result = run_daily_forecast_workflow(session, forecast_request)
             forecast_batch_id = result.forecast_batch_id
             forecast_created = True
@@ -251,7 +254,21 @@ def run_fx_daily_protocol_once(
     outcome_recorded = False
     evaluation_count = 0
 
+    # For outcome evaluation we additionally require that the prior-day forecast
+    # batch exists and is complete.  On a fresh or backfilled database the batch
+    # may be absent; proceeding without it would let run_daily_outcome_evaluation_workflow
+    # raise ValueError inside the transaction, rolling back the newly-created
+    # today's forecast batch.
+    _prior_batch_ready = False
     if config.run_outcome_evaluation and previous_window_matches(snapshot):
+        from ugh_quantamental.persistence.repositories import FxForecastRepository as _FxFR
+
+        prior_as_of = snapshot.completed_windows[-1].window_start_jst
+        prior_batch_id = make_forecast_batch_id(config.pair, prior_as_of, config.protocol_version)
+        prior_batch = _FxFR.load_fx_forecast_batch(session, prior_batch_id)
+        _prior_batch_ready = prior_batch is not None and len(prior_batch.forecasts) == 4
+
+    if _prior_batch_ready:
         outcome_request = build_daily_outcome_request(
             snapshot,
             schema_version=config.schema_version,
