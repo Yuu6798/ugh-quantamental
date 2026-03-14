@@ -18,13 +18,15 @@ from ugh_quantamental.engine.state_models import StateConfig, StateEngineResult,
 from sqlalchemy import select
 
 from ugh_quantamental.persistence.models import (
+    FxEvaluationRecord,
     FxForecastRecord,
+    FxOutcomeRecord,
     ProjectionRunRecord,
     RegressionSuiteBaselineRecord,
     StateRunRecord,
 )
 from ugh_quantamental.fx_protocol.forecast_models import PersistedDailyForecastBatch
-from ugh_quantamental.fx_protocol.models import ForecastRecord
+from ugh_quantamental.fx_protocol.models import EvaluationRecord, ForecastRecord, OutcomeRecord
 from ugh_quantamental.persistence.serializers import (
     dump_model_json,
     projection_payload_to_models,
@@ -312,4 +314,93 @@ class StateRunRepository:
             event_features=event_features,
             config=config,
             result=result,
+        )
+
+
+class FxOutcomeEvaluationRepository:
+    """Persistence adapter for FX outcome and evaluation records."""
+
+    @staticmethod
+    def save_fx_outcome_record(
+        session: Session,
+        *,
+        outcome: OutcomeRecord,
+    ) -> FxOutcomeRecord:
+        """Persist a canonical FX outcome record. Flushes but does not commit."""
+        record = FxOutcomeRecord(
+            outcome_id=outcome.outcome_id,
+            pair=outcome.pair.value,
+            window_start_jst=_normalize_created_at(outcome.window_start_jst),
+            window_end_jst=_normalize_created_at(outcome.window_end_jst),
+            protocol_version=outcome.protocol_version,
+            payload_json=dump_model_json(outcome),
+        )
+        session.add(record)
+        session.flush()
+        return record
+
+    @staticmethod
+    def load_fx_outcome_record(session: Session, outcome_id: str) -> OutcomeRecord | None:
+        """Load a canonical FX outcome record by primary key."""
+        record = session.get(FxOutcomeRecord, outcome_id)
+        if record is None:
+            return None
+        return OutcomeRecord.model_validate(record.payload_json)
+
+    @staticmethod
+    def save_fx_evaluation_batch(
+        session: Session,
+        *,
+        outcome_id: str,
+        evaluations: tuple[EvaluationRecord, ...],
+    ) -> tuple[FxEvaluationRecord, ...]:
+        """Persist a batch of FX evaluation records. Flushes but does not commit.
+
+        Requires the corresponding ``FxOutcomeRecord`` to already be present in the session
+        so that ``window_start_jst`` / ``window_end_jst`` columns can be populated.
+        """
+        outcome_rec = session.get(FxOutcomeRecord, outcome_id)
+        if outcome_rec is None:
+            raise ValueError(
+                f"Cannot save evaluations: FxOutcomeRecord {outcome_id!r} not found. "
+                "Save the outcome first."
+            )
+        records = []
+        for evaluation in evaluations:
+            record = FxEvaluationRecord(
+                evaluation_id=evaluation.evaluation_id,
+                forecast_id=evaluation.forecast_id,
+                outcome_id=outcome_id,
+                pair=evaluation.pair.value,
+                strategy_kind=evaluation.strategy_kind.value,
+                window_start_jst=outcome_rec.window_start_jst,
+                window_end_jst=outcome_rec.window_end_jst,
+                protocol_version=evaluation.protocol_version,
+                payload_json=dump_model_json(evaluation),
+            )
+            session.add(record)
+            records.append(record)
+        session.flush()
+        return tuple(records)
+
+    @staticmethod
+    def load_fx_evaluation_batch(
+        session: Session,
+        outcome_id: str,
+    ) -> tuple[EvaluationRecord, ...] | None:
+        """Load all evaluation records for a given outcome_id.
+
+        Returns ``None`` if no records exist, or a tuple of ``EvaluationRecord`` instances.
+        """
+        records = tuple(
+            session.execute(
+                select(FxEvaluationRecord)
+                .where(FxEvaluationRecord.outcome_id == outcome_id)
+                .order_by(FxEvaluationRecord.evaluation_id.asc())
+            ).scalars()
+        )
+        if not records:
+            return None
+        return tuple(
+            EvaluationRecord.model_validate(record.payload_json) for record in records
         )

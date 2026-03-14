@@ -26,11 +26,16 @@ from ugh_quantamental.fx_protocol.models import (
     OutcomeRecord,
     StrategyKind,
 )
+from ugh_quantamental.fx_protocol.outcome_models import (
+    DailyOutcomeWorkflowRequest,
+    PersistedOutcomeEvaluationBatch,
+)
 
 __all__ = [
     "BaselineContext",
     "DailyForecastBatch",
     "DailyForecastWorkflowRequest",
+    "DailyOutcomeWorkflowRequest",
     "CurrencyPair",
     "DisconfirmerRule",
     "EvaluationRecord",
@@ -40,6 +45,7 @@ __all__ = [
     "ForecastRecord",
     "MarketDataProvenance",
     "PersistedDailyForecastBatch",
+    "PersistedOutcomeEvaluationBatch",
     "OutcomeRecord",
     "StrategyKind",
 ]
