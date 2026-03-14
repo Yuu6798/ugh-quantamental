@@ -134,6 +134,36 @@ def test_import_rule_does_not_modify_multiline_string(tmp_path: Path, monkeypatc
     assert target.read_text(encoding="utf-8") == "doc = \"\"\"\nimport  fake\n\"\"\"\nimport os\n"
 
 
+def test_import_rule_missing_target_file_is_safe_noop(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    missing = tmp_path / "missing.py"
+    context = _context("lint: sort imports", str(missing))
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is False
+    assert result.details == "missing file"
+
+
+def test_import_rule_existing_file_behavior_unchanged(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    target = tmp_path / "sample.py"
+    target.write_text("import  os\nx = 1\n", encoding="utf-8")
+    context = _context("lint: sort imports", str(target))
+
+    registry = RuleRegistry()
+    rule = registry.match(context)
+    assert rule is not None
+
+    result = rule.apply(context)
+    assert result.changed is True
+    assert result.details == "applied"
+    assert target.read_text(encoding="utf-8") == "import os\nx = 1\n"
+
+
 
 def test_import_rule_preserves_lf_newlines(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
