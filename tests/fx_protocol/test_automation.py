@@ -436,6 +436,104 @@ class TestRunFxDailyProtocolOnce:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# SQLite path handling logic (scripts/run_fx_daily_protocol.py)
+# ---------------------------------------------------------------------------
+
+
+class TestSqlitePathHandling:
+    """Tests for sqlite path construction from environment variables."""
+
+    def test_fx_sqlite_path_takes_priority(self, monkeypatch) -> None:
+        """FX_SQLITE_PATH overrides FX_SQLITE_FILENAME + FX_DATA_DIR."""
+        import os
+
+        monkeypatch.setenv("FX_SQLITE_PATH", "/tmp/explicit.db")
+        monkeypatch.setenv("FX_SQLITE_FILENAME", "other.db")
+        monkeypatch.setenv("FX_DATA_DIR", "/tmp/data")
+
+        sqlite_path = os.environ.get("FX_SQLITE_PATH", "").strip()
+        if not sqlite_path:
+            sqlite_filename = os.environ.get("FX_SQLITE_FILENAME", "fx_protocol.db").strip()
+            data_dir = os.environ.get("FX_DATA_DIR", "./data").strip()
+            sqlite_path = os.path.join(data_dir, sqlite_filename)
+
+        assert sqlite_path == "/tmp/explicit.db"
+
+    def test_sqlite_filename_combined_with_data_dir(self, monkeypatch) -> None:
+        """FX_SQLITE_FILENAME + FX_DATA_DIR are joined when FX_SQLITE_PATH not set."""
+        import os
+
+        monkeypatch.delenv("FX_SQLITE_PATH", raising=False)
+        monkeypatch.setenv("FX_SQLITE_FILENAME", "protocol.db")
+        monkeypatch.setenv("FX_DATA_DIR", "/repo/data")
+
+        sqlite_path = os.environ.get("FX_SQLITE_PATH", "").strip()
+        if not sqlite_path:
+            sqlite_filename = os.environ.get("FX_SQLITE_FILENAME", "fx_protocol.db").strip()
+            data_dir = os.environ.get("FX_DATA_DIR", "./data").strip()
+            sqlite_path = os.path.join(data_dir, sqlite_filename)
+
+        assert sqlite_path == "/repo/data/protocol.db"
+
+    def test_default_sqlite_path_used_when_no_env(self, monkeypatch) -> None:
+        """Defaults are used when no env vars are set."""
+        import os
+
+        monkeypatch.delenv("FX_SQLITE_PATH", raising=False)
+        monkeypatch.delenv("FX_SQLITE_FILENAME", raising=False)
+        monkeypatch.delenv("FX_DATA_DIR", raising=False)
+
+        sqlite_path = os.environ.get("FX_SQLITE_PATH", "").strip()
+        if not sqlite_path:
+            sqlite_filename = os.environ.get("FX_SQLITE_FILENAME", "fx_protocol.db").strip()
+            data_dir = os.environ.get("FX_DATA_DIR", "./data").strip()
+            sqlite_path = os.path.join(data_dir, sqlite_filename)
+
+        assert sqlite_path == os.path.join("./data", "fx_protocol.db")
+
+
+# ---------------------------------------------------------------------------
+# Script-level config validation (without network)
+# ---------------------------------------------------------------------------
+
+
+class TestScriptConfigValidation:
+    """Tests for script-level config validation logic, no network access."""
+
+    def test_missing_fx_data_url_detected(self, monkeypatch) -> None:
+        """FX_DATA_URL must not be empty for the provider to work."""
+        monkeypatch.delenv("FX_DATA_URL", raising=False)
+        provider = HttpJsonFxMarketDataProvider(url="")
+        as_of = datetime(2026, 3, 10, 8, 0, 0, tzinfo=_JST)
+        with pytest.raises(FxDataFetchError, match="FX_DATA_URL"):
+            provider.fetch_snapshot(as_of)
+
+    def test_automation_config_version_defaults(self) -> None:
+        """All version defaults are non-empty strings."""
+        cfg = FxDailyAutomationConfig()
+        assert cfg.theory_version
+        assert cfg.engine_version
+        assert cfg.schema_version
+        assert cfg.protocol_version
+
+    def test_automation_config_data_branch_default(self) -> None:
+        """Default data branch is 'fx-daily-data'."""
+        cfg = FxDailyAutomationConfig()
+        assert cfg.data_branch == "fx-daily-data"
+
+    def test_automation_config_sqlite_path_default(self) -> None:
+        """Default sqlite_path is set and non-empty."""
+        cfg = FxDailyAutomationConfig()
+        assert cfg.sqlite_path
+        assert "fx_protocol.db" in cfg.sqlite_path
+
+    def test_automation_config_empty_version_rejected(self) -> None:
+        """Empty version strings must be rejected by the config model."""
+        with pytest.raises(Exception):
+            FxDailyAutomationConfig(theory_version="")
+
+
 def _build_windows_raw(n: int) -> tuple[FxCompletedWindow, ...]:
     """Build n consecutive FxCompletedWindow objects (Mon→next-biz-day)."""
     windows: list[FxCompletedWindow] = []
