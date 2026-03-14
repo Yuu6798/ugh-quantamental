@@ -365,6 +365,182 @@ def test_codex_review_without_legacy_keywords_reaches_executor(tmp_path: Path, m
     assert submitted, "executor must have been called"
 
 
+def _write_review_event_no_path(path: Path, reviewer: str = "chatgpt-codex-connector[bot]") -> None:
+    """pull_request_review event with no file:/path: hint in the review body."""
+    payload = {
+        "repository": {"full_name": "acme/repo"},
+        "pull_request": {
+            "number": 12,
+            "base": {"ref": "main"},
+            "head": {"ref": "feature", "sha": "abc", "repo": {"full_name": "acme/repo"}},
+        },
+        "review": {
+            "id": 10,
+            "user": {"login": reviewer},
+            "body": "P1 please set range_hit to None",  # no file: hint
+            "submitted_at": "2024-01-01T00:00:00Z",
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+_FAKE_INLINE_COMMENT: dict = {
+    "id": 44,
+    "pull_request_review_id": 10,
+    "user": {"login": "chatgpt-codex-connector[bot]"},
+    "body": "P1 please set range_hit to None",
+    "path": "dummy.py",
+    "diff_hunk": "@@",
+    "line": 310,
+    "start_line": 310,
+    "updated_at": "2024-01-01T00:00:00Z",
+    "node_id": "PRRC_node_44",
+}
+
+
+class _FakeGithubClientWithInlineComments:
+    """Fake GithubClient that returns configurable inline comments for the fallback path."""
+
+    markers: set[str] = set()
+    inline_comments: tuple[dict, ...] = ()
+
+    def __init__(self, token: str, api_url: str = "https://api.github.com") -> None:
+        del token, api_url
+
+    def has_processed_marker(self, context, marker: str) -> bool:
+        del context
+        return marker in self.markers
+
+    def persist_marker(self, context, marker: str) -> None:
+        del context
+        self.markers.add(marker)
+
+    def reply_to_review_comment(self, repo: str, comment_id: int, body: str) -> None:
+        del repo, comment_id
+        self.markers.add(body.splitlines()[-1])
+
+    def reply_to_pr(self, repo: str, pr_number: int, body: str) -> None:
+        del repo, pr_number
+        self.markers.add(body.splitlines()[-1])
+
+    def list_review_comments_for_review(self, repo: str, pr_number: int, review_id: int) -> tuple[dict, ...]:
+        del repo, pr_number, review_id
+        return self.inline_comments
+
+
+def test_review_body_no_path_with_inline_comment_expands_and_processes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """review_body + no file hint + related inline comment → skip does NOT occur; inline comment
+    is classified and processed instead."""
+    _FakeGithubClientWithInlineComments.markers = set()
+    _FakeGithubClientWithInlineComments.inline_comments = (_FAKE_INLINE_COMMENT,)
+
+    event = tmp_path / "event.json"
+    _write_review_event_no_path(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review")
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setattr(bot, "GithubClient", _FakeGithubClientWithInlineComments)
+
+    stub = _ExecutorStub(
+        CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
+        CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
+    )
+    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    result = bot.run()
+
+    assert result.reason == "pushed"
+    assert stub.submitted_prompts, "executor must have been called for the inline comment"
+    # processed_key should reflect the inline comment, not the review body
+    assert result.processed_key.startswith("review_comment:")
+
+
+def test_review_body_no_path_without_inline_comments_skips_with_descriptive_reason(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """review_body + no file hint + no inline comments → skip with specific reason."""
+    _FakeGithubClientWithInlineComments.markers = set()
+    _FakeGithubClientWithInlineComments.inline_comments = ()
+
+    event = tmp_path / "event.json"
+    _write_review_event_no_path(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review")
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setattr(bot, "GithubClient", _FakeGithubClientWithInlineComments)
+
+    called = {"executor": False}
+
+    def _builder(command, timeout_seconds):
+        del command, timeout_seconds
+        called["executor"] = True
+        raise AssertionError("executor should not run when no inline comments exist")
+
+    monkeypatch.setattr(bot, "build_executor", _builder)
+
+    result = bot.run()
+
+    assert result.reason == "review-body-no-path-no-inline-comments"
+    assert result.classification == bot.Classification.skip
+    assert called["executor"] is False
+
+
+def test_review_body_fallback_deduplicates_on_second_run(tmp_path: Path, monkeypatch) -> None:
+    """The same pull_request_review event must not trigger re-processing on a second bot run.
+    Both the review body key and the inline comment key are marked; the second run must be
+    recognised as a duplicate via the GitHub marker."""
+    _FakeGithubClientWithInlineComments.markers = set()
+    _FakeGithubClientWithInlineComments.inline_comments = (_FAKE_INLINE_COMMENT,)
+
+    event = tmp_path / "event.json"
+    _write_review_event_no_path(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review")
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setattr(bot, "GithubClient", _FakeGithubClientWithInlineComments)
+
+    stub = _ExecutorStub(
+        CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
+        CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
+    )
+    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    first = bot.run()
+    assert first.reason == "pushed"
+
+    # New state store to defeat file-based dedupe; GitHub marker dedupe must catch it.
+    monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state-2.json"))
+    second = bot.run()
+    assert second.reason == "duplicate"
+
+
+def test_review_body_fallback_does_not_affect_diff_comment_events(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Existing pull_request_review_comment events continue to process without any fallback."""
+    event = tmp_path / "event.json"
+    _write_comment_event(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review_comment")
+
+    stub = _ExecutorStub(
+        CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
+        CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
+    )
+    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    result = bot.run()
+    assert result.reason == "pushed"
+    assert result.processed_key.startswith("review_comment:")
+
+
 def test_invalid_review_body_path_hint_skips_without_executor(tmp_path: Path, monkeypatch) -> None:
     event = tmp_path / "event.json"
     _write_review_event(event)

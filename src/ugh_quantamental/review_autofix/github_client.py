@@ -69,6 +69,15 @@ class GithubClient:
     def list_review_comments(self, repo: str, pr_number: int) -> tuple[dict, ...]:
         return self._list_paginated(f"/repos/{repo}/pulls/{pr_number}/comments")
 
+    def list_review_comments_for_review(
+        self, repo: str, pr_number: int, review_id: int
+    ) -> tuple[dict, ...]:
+        """Return inline diff comments that belong to the given review_id."""
+        return tuple(
+            c for c in self.list_review_comments(repo, pr_number)
+            if c.get("pull_request_review_id") == review_id
+        )
+
     def list_issue_comments(self, repo: str, pr_number: int) -> tuple[dict, ...]:
         return self._list_paginated(f"/repos/{repo}/issues/{pr_number}/comments")
 
@@ -174,6 +183,34 @@ def _sanitize_review_body_path_hint(raw: str) -> str | None:
     if normalized.startswith("../"):
         return None
     return normalized
+
+
+def build_context_from_inline_comment(base_context: ReviewContext, comment: dict) -> ReviewContext:
+    """Build a diff_comment ReviewContext from a raw GitHub comment dict.
+
+    PR-level metadata (repo, head_sha, refs, same_repo) is inherited from *base_context*
+    so callers do not need to re-parse the original event payload.
+    """
+    body = comment.get("body", "")
+    return ReviewContext(
+        kind=ReviewKind.diff_comment,
+        repository=base_context.repository,
+        pr_number=base_context.pr_number,
+        review_id=comment.get("pull_request_review_id"),
+        review_comment_id=comment["id"],
+        head_sha=base_context.head_sha,
+        base_ref=base_context.base_ref,
+        head_ref=base_context.head_ref,
+        same_repo=base_context.same_repo,
+        reviewer_login=((comment.get("user") or {}).get("login")),
+        body=body,
+        path=comment.get("path"),
+        diff_hunk=comment.get("diff_hunk"),
+        line=comment.get("line"),
+        start_line=comment.get("start_line"),
+        version_discriminator=_build_version_discriminator(comment, body),
+        review_comment_node_id=comment.get("node_id"),
+    )
 
 
 def build_review_context(event: GithubEvent) -> ReviewContext:
