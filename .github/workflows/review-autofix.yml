@@ -13,7 +13,22 @@ permissions:
 
 jobs:
   review-autofix:
-    if: github.event_name != 'pull_request_review' || github.event.review.state != 'approved'
+    # Skip jobs triggered by actors not in the configured allowlist.
+    # This is a cost-optimisation gate only — bot.py performs the authoritative
+    # actor check at runtime using the same ALLOWED_BOT_REVIEWERS value.
+    # contains() does substring matching on the CSV variable, which is sufficient
+    # for bot login names and avoids hardcoding a single bot identity here.
+    if: >-
+      (
+        github.event_name == 'pull_request_review_comment' &&
+        contains(vars.ALLOWED_BOT_REVIEWERS || 'chatgpt-codex-connector[bot]', github.event.comment.user.login)
+      ) || (
+        github.event_name == 'pull_request_review' &&
+        github.event.review.state != 'approved' &&
+        contains(vars.ALLOWED_BOT_REVIEWERS || 'chatgpt-codex-connector[bot]', github.event.review.user.login)
+      ) || (
+        github.event_name == 'workflow_dispatch'
+      )
     runs-on: ubuntu-latest
     concurrency:
       group: review-autofix-${{ github.event.pull_request.number || github.ref_name }}

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 
-from .classifier import classify_review
+from .classifier import classify_codex_review
 from .codex_executor import build_executor
 from .config import BotConfig, load_config
 from .executor_models import CodexExecutionStatus
@@ -85,14 +85,17 @@ def run() -> ProcessResult:
     if config.target_reviewers and (context.reviewer_login or "") not in config.target_reviewers:
         return ProcessResult(key, Classification.skip, None, False, False, False, False, "reviewer-filter")
 
-    classification = classify_review(context)
-    if classification == Classification.skip:
-        state.mark(key)
-        return ProcessResult(key, classification, None, False, False, False, False, "skip")
-
+    # A "file:" / "path:" line-start hint was found but the path could not be sanitized
+    # (e.g. path traversal).  Reject before classification so the reason is distinct from
+    # a plain "no hint" skip and the state store still records it as processed.
     if context.kind.value == "review_body" and context.review_body_path_hint_present and context.path is None:
         state.mark(key)
         return ProcessResult(key, Classification.skip, None, False, False, False, False, "invalid-review-body-path")
+
+    classification = classify_codex_review(context)
+    if classification == Classification.skip:
+        state.mark(key)
+        return ProcessResult(key, classification, None, False, False, False, False, "skip")
 
     if not context.same_repo and not config.allow_push_on_fork:
         classification = Classification.propose_only
