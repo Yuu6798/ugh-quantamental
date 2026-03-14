@@ -34,6 +34,7 @@ class ReviewContext:
     start_line: int | None
     version_discriminator: str
     review_comment_node_id: str | None = None
+    review_body_path_hint_present: bool = False
 
 
 @dataclass(frozen=True)
