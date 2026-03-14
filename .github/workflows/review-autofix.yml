@@ -80,9 +80,11 @@ jobs:
           import os
           import runpy
           import sys
+          from pathlib import Path
 
-          trusted_src = os.environ["TRUSTED_SRC"]
+          trusted_src = str(Path(os.environ["TRUSTED_SRC"]).resolve())
+          cwd = str(Path.cwd().resolve())
           os.environ["PYTHONPATH"] = trusted_src
-          sys.path = [trusted_src, *[p for p in sys.path if p not in {"", "."}]]
+          sys.path = [trusted_src, *[p for p in sys.path if p not in {"", ".", cwd}]]
           runpy.run_module("ugh_quantamental.review_autofix.bot", run_name="__main__")
           PY

@@ -25,10 +25,11 @@ def _context(body: str, path: str, line: int = 1) -> ReviewContext:
     )
 
 
-def test_none_rule_rewrites_range_hit_assignment(tmp_path: Path) -> None:
+def test_none_rule_rewrites_range_hit_assignment(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_text("range_hit = 0.5\n", encoding="utf-8")
-    context = _context("Please set range_hit to None", str(target))
+    context = _context("Please set range_hit to None", "sample.py")
 
     registry = RuleRegistry()
     rule = registry.match(context)
@@ -39,9 +40,9 @@ def test_none_rule_rewrites_range_hit_assignment(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "range_hit = None\n"
 
 
-def test_none_rule_missing_target_file_is_safe_noop(tmp_path: Path) -> None:
-    missing = tmp_path / "missing.py"
-    context = _context("Please set range_hit to None", str(missing))
+def test_none_rule_missing_target_file_is_safe_noop(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    context = _context("Please set range_hit to None", "missing.py")
 
     registry = RuleRegistry()
     rule = registry.match(context)
@@ -52,10 +53,11 @@ def test_none_rule_missing_target_file_is_safe_noop(tmp_path: Path) -> None:
     assert result.details == "missing file"
 
 
-def test_none_rule_only_rewrites_reviewed_line(tmp_path: Path) -> None:
+def test_none_rule_only_rewrites_reviewed_line(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_text("range_hit = 0.5\nother = 1\nrange_hit = 0.7\ntext = 'range_hit = 0.9'\n", encoding="utf-8")
-    context = _context("Please set range_hit to None", str(target), line=3)
+    context = _context("Please set range_hit to None", "sample.py", line=3)
 
     registry = RuleRegistry()
     rule = registry.match(context)
@@ -66,10 +68,11 @@ def test_none_rule_only_rewrites_reviewed_line(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "range_hit = 0.5\nother = 1\nrange_hit = None\ntext = 'range_hit = 0.9'\n"
 
 
-def test_none_rule_preserves_semicolon_suffix_content(tmp_path: Path) -> None:
+def test_none_rule_preserves_semicolon_suffix_content(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_text("range_hit = 0.5; audit()\n", encoding="utf-8")
-    context = _context("Please set range_hit to None", str(target))
+    context = _context("Please set range_hit to None", "sample.py")
 
     registry = RuleRegistry()
     rule = registry.match(context)
@@ -80,10 +83,11 @@ def test_none_rule_preserves_semicolon_suffix_content(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "range_hit = None; audit()\n"
 
 
-def test_none_rule_preserves_inline_comment_suffix(tmp_path: Path) -> None:
+def test_none_rule_preserves_inline_comment_suffix(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_text("range_hit = 0.5  # keep note\n", encoding="utf-8")
-    context = _context("Please set range_hit to None", str(target))
+    context = _context("Please set range_hit to None", "sample.py")
 
     registry = RuleRegistry()
     rule = registry.match(context)
@@ -94,10 +98,11 @@ def test_none_rule_preserves_inline_comment_suffix(tmp_path: Path) -> None:
     assert target.read_text(encoding="utf-8") == "range_hit = None  # keep note\n"
 
 
-def test_none_rule_preserves_unrelated_trailing_text(tmp_path: Path) -> None:
+def test_none_rule_preserves_unrelated_trailing_text(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_text("range_hit = 0.5; other = range_hit + 1\n", encoding="utf-8")
-    context = _context("Please set range_hit to None", str(target))
+    context = _context("Please set range_hit to None", "sample.py")
 
     registry = RuleRegistry()
     rule = registry.match(context)
@@ -276,7 +281,8 @@ def test_import_rule_selected_by_explicit_rule_id() -> None:
     assert rule.rule_id == "import-cleanup"
 
 
-def test_none_rule_review_body_fallback_applies_without_line(tmp_path: Path) -> None:
+def test_none_rule_review_body_fallback_applies_without_line(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_text("x = 1\nrange_hit = 0.5\n", encoding="utf-8")
     context = ReviewContext(
@@ -291,7 +297,7 @@ def test_none_rule_review_body_fallback_applies_without_line(tmp_path: Path) -> 
         same_repo=True,
         reviewer_login="reviewer",
         body="file: sample.py\nset range_hit to None",
-        path=str(target),
+        path="sample.py",
         diff_hunk=None,
         line=None,
         start_line=None,
@@ -322,7 +328,7 @@ def test_none_rule_review_body_generic_none_text_does_not_match(tmp_path: Path) 
         same_repo=True,
         reviewer_login="reviewer",
         body="file: sample.py\nnone of this should be auto fixed",
-        path=str(target),
+        path="sample.py",
         diff_hunk=None,
         line=None,
         start_line=None,
@@ -348,7 +354,7 @@ def test_none_rule_review_body_generic_set_none_without_range_hit_does_not_match
         same_repo=True,
         reviewer_login="reviewer",
         body="file: sample.py\nPlease set foo to None",
-        path=str(target),
+        path="sample.py",
         diff_hunk=None,
         line=None,
         start_line=None,
@@ -359,10 +365,11 @@ def test_none_rule_review_body_generic_set_none_without_range_hit_does_not_match
     assert registry.match(context) is None
 
 
-def test_none_rule_diff_comment_without_line_still_noop(tmp_path: Path) -> None:
+def test_none_rule_diff_comment_without_line_still_noop(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_text("range_hit = 0.5\n", encoding="utf-8")
-    context = _context("Please set range_hit to None", str(target), line=1)
+    context = _context("Please set range_hit to None", "sample.py", line=1)
     context = ReviewContext(**{**context.__dict__, "line": None, "start_line": None})
 
     registry = RuleRegistry()
@@ -402,10 +409,11 @@ def test_none_rule_diff_comment_explicit_intent_still_matches() -> None:
     assert rule is not None
     assert rule.rule_id == "none-normalization"
 
-def test_none_rule_multiline_diff_uses_start_line_when_targeted(tmp_path: Path) -> None:
+def test_none_rule_multiline_diff_uses_start_line_when_targeted(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_text("range_hit = 0.5\nother = 1\n", encoding="utf-8")
-    context = _context("Please set range_hit to None", str(target), line=2)
+    context = _context("Please set range_hit to None", "sample.py", line=2)
     context = ReviewContext(**{**context.__dict__, "start_line": 1})
 
     registry = RuleRegistry()
@@ -417,10 +425,11 @@ def test_none_rule_multiline_diff_uses_start_line_when_targeted(tmp_path: Path) 
     assert target.read_text(encoding="utf-8") == "range_hit = None\nother = 1\n"
 
 
-def test_none_rule_single_line_still_respects_reviewed_line(tmp_path: Path) -> None:
+def test_none_rule_single_line_still_respects_reviewed_line(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
     target = tmp_path / "sample.py"
     target.write_text("range_hit = 0.5\nother = 1\n", encoding="utf-8")
-    context = _context("Please set range_hit to None", str(target), line=2)
+    context = _context("Please set range_hit to None", "sample.py", line=2)
 
     registry = RuleRegistry()
     rule = registry.match(context)
@@ -430,3 +439,57 @@ def test_none_rule_single_line_still_respects_reviewed_line(tmp_path: Path) -> N
     assert result.changed is False
     assert result.details == "no-op"
     assert target.read_text(encoding="utf-8") == "range_hit = 0.5\nother = 1\n"
+
+
+def test_none_rule_skips_absolute_target_outside_repo_root(tmp_path: Path, monkeypatch) -> None:
+    outside = tmp_path / "outside.py"
+    outside.write_text("range_hit = 1\n", encoding="utf-8")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    context = _context("Please set range_hit to None", str(outside))
+
+    rule = NoneNormalizationRule()
+    result = rule.apply(context)
+
+    assert result.changed is False
+    assert result.details == "unsafe target"
+    assert outside.read_text(encoding="utf-8") == "range_hit = 1\n"
+
+
+def test_none_rule_skips_symlink_target_resolving_outside_repo(tmp_path: Path, monkeypatch) -> None:
+    outside = tmp_path / "outside.py"
+    outside.write_text("range_hit = 1\n", encoding="utf-8")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    link = repo / "linked.py"
+    link.symlink_to(outside)
+
+    monkeypatch.chdir(repo)
+    context = _context("Please set range_hit to None", "linked.py")
+
+    rule = NoneNormalizationRule()
+    result = rule.apply(context)
+
+    assert result.changed is False
+    assert result.details == "unsafe target"
+    assert outside.read_text(encoding="utf-8") == "range_hit = 1\n"
+
+
+def test_none_rule_skips_traversal_target_outside_repo(tmp_path: Path, monkeypatch) -> None:
+    outside = tmp_path / "outside.py"
+    outside.write_text("range_hit = 1\n", encoding="utf-8")
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    context = _context("Please set range_hit to None", "../outside.py")
+
+    rule = NoneNormalizationRule()
+    result = rule.apply(context)
+
+    assert result.changed is False
+    assert result.details == "unsafe target"
+    assert outside.read_text(encoding="utf-8") == "range_hit = 1\n"
