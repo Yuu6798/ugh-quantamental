@@ -56,7 +56,12 @@ def classify_codex_review(context: ReviewContext) -> Classification:
     body = context.body.lower()
     if any(word in body for word in _SKIP_KEYWORDS):
         return Classification.skip
-    if context.path is None and context.kind.value == "review_body":
-        if "file:" not in body and "path:" not in body:
-            return Classification.skip
+    if context.kind.value == "review_body" and context.path is None:
+        # Use the already-parsed and sanitized path from ReviewContext rather than
+        # raw substring matching on the body.  Substring checks ("file:" in body)
+        # produce false positives — e.g. "update profile: …" contains "file:" as a
+        # substring but has no concrete file target.  build_review_context() already
+        # performs a line-start check ("file:" / "path:" at the start of a line) and
+        # path sanitization; context.path is None means no valid target was found.
+        return Classification.skip
     return Classification.auto_fixable

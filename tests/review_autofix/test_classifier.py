@@ -91,3 +91,13 @@ def test_codex_classify_review_body_without_hint_is_skip() -> None:
 def test_codex_classify_no_keyword_comment_is_auto_fixable() -> None:
     """Codex comment not matching any legacy keyword must still be auto_fixable."""
     assert classify_codex_review(_codex_context("Rename this to snake_case.")) == Classification.auto_fixable
+
+
+def test_codex_classify_review_body_false_positive_substring_is_skip() -> None:
+    """'profile:' contains 'file:' as a substring; must not be treated as a valid path hint.
+
+    Since context.path is None (build_review_context found no line-start file hint),
+    classify_codex_review must return skip rather than auto_fixable.
+    """
+    ctx = _codex_context("update profile: …", path=None, kind=ReviewKind.review_body)
+    assert classify_codex_review(ctx) == Classification.skip
