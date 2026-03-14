@@ -99,7 +99,11 @@ def main() -> None:
         import subprocess
 
         result_alembic = subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            [
+                sys.executable, "-m", "alembic",
+                "-x", f"sqlalchemy.url={db_url}",
+                "upgrade", "head",
+            ],
             capture_output=True,
             text=True,
         )

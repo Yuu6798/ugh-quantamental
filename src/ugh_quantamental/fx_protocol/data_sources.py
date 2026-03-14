@@ -114,13 +114,13 @@ def _parse_snapshot(payload: dict, as_of_jst: datetime) -> FxProtocolMarketSnaps
             _parse_completed_window(w) for w in raw_windows
         )
         provenance = _parse_provenance(payload["market_data_provenance"])
-        # Use the as_of_jst supplied by the caller; provider may also include it.
-        snapshot_as_of = as_of_jst
-        if "as_of_jst" in payload:
-            snapshot_as_of = _to_jst(datetime.fromisoformat(payload["as_of_jst"]))
+        # Always use the as_of_jst supplied by the caller (derived from the
+        # protocol calendar).  Provider payloads may contain stale or mismatched
+        # as_of_jst values; accepting them would silently shift the forecast
+        # window and break the canonical JST window semantics.
         return FxProtocolMarketSnapshot(
             pair=pair,
-            as_of_jst=snapshot_as_of,
+            as_of_jst=as_of_jst,
             current_spot=current_spot,
             completed_windows=completed_windows,
             market_data_provenance=provenance,
