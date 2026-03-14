@@ -61,7 +61,7 @@ def _make_base_record(
     strategy_kind: StrategyKind,
     forecast_direction: ForecastDirection,
     expected_close_change_bp: float,
-    expected_range: ExpectedRange | None,
+    expected_range: ExpectedRange | None = None,
     primary_question: str | None = None,
     disconfirmers: tuple[DisconfirmerRule, ...] = (),
     dominant_state=None,
@@ -79,43 +79,48 @@ def _make_base_record(
     conviction=None,
     urgency=None,
 ) -> ForecastRecord:
-    return ForecastRecord(
-        forecast_id=make_forecast_id(
+    payload = {
+        "forecast_id": make_forecast_id(
             request.pair, request.as_of_jst, request.protocol_version, strategy_kind
         ),
-        forecast_batch_id=forecast_batch_id,
-        pair=request.pair,
-        strategy_kind=strategy_kind,
-        as_of_jst=request.as_of_jst,
-        window_end_jst=window_end_jst,
-        locked_at_utc=request.locked_at_utc
+        "forecast_batch_id": forecast_batch_id,
+        "pair": request.pair,
+        "strategy_kind": strategy_kind,
+        "as_of_jst": request.as_of_jst,
+        "window_end_jst": window_end_jst,
+        "locked_at_utc": request.locked_at_utc
         or _as_of_jst_to_utc(request.as_of_jst) - timedelta(seconds=1),
-        market_data_provenance=request.market_data_provenance,
-        input_snapshot_ref=request.input_snapshot_ref if strategy_kind == StrategyKind.ugh else None,
-        primary_question=primary_question,
-        forecast_direction=forecast_direction,
-        expected_close_change_bp=expected_close_change_bp,
-        expected_range=expected_range,
-        disconfirmers=disconfirmers,
-        dominant_state=dominant_state,
-        state_probabilities=state_probabilities,
-        q_dir=q_dir,
-        q_strength=q_strength,
-        s_q=s_q,
-        temporal_score=temporal_score,
-        grv_raw=grv_raw,
-        grv_lock=grv_lock,
-        alignment=alignment,
-        e_star=e_star,
-        mismatch_px=mismatch_px,
-        mismatch_sem=mismatch_sem,
-        conviction=conviction,
-        urgency=urgency,
-        theory_version=request.theory_version,
-        engine_version=request.engine_version,
-        schema_version=request.schema_version,
-        protocol_version=request.protocol_version,
-    )
+        "market_data_provenance": request.market_data_provenance,
+        "forecast_direction": forecast_direction,
+        "expected_close_change_bp": expected_close_change_bp,
+        "disconfirmers": disconfirmers,
+        "theory_version": request.theory_version,
+        "engine_version": request.engine_version,
+        "schema_version": request.schema_version,
+        "protocol_version": request.protocol_version,
+    }
+
+    optional_fields = {
+        "input_snapshot_ref": request.input_snapshot_ref if strategy_kind == StrategyKind.ugh else None,
+        "primary_question": primary_question,
+        "expected_range": expected_range,
+        "dominant_state": dominant_state,
+        "state_probabilities": state_probabilities,
+        "q_dir": q_dir,
+        "q_strength": q_strength,
+        "s_q": s_q,
+        "temporal_score": temporal_score,
+        "grv_raw": grv_raw,
+        "grv_lock": grv_lock,
+        "alignment": alignment,
+        "e_star": e_star,
+        "mismatch_px": mismatch_px,
+        "mismatch_sem": mismatch_sem,
+        "conviction": conviction,
+        "urgency": urgency,
+    }
+    payload.update({k: v for k, v in optional_fields.items() if v is not None})
+    return ForecastRecord(**payload)
 
 
 def build_random_walk_forecast(
@@ -123,7 +128,6 @@ def build_random_walk_forecast(
     forecast_batch_id: str,
     window_end_jst,
 ) -> ForecastRecord:
-    ctx = request.baseline_context
     return _make_base_record(
         request=request,
         forecast_batch_id=forecast_batch_id,
@@ -131,10 +135,6 @@ def build_random_walk_forecast(
         strategy_kind=StrategyKind.baseline_random_walk,
         forecast_direction=ForecastDirection.flat,
         expected_close_change_bp=0.0,
-        expected_range=_build_range_from_baseline_context(
-            ctx.current_spot,
-            ctx.trailing_mean_range_price,
-        ),
     )
 
 
@@ -153,10 +153,6 @@ def build_prev_day_direction_forecast(
         strategy_kind=StrategyKind.baseline_prev_day_direction,
         forecast_direction=_direction_from_bp(ctx.previous_close_change_bp),
         expected_close_change_bp=ctx.previous_close_change_bp,
-        expected_range=_build_range_from_baseline_context(
-            ctx.current_spot,
-            ctx.trailing_mean_range_price,
-        ),
     )
 
 
@@ -180,10 +176,6 @@ def build_simple_technical_forecast(
         strategy_kind=StrategyKind.baseline_simple_technical,
         forecast_direction=_direction_from_bp(expected_change_bp),
         expected_close_change_bp=expected_change_bp,
-        expected_range=_build_range_from_baseline_context(
-            ctx.current_spot,
-            ctx.trailing_mean_range_price,
-        ),
     )
 
 

@@ -238,23 +238,17 @@ def test_baseline_construction_rules_are_deterministic() -> None:
     assert rw.strategy_kind == StrategyKind.baseline_random_walk
     assert rw.forecast_direction == ForecastDirection.flat
     assert rw.expected_close_change_bp == 0.0
-    assert rw.expected_range is not None
-    assert rw.expected_range.low_price == pytest.approx(149.4)
-    assert rw.expected_range.high_price == pytest.approx(150.6)
+    assert rw.expected_range is None
 
     pd = build_prev_day_direction_forecast(request, batch_id, window_end)
     assert pd.forecast_direction == ForecastDirection.up
     assert pd.expected_close_change_bp == 12.0
-    assert pd.expected_range is not None
-    assert pd.expected_range.low_price == pytest.approx(149.4)
-    assert pd.expected_range.high_price == pytest.approx(150.6)
+    assert pd.expected_range is None
 
     st = build_simple_technical_forecast(request, batch_id, window_end)
     assert st.forecast_direction == ForecastDirection.up
     assert st.expected_close_change_bp == 20.0
-    assert st.expected_range is not None
-    assert st.expected_range.low_price == pytest.approx(149.4)
-    assert st.expected_range.high_price == pytest.approx(150.6)
+    assert st.expected_range is None
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
