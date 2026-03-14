@@ -282,3 +282,57 @@ def test_durable_duplicate_detection_with_github_marker(tmp_path: Path, monkeypa
     monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state-2.json"))
     second = bot.run()
     assert second.reason == "duplicate"
+
+
+def test_noop_artifact_only_does_not_push(tmp_path: Path, monkeypatch) -> None:
+    event = tmp_path / "event.json"
+    _write_comment_event(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review_comment")
+
+    class _ArtifactOnlyExecutor:
+        def submit_fix_task(self, task):
+            from ugh_quantamental.review_autofix.executor_models import CodexTaskHandle
+
+            return CodexTaskHandle(task_id=task.task_id)
+
+        def wait_for_result(self, handle):
+            del handle
+            artifact = Path(".autofix-bot") / "codex-task-artifact.txt"
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact.write_text("prompt", encoding="utf-8")
+            return CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok")
+
+        def apply_or_confirm_branch_update(self, handle, result):
+            del handle, result
+            return CodexApplyResult(changed=True, branch_updated=False, summary="ok")
+
+    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: _ArtifactOnlyExecutor())
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: (_ for _ in ()).throw(AssertionError("should not commit")))
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: (_ for _ in ()).throw(AssertionError("should not push")))
+
+    result = bot.run()
+    assert result.reason == "no-change-after-codex"
+    assert result.pushed is False
+
+
+def test_invalid_review_body_path_hint_skips_without_executor(tmp_path: Path, monkeypatch) -> None:
+    event = tmp_path / "event.json"
+    _write_review_event(event)
+    payload = json.loads(event.read_text(encoding="utf-8"))
+    payload["review"]["body"] = "file: ../tmp/x.py\nP1 please set range_hit to None"
+    event.write_text(json.dumps(payload), encoding="utf-8")
+
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review")
+
+    called = {"executor": False}
+
+    def _builder(command, timeout_seconds):
+        del command, timeout_seconds
+        called["executor"] = True
+        raise AssertionError("executor should not run")
+
+    monkeypatch.setattr(bot, "build_executor", _builder)
+
+    result = bot.run()
+    assert result.reason == "invalid-review-body-path"
+    assert called["executor"] is False

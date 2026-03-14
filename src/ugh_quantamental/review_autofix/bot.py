@@ -90,6 +90,10 @@ def run() -> ProcessResult:
         state.mark(key)
         return ProcessResult(key, classification, None, False, False, False, False, "skip")
 
+    if context.kind.value == "review_body" and context.review_body_path_hint_present and context.path is None:
+        state.mark(key)
+        return ProcessResult(key, Classification.skip, None, False, False, False, False, "invalid-review-body-path")
+
     if not context.same_repo and not config.allow_push_on_fork:
         classification = Classification.propose_only
 

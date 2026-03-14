@@ -100,13 +100,16 @@ def test_build_review_context_accepts_valid_review_body_file_hint() -> None:
     context = build_review_context(_review_body_event("file: src/module.py\nset range_hit to None"))
     assert context.kind == ReviewKind.review_body
     assert context.path == "src/module.py"
+    assert context.review_body_path_hint_present is True
 
 
 def test_build_review_context_rejects_absolute_review_body_file_hint() -> None:
     context = build_review_context(_review_body_event("file: /tmp/x.py\nset range_hit to None"))
     assert context.path is None
+    assert context.review_body_path_hint_present is True
 
 
 def test_build_review_context_rejects_traversal_review_body_file_hint() -> None:
     context = build_review_context(_review_body_event("file: ../tmp/x.py\nset range_hit to None"))
     assert context.path is None
+    assert context.review_body_path_hint_present is True

@@ -217,9 +217,11 @@ def build_review_context(event: GithubEvent) -> ReviewContext:
     review = payload["review"]
     body = review.get("body", "")
     path = None
+    review_body_path_hint_present = False
     for line in body.splitlines():
         lower = line.lower()
         if lower.startswith("file:") or lower.startswith("path:"):
+            review_body_path_hint_present = True
             path = _sanitize_review_body_path_hint(line.split(":", 1)[1])
             break
     return ReviewContext(
@@ -239,4 +241,5 @@ def build_review_context(event: GithubEvent) -> ReviewContext:
         line=None,
         start_line=None,
         version_discriminator=_build_version_discriminator(review, body),
+        review_body_path_hint_present=review_body_path_hint_present,
     )

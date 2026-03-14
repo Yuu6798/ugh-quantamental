@@ -23,7 +23,7 @@ def test_commit_changes_excludes_operational_state(monkeypatch) -> None:
     assert commands[1].startswith("git commit -m ")
 
 
-def test_has_changes_ignores_only_state_file(monkeypatch) -> None:
+def test_has_changes_ignores_autofix_bot_state_file(monkeypatch) -> None:
     def fake_run(command: str, shell: bool, capture_output: bool, text: bool, check: bool):
         del command
         del shell
@@ -71,3 +71,20 @@ def test_push_head_branch_uses_safe_arg_list(monkeypatch) -> None:
     monkeypatch.setattr(git_ops.subprocess, "run", fake_run)
     git_ops.push_head_branch("feature")
     assert calls == [(["git", "push", "origin", "HEAD:feature"], True)]
+
+
+def test_has_changes_ignores_other_autofix_bot_artifacts(monkeypatch) -> None:
+    def fake_run(command: str, shell: bool, capture_output: bool, text: bool, check: bool):
+        del command
+        del shell
+        del capture_output
+        del text
+        del check
+
+        class Result:
+            stdout = "?? .autofix-bot/codex-task-k1.txt\n"
+
+        return Result()
+
+    monkeypatch.setattr(git_ops.subprocess, "run", fake_run)
+    assert git_ops.has_changes() is False
