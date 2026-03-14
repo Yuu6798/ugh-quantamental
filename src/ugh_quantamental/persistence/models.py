@@ -66,6 +66,35 @@ class FxForecastRecord(Base):
     payload_json: Mapped[dict] = mapped_column(JSON, nullable=False)
 
 
+class FxOutcomeRecord(Base):
+    """JSON-backed FX outcome record with minimal searchable metadata columns."""
+
+    __tablename__ = "fx_outcome_records"
+
+    outcome_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    pair: Mapped[str] = mapped_column(String(16), nullable=False)
+    window_start_jst: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    window_end_jst: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    protocol_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
+class FxEvaluationRecord(Base):
+    """JSON-backed FX evaluation record with minimal searchable metadata columns."""
+
+    __tablename__ = "fx_evaluation_records"
+
+    evaluation_id: Mapped[str] = mapped_column(String(512), primary_key=True)
+    forecast_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    outcome_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    pair: Mapped[str] = mapped_column(String(16), nullable=False)
+    strategy_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    window_start_jst: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    window_end_jst: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    protocol_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
 class RegressionSuiteBaselineRecord(Base):
     """Persisted regression suite baseline (golden snapshot)."""
 
