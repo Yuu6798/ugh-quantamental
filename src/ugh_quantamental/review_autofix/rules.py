@@ -41,6 +41,10 @@ class NoneNormalizationRule(BaseRule):
         if context.path is None:
             return None
 
+        if context.kind.value == "review_body" and context.line is None and context.start_line is None:
+            if not (explicit_rule_id or has_target_field):
+                return None
+
         if not (has_none_request and has_explicit_intent):
             return None
 

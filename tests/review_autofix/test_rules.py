@@ -333,6 +333,32 @@ def test_none_rule_review_body_generic_none_text_does_not_match(tmp_path: Path) 
     assert registry.match(context) is None
 
 
+def test_none_rule_review_body_generic_set_none_without_range_hit_does_not_match(tmp_path: Path) -> None:
+    target = tmp_path / "sample.py"
+    target.write_text("x = 1\nrange_hit = 0.5\n", encoding="utf-8")
+    context = ReviewContext(
+        kind=ReviewKind.review_body,
+        repository="acme/repo",
+        pr_number=7,
+        review_id=99,
+        review_comment_id=None,
+        head_sha="sha",
+        base_ref="main",
+        head_ref="feature",
+        same_repo=True,
+        reviewer_login="reviewer",
+        body="file: sample.py\nPlease set foo to None",
+        path=str(target),
+        diff_hunk=None,
+        line=None,
+        start_line=None,
+        version_discriminator="v",
+    )
+
+    registry = RuleRegistry()
+    assert registry.match(context) is None
+
+
 def test_none_rule_diff_comment_without_line_still_noop(tmp_path: Path) -> None:
     target = tmp_path / "sample.py"
     target.write_text("range_hit = 0.5\n", encoding="utf-8")
