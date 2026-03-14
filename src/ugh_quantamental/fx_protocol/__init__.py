@@ -30,6 +30,14 @@ from ugh_quantamental.fx_protocol.outcome_models import (
     DailyOutcomeWorkflowRequest,
     PersistedOutcomeEvaluationBatch,
 )
+from ugh_quantamental.fx_protocol.automation_models import (
+    FxDailyAutomationConfig,
+    FxDailyAutomationResult,
+)
+from ugh_quantamental.fx_protocol.data_models import (
+    FxCompletedWindow,
+    FxProtocolMarketSnapshot,
+)
 
 __all__ = [
     "BaselineContext",
@@ -48,4 +56,8 @@ __all__ = [
     "PersistedOutcomeEvaluationBatch",
     "OutcomeRecord",
     "StrategyKind",
+    "FxDailyAutomationConfig",
+    "FxDailyAutomationResult",
+    "FxCompletedWindow",
+    "FxProtocolMarketSnapshot",
 ]
