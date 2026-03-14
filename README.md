@@ -251,3 +251,71 @@ The following are intentionally not implemented:
 - REST/gRPC service layer
 - Async execution or background jobs
 - Intra-day or high-frequency signal handling
+
+## PR review auto-fix bot (same PR branch)
+
+### Purpose
+- Automatically handle only **clear/mechanical** PR review findings (diff comments and review body comments) and keep fixes inside the **same PR head branch**.
+- Push is allowed only after validations succeed; no child PR workflow is used.
+
+### Non-goals
+- Large design refactors, API contract changes, abstract feedback interpretation, or risky multi-file transformations.
+
+### Why GitHub Actions (not GitHub App)
+- This repository already uses GitHub Actions CI and has no webhook server runtime.
+- The MVP can stay lightweight and repo-local by adding one workflow + Python module.
+- Triggering on review events and pushing to the PR head branch is directly supported.
+
+### Setup
+1. Ensure workflow `.github/workflows/review-autofix.yml` is enabled.
+2. Keep workflow permissions minimal (`contents: write`, `pull-requests: write`).
+3. Configure repository variables as needed (see env example below).
+
+### Required events
+- `pull_request_review_comment` (`created`, `edited`)
+- `pull_request_review` (`submitted`, `edited`)
+
+### Local run
+```bash
+export GITHUB_EVENT_PATH=/path/to/event.json
+export GITHUB_EVENT_NAME=pull_request_review_comment
+export BOT_MODE=detect_only
+python -m ugh_quantamental.review_autofix.bot
+```
+
+### Environment example
+```bash
+BOT_MODE=detect_only
+TARGET_REVIEWERS=
+DRY_RUN=true
+ALLOW_PUSH_ON_FORK=false
+VALIDATION_FORMAT_COMMANDS=
+VALIDATION_LINT_COMMANDS="ruff check ."
+VALIDATION_TYPECHECK_COMMANDS=
+VALIDATION_TEST_COMMANDS="pytest -q"
+REPLY_ON_SUCCESS=true
+REPLY_ON_FAILURE=true
+AUTO_RESOLVE=false
+LOG_LEVEL=INFO
+```
+
+### Operation modes
+- `detect_only` (Phase 1)
+- `propose_only` (Phase 2)
+- `apply_and_push` (Phase 3)
+- `apply_push_and_resolve` (Phase 4; resolve is flag-gated)
+
+### same-repo PR vs fork PR
+- same-repo PR: can apply, validate, and push to the same PR head branch.
+- fork PR: defaults to no push (`ALLOW_PUSH_ON_FORK=false`), handled as propose-only/dry-run.
+
+### Safety notes
+- Do not execute arbitrary commands from review text.
+- Keep changes minimal and directly linked to the matched rule.
+- Never push when validation fails.
+- Do not log secrets.
+
+### Known constraints
+- Rule set is intentionally narrow for MVP; unmatched/ambiguous comments are skipped.
+- Review-body automation requires enough location hints (e.g., `file: path/to/file.py`).
+- Duplicate prevention uses a state key (`review_comment_id + head_sha` or `review_id + head_sha`).
