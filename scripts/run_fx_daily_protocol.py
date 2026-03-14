@@ -79,7 +79,6 @@ def main() -> None:
         from ugh_quantamental.fx_protocol.automation_models import FxDailyAutomationConfig
         from ugh_quantamental.fx_protocol.data_sources import HttpJsonFxMarketDataProvider
         from ugh_quantamental.persistence.db import (
-            create_all_tables,
             create_db_engine,
             create_session_factory,
         )
@@ -95,30 +94,25 @@ def main() -> None:
     db_url = f"sqlite:///{os.path.abspath(sqlite_path)}"
     print(f"[INFO] db_url          = {db_url}")
 
-    try:
-        import subprocess
+    import subprocess
 
-        result_alembic = subprocess.run(
-            [
-                sys.executable, "-m", "alembic",
-                "-x", f"sqlalchemy.url={db_url}",
-                "upgrade", "head",
-            ],
-            capture_output=True,
-            text=True,
+    result_alembic = subprocess.run(
+        [
+            sys.executable, "-m", "alembic",
+            "-x", f"sqlalchemy.url={db_url}",
+            "upgrade", "head",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result_alembic.returncode != 0:
+        print(result_alembic.stderr, file=sys.stderr)
+        _fail(
+            f"Alembic migration failed (exit {result_alembic.returncode}). "
+            "Database schema may be out of date. Aborting to prevent data inconsistency."
         )
-        if result_alembic.returncode != 0:
-            print("[WARN] Alembic upgrade failed; falling back to create_all_tables.")
-            print(result_alembic.stderr, file=sys.stderr)
-            engine = create_db_engine(db_url)
-            create_all_tables(engine)
-        else:
-            print("[INFO] Alembic migrations applied.")
-            engine = create_db_engine(db_url)
-    except Exception as exc:
-        print(f"[WARN] Alembic not available ({exc}); using create_all_tables.")
-        engine = create_db_engine(db_url)
-        create_all_tables(engine)
+    print("[INFO] Alembic migrations applied.")
+    engine = create_db_engine(db_url)
 
     # --- Run protocol ---
     config = FxDailyAutomationConfig(
