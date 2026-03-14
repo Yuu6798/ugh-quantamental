@@ -241,16 +241,67 @@ Formal v1 specs live in `docs/specs/`:
 | `ugh_regression_suite_v1.md` | Regression suite runner and pass/fail policy (Milestone 11) |
 | `ugh_baseline_v1.md` | Baseline / golden snapshot management and comparison policy (Milestone 12) |
 
+## FX Daily Protocol automation (Milestone 16)
+
+A GitHub Actions workflow runs the FX daily protocol automatically every business
+day at **08:00 JST** (23:00 UTC the previous day, Mon–Fri).
+
+### How it works
+
+1. The workflow checks out the code branch and a separate `fx-daily-data` branch
+   (created automatically on first run).
+2. Alembic migrations are applied to a SQLite database file in `fx-daily-data`.
+3. `scripts/run_fx_daily_protocol.py` fetches USDJPY market data, creates the
+   daily forecast batch (UGH + 3 baselines), and — when the prior window is
+   available — records the outcome and per-forecast evaluations.
+4. If any data changed, the SQLite file is committed and pushed back to the
+   `fx-daily-data` branch only (never to `main`).
+
+### Required environment variables / secrets
+
+| Variable | Where | Description |
+|---|---|---|
+| `FX_DATA_URL` | GitHub Secret | Market data endpoint URL (required) |
+| `FX_DATA_AUTH_TOKEN` | GitHub Secret | Optional bearer token for the endpoint |
+| `FX_DATA_BRANCH` | GitHub Variable | Data branch name (default: `fx-daily-data`) |
+| `FX_SQLITE_FILENAME` | GitHub Variable | SQLite filename (default: `fx_protocol.db`) |
+| `FX_THEORY_VERSION` | GitHub Variable | UGH theory version (default: `v1`) |
+| `FX_ENGINE_VERSION` | GitHub Variable | UGH engine version (default: `v1`) |
+| `FX_SCHEMA_VERSION` | GitHub Variable | Schema version (default: `v1`) |
+| `FX_PROTOCOL_VERSION` | GitHub Variable | Protocol version (default: `v1`) |
+
+### Running locally
+
+```bash
+export FX_DATA_URL="https://your-data-endpoint/usdjpy"
+export FX_DATA_DIR="./data"
+python scripts/run_fx_daily_protocol.py
+```
+
+### Durable storage
+
+All forecast, outcome, and evaluation records are stored in a SQLite database
+file committed to the `fx-daily-data` branch.  This branch is isolated from
+the code branch; data commits do not trigger CI.
+
+### What is still out of scope (v1)
+
+- Weekly and monthly reporting
+- Multi-pair support beyond USDJPY
+- Intraday or high-frequency data
+- External broker integration
+- Async execution
+
 ## Out of scope
 
 The following are intentionally not implemented:
 
 - ML fitting, calibration, or learned weight matrices
 - Stochastic/probabilistic filtering (particle filters, Kalman, etc.)
-- External data connectors or API clients
 - REST/gRPC service layer
 - Async execution or background jobs
 - Intra-day or high-frequency signal handling
+- Weekly/monthly reporting (next milestone)
 
 ## PR review auto-fix bot (same PR branch)
 
