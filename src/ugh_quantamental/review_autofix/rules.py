@@ -147,6 +147,13 @@ class ImportCleanupRule(BaseRule):
     def apply(self, context: ReviewContext) -> RuleApplication:
         if context.path is None:
             return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", None, "", ""), False, "no file")
+
+        candidate = Path(context.path)
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        if not candidate.exists():
+            return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "missing file")
+
         file_path = self._resolve_safe_target(context.path)
         if file_path is None:
             return RuleApplication(self.match(context) or RuleMatch(self.rule_id, "P2", context.path, "", ""), False, "unsafe target")
