@@ -8,6 +8,12 @@ Importable without SQLAlchemy.
 
 from __future__ import annotations
 
+from ugh_quantamental.fx_protocol.forecast_models import (
+    BaselineContext,
+    DailyForecastBatch,
+    DailyForecastWorkflowRequest,
+    PersistedDailyForecastBatch,
+)
 from ugh_quantamental.fx_protocol.models import (
     CurrencyPair,
     DisconfirmerRule,
@@ -22,6 +28,9 @@ from ugh_quantamental.fx_protocol.models import (
 )
 
 __all__ = [
+    "BaselineContext",
+    "DailyForecastBatch",
+    "DailyForecastWorkflowRequest",
     "CurrencyPair",
     "DisconfirmerRule",
     "EvaluationRecord",
@@ -30,6 +39,7 @@ __all__ = [
     "ForecastDirection",
     "ForecastRecord",
     "MarketDataProvenance",
+    "PersistedDailyForecastBatch",
     "OutcomeRecord",
     "StrategyKind",
 ]
