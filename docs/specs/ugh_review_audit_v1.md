@@ -1,577 +1,439 @@
-# PR Review Semantic Audit Engine — v1 Specification
+# UGH Review Audit Engine v1 — PR Review Semantic Audit
 
-**Milestone: `review_audit_workflow`**
-**Status: Planned (pre-implementation)**
-**Depends on: Milestones 1–12 (complete)**
+## Why this layer exists
+
+The `review_autofix` bot classifies and applies mechanical PR review fixes. It
+records what it fixed, but not whether the fix was semantically aligned with
+the reviewer's intent.
+
+The review audit engine adds a deterministic audit layer that computes:
+
+- **PoR** (Probability of Relevance) — how well the bot can address the
+  reviewer's intent, given the clarity, locality, and mechanicalness of the
+  review comment.
+- **ΔE** (semantic divergence) — how much the applied fix deviated from that
+  intent, measured as a distance between intent and action feature vectors.
+- a **verdict** categorising the outcome as `aligned | marginal | misaligned |
+  insufficient_data`.
+
+This layer follows the same `engine → persist → replay` pattern as the
+projection and state engines. v1 integrates with the review_autofix bot in
+**shadow mode only** — results are stored and logged, but never used to block
+pushes or trigger enforcement.
 
 ---
 
-## 1. 目的
+## Three-layer extraction boundary
 
-`review_autofix` bot は現在、lint・import・unused などの機械的レビュー指摘に対して、
-rule-based に classify し、Codex に修正タスクを渡す構造を持っている。
-
-ただし現状は、**その修正が reviewer の意図と本当に整合していたか** を監査する層がない。
-
-本マイルストーンの目的は、以下を満たす **PR Review Semantic Audit Engine** を追加すること。
-
-- pure / deterministic な意味監査エンジンを追加する
-- projection / state と同じく `engine → persist → replay` パターンに従う
-- bot 側にはまず **shadow audit** として統合する
-- v1 では **push blocking / enforcement は行わない**
-- raw text は監査証跡として保持するが、**engine input にはしない**
-
----
-
-## 2. 設計原則
-
-### 2.1 三層 feature extraction
-
-raw text をそのまま engine に渡さない。以下の3層で処理する。
+Raw review text is never passed into the engine. A deterministic extraction
+pipeline converts raw observations into bounded, typed features before the
+engine is called:
 
 ```
-ReviewContext  (raw GitHub event data / raw review text)
-    ↓  deterministic rule-based extractor
-ReviewObservation  (symbolic intermediate layer: bool / enum / counts)
-    ↓  normalization rules
-ReviewIntentFeatures  (bounded [0, 1] floats)
-    ↓  pure engine
+ReviewContext           raw GitHub event data (frozen dataclass)
+    │
+    ▼  extract_review_observation()       rule-based, deterministic
+ReviewObservation       symbolic intermediate: bool / enum / int counts
+    │
+    ▼  extract_review_intent_features()   normalization to [0, 1]
+ReviewIntentFeatures    bounded floats consumed by the engine
+    │
+    ▼  run_review_audit_engine()
 ReviewAuditSnapshot / ReviewAuditEngineResult
 ```
 
-### 2.2 pure engine の境界
+This separation ensures:
 
-engine が受け取るのは typed / normalized / bounded なモデルのみ。
+- the engine remains pure, connector-free, and fully reproducible,
+- extractor rule changes are tracked independently from engine changes,
+- raw text is preserved in persistence as an audit trail but never modifies
+  engine computation.
 
-**engine 内で扱ってはいけないもの:**
-- review comment 原文
-- diff hunk 原文
-- GitHub API payload
-- live repository state
-- executor output の生テキスト
+---
 
-**engine が扱うもの:**
-- `ReviewIntentFeatures`
-- `FixActionFeatures | None`
-- `ReviewAuditConfig`
+## Inputs consumed
 
-### 2.3 raw text の扱い
+### `ReviewIntentFeatures` (required — pre-action)
 
-raw text は消さない。ただし用途は audit trail / extractor replay 用であり、engine input ではない。
-
-**persistence に保持するもの:**
-- `review_context_json` — 生の ReviewContext (監査証跡)
-- `observation_json` — ReviewObservation (extractor replay 用)
-- `intent_features_json` — ReviewIntentFeatures
-- `action_features_json` — FixActionFeatures (存在する場合)
-- `engine_result_json` — ReviewAuditEngineResult
-
-### 2.4 replay を二段に分ける
-
-| 種別 | 目的 | 入力 |
+| Field | Range | Meaning |
 |---|---|---|
-| Engine replay | engine 数式の drift 検知 | 保存済み `intent_features` + `action_features` |
-| Extractor replay | extractor ルールの drift 検知 | 保存済み `review_context_json` |
+| `intent_clarity` | [0, 1] | How clearly the reviewer specified what to fix |
+| `locality_strength` | [0, 1] | How tightly scoped the fix target is |
+| `mechanicalness` | [0, 1] | How mechanical / automation-safe the fix is |
+| `scope_boundness` | [0, 1] | Whether the reviewer explicitly constrained fix scope |
+| `semantic_change_risk` | [0, 1] | Estimated risk of unintended behavioural change |
+| `validation_intensity` | [0, 1] | Implied level of validation the fix requires |
+
+### `FixActionFeatures | None` (optional — post-action only)
+
+| Field | Range / Type | Meaning |
+|---|---|---|
+| `changed` | bool | Whether the executor produced any change |
+| `validation_ok` | bool | Whether validation passed |
+| `lines_changed` | int ≥ 0 | Raw lines changed |
+| `files_changed` | int ≥ 0 | Raw files changed |
+| `target_file_match` | [0, 1] | Fix touched the file the reviewer referenced |
+| `line_anchor_touched` | [0, 1] | Fix touched the line / hunk the reviewer referenced |
+| `diff_hunk_overlap` | [0, 1] | Overlap between applied diff and reviewer diff hunk |
+| `scope_ratio` | [0, 1] | Fix scope relative to intent (0 = tight, 1 = broad) |
+| `validation_scope_executed` | [0, 1] | Breadth of validation actually run |
+| `behavior_preservation_proxy` | [0, 1] | Estimated probability existing behaviour was preserved |
+| `execution_status` | str | `"succeeded" \| "no_op" \| "failed" \| "timeout" \| "skipped"` |
+
+`FixActionFeatures` is `None` in detect_only / propose_only modes, or when the
+audit runs before code execution.
+
+### `ReviewAuditConfig`
+
+| Field | Default | Constraint |
+|---|---|---|
+| `w_clarity` | 0.30 | > 0.0 |
+| `w_locality` | 0.25 | > 0.0 |
+| `w_mechanical` | 0.20 | > 0.0 |
+| `w_scope` | 0.25 | > 0.0 |
+| `extractor_version` | `"v1"` | str |
+| `feature_spec_version` | `"v1"` | str |
+
+The four weights are not required to sum to exactly 1.0; `compute_por`
+normalises by their total internally.
 
 ---
 
-## 3. v1 の適用範囲
+## ReviewObservation — semantic field definitions
 
-### v1 に含めるもの
-- spec-first で review audit math を定義
-- deterministic rule-based extractor
-- pure review audit engine
-- persistence / workflow / query / replay
-- bot への shadow integration (non-enforcing)
+`ReviewObservation` is the symbolic intermediate layer produced by
+`extract_review_observation`. It is stored in `observation_json` for extractor
+replay. It is **never** passed into the engine.
 
-### v1 に含めないもの
-- push blocking / verdict に基づく auto reject
-- live LLM extractor / non-deterministic semantic parser
-- human approval UI
-- cross-PR learning
-- adaptive calibration / learned thresholds
+| Field | Type | Extraction rule |
+|---|---|---|
+| `has_path_hint` | bool | `context.path is not None` |
+| `has_line_anchor` | bool | `context.line is not None or context.start_line is not None` |
+| `has_diff_hunk` | bool | `context.diff_hunk is not None` |
+| `priority` | `"P0" \| "P1" \| "P2" \| "P3"` | `extract_priority(context.body)` |
+| `mechanical_keyword_hits` | int ≥ 0 | count of `_AUTO_KEYWORDS` tokens in `context.body` |
+| `skip_keyword_hits` | int ≥ 0 | count of `_SKIP_KEYWORDS` tokens in `context.body` |
+| `behavior_preservation_signal` | bool | body contains any of: `"preserve"`, `"behavior"`, `"existing"`, `"既存"` |
+| `scope_limit_signal` | bool | body contains any of: `"minimal"`, `"only"`, `"scope"`, `"最小"`, `"のみ"` |
+| `ambiguity_signal_count` | int ≥ 0 | count of `"should"`, `"consider"`, `"提案"` in body |
+| `target_file_present` | bool | `context.path is not None` |
+| `review_kind` | `"diff_comment" \| "review_body"` | `"diff_comment"` if `context.diff_hunk` else `"review_body"` |
+
+All token-match operations are case-insensitive. Keyword lists (`_AUTO_KEYWORDS`,
+`_SKIP_KEYWORDS`) are sourced from `classifier.py` to stay consistent with the
+existing classification layer.
 
 ---
 
-## 4. モデル設計
+## ReviewIntentFeatures — normalization rules
 
-### 4.1 ReviewObservation
+`extract_review_intent_features(obs: ReviewObservation) -> ReviewIntentFeatures`
 
-raw `ReviewContext` から deterministic に抽出する symbolic 中間層。
-extractor replay の基準点になる。
+Each feature is computed deterministically from `ReviewObservation` fields and
+clamped to `[0, 1]` before being written into the model.
 
-```python
-class ReviewObservation(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+### `intent_clarity`
 
-    has_path_hint: bool              # context.path is not None
-    has_line_anchor: bool            # context.line or context.start_line is not None
-    has_diff_hunk: bool              # context.diff_hunk is not None
+Priority contributes a base score: `P0 → 1.0, P1 → 0.75, P2 → 0.5, P3 → 0.25`.
 
-    priority: str                    # "P0" | "P1" | "P2" | "P3"
-
-    mechanical_keyword_hits: int = Field(ge=0)   # _AUTO_KEYWORDS 件数
-    skip_keyword_hits: int = Field(ge=0)          # _SKIP_KEYWORDS 件数
-
-    behavior_preservation_signal: bool  # "preserve" / "behavior" / "existing" 等
-    scope_limit_signal: bool            # "minimal" / "only" / "scope" 等
-
-    ambiguity_signal_count: int = Field(ge=0)   # "should" / "consider" 等の件数
-    target_file_present: bool           # context.path is not None
-
-    review_kind: str                 # "diff_comment" | "review_body"
+```
+priority_score = {P0: 1.0, P1: 0.75, P2: 0.5, P3: 0.25}[priority]
+clarity_raw = 0.35 * priority_score
+            + 0.25 * float(has_path_hint)
+            + 0.25 * float(has_line_anchor)
+            + 0.15 * float(has_diff_hunk)
+intent_clarity = clamp(clarity_raw, 0.0, 1.0)
 ```
 
-### 4.2 ReviewIntentFeatures
+### `locality_strength`
 
-engine に渡す normalized features。全フィールド [0, 1]。
-
-```python
-class ReviewIntentFeatures(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    intent_clarity: float = Field(ge=0.0, le=1.0)
-    locality_strength: float = Field(ge=0.0, le=1.0)
-    mechanicalness: float = Field(ge=0.0, le=1.0)
-    scope_boundness: float = Field(ge=0.0, le=1.0)
-    semantic_change_risk: float = Field(ge=0.0, le=1.0)
-    validation_intensity: float = Field(ge=0.0, le=1.0)
+```
+locality_raw = 0.55 * float(has_line_anchor)
+             + 0.45 * float(has_diff_hunk)
+locality_strength = clamp(locality_raw, 0.0, 1.0)
 ```
 
-### 4.3 FixActionFeatures
+### `mechanicalness`
 
-post-action audit 用。意味差分を見るため十分に構造化する。
-
-```python
-class FixActionFeatures(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    changed: bool
-    validation_ok: bool
-
-    lines_changed: int = Field(ge=0)
-    files_changed: int = Field(ge=0)
-
-    target_file_match: float = Field(ge=0.0, le=1.0)    # 指摘ファイルに実際に触れたか
-    line_anchor_touched: float = Field(ge=0.0, le=1.0)  # 指摘行付近を修正したか
-    diff_hunk_overlap: float = Field(ge=0.0, le=1.0)    # diff hunk との重複率
-    scope_ratio: float = Field(ge=0.0, le=1.0)          # 修正規模 (0=局所, 1=広域)
-    validation_scope_executed: float = Field(ge=0.0, le=1.0)  # 実行した検証の広さ
-    behavior_preservation_proxy: float = Field(ge=0.0, le=1.0)  # 振る舞い変更の推定量
-
-    execution_status: str  # "succeeded" | "no_op" | "failed" | "timeout" | "skipped"
+```
+mech_raw = min(1.0, mechanical_keyword_hits / 3.0)
+         - 0.15 * min(1.0, skip_keyword_hits / 2.0)
+mechanicalness = clamp(mech_raw, 0.0, 1.0)
 ```
 
-### 4.4 ReviewAuditConfig
+### `semantic_change_risk`
 
-```python
-class ReviewAuditConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    # PoR weights (合計 ≈ 1.0 を意図する — engine は正規化しない)
-    w_clarity: float = Field(default=0.30, gt=0.0)
-    w_locality: float = Field(default=0.25, gt=0.0)
-    w_mechanical: float = Field(default=0.20, gt=0.0)
-    w_scope: float = Field(default=0.25, gt=0.0)
-
-    extractor_version: str = "v1"
-    feature_spec_version: str = "v1"
+```
+ambiguity_factor = min(1.0, ambiguity_signal_count / 3.0)
+risk_raw = 0.5 * ambiguity_factor
+         + 0.3 * float(behavior_preservation_signal)
+         + 0.2 * min(1.0, skip_keyword_hits / 2.0)
+semantic_change_risk = clamp(risk_raw, 0.0, 1.0)
 ```
 
-### 4.5 ReviewAuditSnapshot (output contract)
+### `scope_boundness`
 
-```python
-class ReviewAuditSnapshot(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    audit_id: str
-
-    por: float = Field(ge=0.0, le=1.0)           # Probability of Relevance
-    delta_e: float | None = Field(default=None, ge=0.0, le=1.0)       # Semantic divergence
-    mismatch_score: float | None = Field(default=None, ge=0.0, le=1.0)
-
-    verdict: str  # "aligned" | "marginal" | "misaligned" | "insufficient_data"
+```
+scope_raw = 0.6 * float(scope_limit_signal)
+          - 0.4 * semantic_change_risk
+scope_boundness = clamp(scope_raw, 0.0, 1.0)
 ```
 
-### 4.6 ReviewAuditEngineResult
+### `validation_intensity`
 
-```python
-class ReviewAuditEngineResult(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    audit_snapshot: ReviewAuditSnapshot
-    intent_features: ReviewIntentFeatures
-    action_features: FixActionFeatures | None
-    config: ReviewAuditConfig
+```
+validation_raw = 0.4 * (1.0 - mechanicalness)
+              + 0.6 * semantic_change_risk
+validation_intensity = clamp(validation_raw, 0.0, 1.0)
 ```
 
 ---
 
-## 5. Extractor 設計
+## Pure deterministic functions
 
-### 5.1 方針
+All functions are side-effect free and deterministic. No raw text enters any
+function.
 
-v1 は **rule-based only**。
+### 1. `compute_por(intent, config) -> float`
 
-- repo の deterministic / replay-first 思想に合致する
-- `classifier.py` の既存ルールと整合する
-- same input → same observation を保証できる
-- extractor_version を bump することでルール変更を追跡可能にする
-
-### 5.2 `extract_review_observation(context: ReviewContext) -> ReviewObservation`
-
-再利用する既存コード:
-
-| 既存 | 再利用先 |
-|---|---|
-| `extract_priority()` (`classifier.py`) | `priority` フィールド |
-| `_AUTO_KEYWORDS` | `mechanical_keyword_hits` |
-| `_SKIP_KEYWORDS` | `skip_keyword_hits` |
-
-抽出ルール:
+PoR measures the probability that the bot can perform a semantically relevant
+fix, integrating clarity, locality, mechanicalness, and scope-boundness.
 
 ```
-has_path_hint           = context.path is not None
-has_line_anchor         = context.line is not None or context.start_line is not None
-has_diff_hunk           = context.diff_hunk is not None
-priority                = extract_priority(context.body)
-mechanical_keyword_hits = count_keywords(_AUTO_KEYWORDS, context.body)
-skip_keyword_hits       = count_keywords(_SKIP_KEYWORDS, context.body)
-behavior_preservation_signal = contains_any(["preserve", "behavior", "existing", "既存"], body)
-scope_limit_signal      = contains_any(["minimal", "only", "scope", "最小", "のみ"], body)
-ambiguity_signal_count  = count_keywords(["should", "consider", "提案"], body)
-target_file_present     = context.path is not None
-review_kind             = "diff_comment" if context.diff_hunk else "review_body"
+w_total = w_clarity + w_locality + w_mechanical + w_scope
+por = (  w_clarity    * intent.intent_clarity
+       + w_locality   * intent.locality_strength
+       + w_mechanical * intent.mechanicalness
+       + w_scope      * intent.scope_boundness
+     ) / w_total
+
+por = clamp(por, 0.0, 1.0)
 ```
 
-### 5.3 `extract_review_intent_features(obs: ReviewObservation) -> ReviewIntentFeatures`
+### 2. `compute_delta_e(intent, action, config) -> float | None`
 
-正規化ルール (v1):
+ΔE measures semantic divergence between what the reviewer intended and what the
+bot actually applied.
 
-| Feature | 計算方針 |
-|---|---|
-| `intent_clarity` | `has_path_hint`, `has_line_anchor`, `has_diff_hunk`, `priority_score` を加重合成。`P0→1.0, P1→0.75, P2→0.5, P3→0.25` |
-| `locality_strength` | `has_line_anchor` + `has_diff_hunk` を中心に合成 |
-| `mechanicalness` | `min(1.0, mechanical_keyword_hits / 3.0)` を基礎に `skip_keyword_hits` で減衰 |
-| `scope_boundness` | `scope_limit_signal` が強いほど高い。`semantic_change_risk` が高いほど低い |
-| `semantic_change_risk` | `ambiguity_signal_count` + skip / broad-change signal で上昇 |
-| `validation_intensity` | `mechanicalness` が高ければ低め (lint のみ)。`semantic_change_risk` が高ければ高め (test 必要) |
-
-### 5.4 `extract_fix_action_features(...) -> FixActionFeatures`
-
-入力候補:
-- executor result (execution_status, changed, validation_ok)
-- git diff stats (lines_changed, files_changed)
-- target path / touched lines (target_file_match, line_anchor_touched)
-- diff hunk (diff_hunk_overlap)
-- validation result (validation_scope_executed)
-
-重要な観点:
-- review が指した対象に実際に触れたか (`target_file_match`, `line_anchor_touched`)
-- 修正規模が過大か (`scope_ratio`)
-- validation scope が reviewer の意図に見合っていたか (`validation_scope_executed`)
-
----
-
-## 6. Pure Engine 設計
-
-### 6.1 `compute_por(intent: ReviewIntentFeatures, config: ReviewAuditConfig) -> float`
-
-PoR は reviewer intent の「修正可能な明瞭さ / 局所性 / 機械性 / scope 制約」をまとめた relevance 指標。
-
-```
-PoR = w_clarity   * intent_clarity
-    + w_locality  * locality_strength
-    + w_mechanical * mechanicalness
-    + w_scope     * scope_boundness
-```
-
-出力は `[0, 1]` にクランプする。
-
-### 6.2 `compute_delta_e(intent: ReviewIntentFeatures, action: FixActionFeatures | None, config: ReviewAuditConfig) -> float | None`
-
-- `action is None` のとき → `None` を返す (insufficient data)
-- action がある場合のみ算出 (weighted L1 distance)
+**If `action is None`: return `None`.** Absence of action data is not the same
+as zero divergence; returning `None` is distinct from returning `0.0`.
 
 ```
 intent_vector = [
-    locality_strength,
-    mechanicalness,
-    scope_boundness,
-    validation_intensity,
+    intent.locality_strength,
+    intent.mechanicalness,
+    intent.scope_boundness,
+    intent.validation_intensity,
 ]
 
 action_vector = [
-    target_file_match,
-    diff_hunk_overlap,
-    1.0 - min(1.0, scope_ratio),
-    validation_scope_executed,
+    action.target_file_match,
+    action.diff_hunk_overlap,
+    1.0 - min(1.0, action.scope_ratio),   # inverted: lower scope_ratio = tighter = more aligned
+    action.validation_scope_executed,
 ]
 
-delta_e = clamp(weighted_l1(intent_vector, action_vector), 0.0, 1.0)
+weights = [0.25, 0.25, 0.25, 0.25]   # uniform in v1
+
+delta_e = clamp(
+    sum(w * abs(iv - av) for w, iv, av in zip(weights, intent_vector, action_vector)),
+    0.0, 1.0,
+)
 ```
 
-### 6.3 `compute_mismatch_score(por: float, delta_e: float | None) -> float | None`
+### 3. `compute_mismatch_score(por, delta_e) -> float | None`
 
 ```
-delta_e is None → mismatch_score = None
-それ以外        → mismatch_score = 0.5 * (1 - por) + 0.5 * delta_e
+if delta_e is None:
+    return None
+return clamp(0.5 * (1.0 - por) + 0.5 * delta_e, 0.0, 1.0)
 ```
 
-### 6.4 `compute_verdict(por: float, delta_e: float | None, action: FixActionFeatures | None) -> str`
+### 4. `compute_verdict(por, delta_e, action) -> str`
 
-| 条件 | verdict |
+Rules are evaluated top-to-bottom; first matching rule wins.
+
+| Condition | Verdict |
 |---|---|
 | `action is None` | `"insufficient_data"` |
 | `por >= 0.7 and delta_e <= 0.2` | `"aligned"` |
 | `por < 0.4 or delta_e > 0.6` | `"misaligned"` |
-| それ以外 | `"marginal"` |
+| otherwise | `"marginal"` |
 
-### 6.5 `build_audit_snapshot(audit_id, por, delta_e, mismatch_score, verdict) -> ReviewAuditSnapshot`
+### 5. `build_audit_snapshot(audit_id, por, delta_e, mismatch_score, verdict) -> ReviewAuditSnapshot`
 
-各スカラーを `[0, 1]` にクランプしてから `ReviewAuditSnapshot` を構築する。
+Assembles the output contract. All scalar fields are clamped to their declared
+bounds before construction. `delta_e` and `mismatch_score` may be `None`.
 
-### 6.6 `run_review_audit_engine(audit_id, intent, action, config) -> ReviewAuditEngineResult`
+### 6. `run_review_audit_engine(audit_id, intent, action, config) -> ReviewAuditEngineResult`
 
-エントリーポイント。呼び出し順:
+End-to-end composition:
 
 ```
-compute_por
-→ compute_delta_e
-→ compute_mismatch_score
-→ compute_verdict
-→ build_audit_snapshot
-→ ReviewAuditEngineResult
+por            = compute_por(intent, config)
+delta_e        = compute_delta_e(intent, action, config)
+mismatch_score = compute_mismatch_score(por, delta_e)
+verdict        = compute_verdict(por, delta_e, action)
+snapshot       = build_audit_snapshot(audit_id, por, delta_e, mismatch_score, verdict)
+return ReviewAuditEngineResult(
+    audit_snapshot = snapshot,
+    intent_features = intent,
+    action_features = action,
+    config = config,
+)
 ```
 
 ---
 
-## 7. Persistence 設計
+## action is None policy
 
-### 7.1 ReviewAuditRunRecord (ORM)
+When `FixActionFeatures` is absent:
 
-```
-テーブル名: review_audit_records
-```
+- `delta_e = None` — not `0.0`; absence of action data is not the same as zero
+  divergence, and `0.0` would misrepresent a fully-aligned fix.
+- `mismatch_score = None` — derived from `delta_e`, inherits `None`.
+- `verdict = "insufficient_data"`.
 
-| カラム | 型 | 用途 |
+This occurs in detect_only and propose_only bot modes, and in any pre-action
+audit invocation before code execution completes.
+
+---
+
+## Shadow mode policy
+
+v1 is **non-enforcing shadow audit only**.
+
+| Bot mode | Audit phase | `FixActionFeatures` | Possible verdicts |
+|---|---|---|---|
+| `detect_only` | pre-action only | `None` | `"insufficient_data"` only |
+| `propose_only` | pre-action only | `None` | `"insufficient_data"` only |
+| `apply_and_push` | pre-action + post-action | present | all four |
+| `apply_push_and_resolve` | pre-action + post-action | present | all four |
+
+In all modes:
+
+- `push_head_branch()` is never conditional on the audit verdict.
+- The verdict is written to persistence and emitted to the log only.
+- No enforcement, blocking, or user-visible reply is triggered by the verdict.
+
+The purpose of v1 shadow integration is **measurement, storage, and replay** —
+not enforcement. Enforcement is explicitly deferred.
+
+---
+
+## Persistence boundary
+
+The review audit run record stores the following JSON columns:
+
+| Column | Content | Purpose |
 |---|---|---|
-| `run_id` | `String(64)` PK | ユニーク識別子 |
-| `created_at` | `DateTime(timezone=False)` | naive UTC |
-| `audit_id` | `String(128)` indexed | 監査対象識別子 |
-| `pr_number` | `Integer` indexed | PR番号 |
-| `reviewer_login` | `String(128)` nullable | レビュアー |
-| `verdict` | `String(32)` indexed | engine verdict |
-| `extractor_version` | `String(32)` | feature extractor バージョン |
-| `feature_spec_version` | `String(32)` | feature spec バージョン |
-| `review_context_json` | `JSON` | raw audit trail |
-| `observation_json` | `JSON` | extractor replay 用 |
-| `intent_features_json` | `JSON` | engine replay 入力 |
-| `action_features_json` | `JSON` nullable | post-action audit (存在する場合) |
-| `engine_result_json` | `JSON` | engine 出力 |
+| `review_context_json` | Serialised `ReviewContext` dataclass | Audit trail; source for extractor replay |
+| `observation_json` | `ReviewObservation` | Extractor replay comparison target |
+| `intent_features_json` | `ReviewIntentFeatures` | Engine replay input |
+| `action_features_json` | `FixActionFeatures` or `null` | Engine replay input |
+| `engine_result_json` | `ReviewAuditEngineResult` | Stored output |
+| `extractor_version` | e.g. `"v1"` | Tracks which rule set produced the observation |
+| `feature_spec_version` | e.g. `"v1"` | Tracks which normalization formula set was used |
 
-### 7.2 Serializer 境界
-
-`ReviewContext` は frozen dataclass であり、既存の `dump_model_json()` は Pydantic BaseModel を前提としているため、専用関数を追加する。
+`ReviewContext` is a **frozen dataclass**, not a Pydantic `BaseModel`. The
+serialization boundary uses dedicated helpers distinct from `dump_model_json` /
+`load_model_json`:
 
 ```python
 dump_review_context_json(context: ReviewContext) -> dict
 load_review_context_json(payload: dict) -> ReviewContext
-review_audit_payload_to_models(payload: dict) -> tuple[...]
 ```
+
+Raw text fields in `review_context_json` (e.g. `body`, `diff_hunk`) are
+preserved verbatim for audit trail purposes. They are not re-fed into the
+engine during replay or any other operation.
 
 ---
 
-## 8. Workflow 設計
+## Replay policy
 
-### 8.1 ReviewAuditWorkflowRequest
+Replay is split into two independent operations to isolate sources of drift.
 
-```python
-class ReviewAuditWorkflowRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+### Engine replay
 
-    audit_id: str
-    pr_number: int = Field(ge=1)
-    reviewer_login: str | None = None
-
-    review_context_json: dict           # JSON-safe (dataclass ではなく dict で渡す)
-    observation: ReviewObservation
-    intent_features: ReviewIntentFeatures
-    action_features: FixActionFeatures | None = None
-
-    config: ReviewAuditConfig = Field(default_factory=ReviewAuditConfig)
-    run_id: str | None = None
-    created_at: datetime | None = None
-```
-
-### 8.2 run_review_audit_workflow(session, request) → ReviewAuditWorkflowResult
-
-既存 workflow パターンと同じ:
+Re-runs the engine from stored `intent_features_json` and `action_features_json`.
 
 ```
-run_review_audit_engine(...)
-→ ReviewAuditRunRepository.save_run(session, ...)  # flush only
-→ ReviewAuditRunRepository.load_run(session, run_id)
-→ ReviewAuditWorkflowResult(run=..., engine_result=...)
+run_id
+    ▼
+get_review_audit_run_bundle(session, run_id)
+    ├── None  →  return None
+    ▼
+run_review_audit_engine(
+    audit_id = bundle.audit_id,
+    intent   = bundle.intent_features,    recovered from DB
+    action   = bundle.action_features,    recovered from DB (may be None)
+    config   = bundle.engine_result.config,
+)
+    ▼
+ReviewAuditReplayComparison(
+    exact_match, por_diff, delta_e_diff, mismatch_score_diff, verdict_match
+)
 ```
+
+Detects: engine code changes that produce different outputs from identical typed
+inputs.
+
+### Extractor replay
+
+Re-runs the extractor from stored `review_context_json`.
+
+```
+run_id
+    ▼
+get_review_audit_run_bundle(session, run_id)
+    ├── None  →  return None
+    ▼
+load_review_context_json(bundle.review_context_json)
+    ▼
+extract_review_observation(context)
+extract_review_intent_features(observation)
+    ▼
+ReviewAuditExtractorReplayComparison(
+    observation_match, intent_features_match, per-field observation diffs
+)
+```
+
+Detects: extractor rule changes that shift feature values for identical raw
+inputs.
+
+Both replay operations are **read-only** — no writes, flushes, or commits.
 
 ---
 
-## 9. Query / Replay 設計
+## extractor_version / feature_spec_version policy
 
-### 9.1 Query
-
-追加モデル:
-- `ReviewAuditRunQuery` — audit_id / pr_number / verdict / created_at_from/to / limit / offset
-- `ReviewAuditRunSummary` — run_id / created_at / audit_id / pr_number / verdict
-- `ReviewAuditRunBundle` — 全カラムを復元した frozen dataclass
-
-追加 reader:
-- `list_review_audit_run_summaries(session, query) -> list[ReviewAuditRunSummary]`
-- `get_review_audit_run_bundle(session, run_id) -> ReviewAuditRunBundle | None`
-
-### 9.2 Replay
-
-**Engine replay** (`replay_review_audit_run`):
-- 保存済み `intent_features` + `action_features` から engine を再実行
-- `ReviewAuditReplayComparison`: `exact_match`, `por_diff`, `delta_e_diff`, `mismatch_score_diff`, `verdict_match`
-
-**Extractor replay** (`replay_review_audit_extractor_run`):
-- 保存済み `review_context_json` から extractor を再実行
-- `ReviewAuditExtractorReplayComparison`: `observation_match`, `intent_features_match`, per-field diff
-
-この二段 replay により、engine drift と extractor drift を独立して検知できる。
+- `extractor_version` tracks which keyword / rule set was active in
+  `feature_extractor.py` when the observation was produced.
+- `feature_spec_version` tracks which normalization formula set was active when
+  intent features were computed.
+- Both default to `"v1"` and are stored on every run record.
+- When keyword sets change (e.g. `_AUTO_KEYWORDS` updated), increment
+  `extractor_version`.
+- When normalization formulas or weights change, increment
+  `feature_spec_version`.
+- Extractor replay surfaces a version mismatch warning when stored version tags
+  differ from the current module values.
+- Engine replay is independent of these version tags.
 
 ---
 
-## 10. Bot Integration (Shadow Mode)
+## Intentionally deferred beyond v1
 
-### 10.1 Insertion Point 1 — `build_review_context()` 直後
-
-```python
-# shadow audit: pre-action (intent features only)
-observation = extract_review_observation(context)
-intent_features = extract_review_intent_features(observation)
-# detect_only / propose_only ではここまで
-```
-
-### 10.2 Insertion Point 2 — executor 完了後 / validation 集約後
-
-```python
-# shadow audit: post-action (FixActionFeatures あり)
-action_features = extract_fix_action_features(codex_result, diff_stats, ...)
-# run_review_audit_workflow → persist
-```
-
-### 10.3 v1 の Shadow Mode 定義
-
-| Bot モード | 実行ポイント | 効果 |
-|---|---|---|
-| `detect_only` | Point 1 のみ | pre-action audit, `verdict = "insufficient_data"` |
-| `propose_only` | Point 1 のみ | pre-action audit, `verdict = "insufficient_data"` |
-| `apply_and_push` | Point 1 + 2 | pre + post audit, 全 verdict が出る |
-
-**v1 のルール:**
-- `verdict` は log / persistence のみに使う
-- `push_head_branch()` の判定には使わない
-- user-visible reply への反映は任意であり、blocking には使わない
-
----
-
-## 11. 実装マイルストーン
-
-| Milestone | 成果物 | 完了条件 |
-|---|---|---|
-| **M1 — Spec 固定** | `docs/specs/ugh_review_audit_v1.md` (本ファイル) | 数式と境界条件がコード前に固まっている |
-| **M2 — Extractor** | `feature_extractor.py` + tests | same input → same output、各シナリオを網羅テスト |
-| **M3 — Engine** | `review_audit_models.py`, `review_audit.py` + tests | bounds / frozen / action=None edge case を全テスト |
-| **M4 — Persistence** | ORM + repository + serializer + migration + tests | save/load roundtrip 成功、flush-only 維持 |
-| **M5 — Workflow** | workflow request/result/runner + tests | engine → persist → reload → return が成立 |
-| **M6 — Query / Replay** | query models/readers + engine/extractor replay + tests | engine drift と extractor drift を分離検知可能 |
-| **M7 — Bot Integration** | `bot.py` 挿入 + logging | push 判定に影響しないことを確認 |
-
----
-
-## 12. 新規追加ファイル
-
-| File | Purpose |
+| Capability | Reason deferred |
 |---|---|
-| `docs/specs/ugh_review_audit_v1.md` | 本ファイル (spec) |
-| `src/ugh_quantamental/review_autofix/feature_extractor.py` | ReviewContext → ReviewObservation → ReviewIntentFeatures |
-| `src/ugh_quantamental/engine/review_audit_models.py` | review audit 用 typed models |
-| `src/ugh_quantamental/engine/review_audit.py` | pure audit engine |
-| `alembic/versions/0005_add_review_audit_records.py` | DB migration |
-| `tests/engine/test_review_audit_models.py` | model tests |
-| `tests/engine/test_review_audit.py` | engine tests |
-| `tests/review_autofix/test_feature_extractor.py` | extractor tests |
-| `tests/persistence/test_review_audit_repositories.py` | persistence tests |
-| `tests/workflows/test_review_audit_workflow.py` | workflow tests |
-
-## 13. 既存ファイルの変更対象
-
-| File | Change |
-|---|---|
-| `src/ugh_quantamental/persistence/models.py` | `ReviewAuditRunRecord` を追加 |
-| `src/ugh_quantamental/persistence/repositories.py` | `ReviewAuditRun` dataclass + repository 追加 |
-| `src/ugh_quantamental/persistence/serializers.py` | review audit 用 serializer 追加 |
-| `src/ugh_quantamental/workflows/models.py` | workflow request/result 追加 |
-| `src/ugh_quantamental/workflows/runners.py` | `run_review_audit_workflow()` 追加 |
-| `src/ugh_quantamental/query/models.py` | query / summary / bundle 追加 |
-| `src/ugh_quantamental/query/readers.py` | list/get reader 追加 |
-| `src/ugh_quantamental/replay/models.py` | replay request/comparison/result 追加 |
-| `src/ugh_quantamental/replay/runners.py` | engine replay + extractor replay 追加 |
-| `src/ugh_quantamental/review_autofix/bot.py` | shadow audit 挿入 |
-| `src/ugh_quantamental/engine/__init__.py` | export 追加 |
-
----
-
-## 14. 守るべき Invariant
-
-1. **Import isolation を壊さない** — `review_audit_models.py` と `workflows/models.py` は SQLAlchemy なしで import 可能
-2. **Engine は pure / no I/O** — `run_review_audit_engine` は typed models のみ受け取り、typed model を返す
-3. **All Pydantic models are frozen + `extra="forbid"`**
-4. **Workflows は flush-only / never commit** — 呼び出し元がトランザクションを所有する
-5. **Extractor は v1 で deterministic** — same `ReviewContext` → same `ReviewObservation`
-6. **raw text は保存するが engine に渡さない**
-7. **replay は engine replay と extractor replay に分離する**
-
----
-
-## 15. 検証コマンド
-
-```bash
-ruff check .   # lint
-pytest -q      # tests
-```
-
-両コマンドはすべての変更後にクリーンに通過しなければならない。
-
----
-
-## 16. 既存コードの再利用ポイント
-
-| 既存 | 場所 | 再利用先 |
-|---|---|---|
-| `extract_priority()` | `classifier.py` | `feature_extractor.py` |
-| `_AUTO_KEYWORDS` | `classifier.py` | `feature_extractor.py` |
-| `_SKIP_KEYWORDS` | `classifier.py` | `feature_extractor.py` |
-| `make_run_id()` | `workflows/models.py` | audit_id / run_id 生成 |
-| `_normalize_created_at()` | `repositories.py` | `ReviewAuditRunRepository` |
-| `dump_model_json()` / `load_model_json()` | `serializers.py` | review audit serializer の基礎 |
-| `ReviewContext` frozen dataclass | `review_autofix/models.py` | raw audit trail の保存元 |
-
----
-
-## 17. v1 の本質的な位置づけ
-
-v1 の PoR は「完璧な semantic understanding」ではない。
-
-v1 の目標は:
-
-1. **deterministic extractor の確立** — 同じ入力から同じ特徴が出る基盤
-2. **pure audit engine の境界固定** — feature ↔ engine ↔ output の契約を決める
-3. **replay 可能な監査構造の導入** — 将来の enforcement / calibration に耐える検証基盤
-
-つまり v1 の本質は、
-PR review semantic audit を「正しさの最終解」として作ることではなく、
-**将来の enforcement や calibration に耐える検証基盤として成立させること**である。
+| Push blocking / verdict enforcement | Shadow mode only in v1; enforcement requires verdict accuracy validation first |
+| LLM-based or non-deterministic extractor | Breaks replay guarantee; violates determinism principle |
+| Learned / calibrated PoR weights or ΔE weights | Requires historical data accumulation; calibration deferred |
+| Cross-PR learning or persistent trend tracking | Requires cross-run aggregation state; out of scope |
+| Human approval UI | No service layer in this repository |
+| Adaptive verdict thresholds | Fixed thresholds in v1; calibration deferred |
+| Extractor replay persistence (storing diff results) | Ephemeral in v1 |
+| Non-uniform ΔE component weights | Uniform 0.25 in v1; per-feature weighting deferred |
+| Async execution | Repository is synchronous throughout |
+| REST / gRPC API layer | Out of scope per architecture principles |
