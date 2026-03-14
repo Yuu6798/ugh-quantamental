@@ -18,7 +18,7 @@ Guidelines for AI assistants working in this repository.
 | `replay.suites` | Named regression suite runner with deterministic pass/fail reporting |
 | `replay.baselines` | Baseline / golden snapshot: persist named suite results and compare future reruns |
 
-Milestones 1–12 are complete. The codebase is a research/scaffold tool, not a production application.
+Milestones 1–12 are complete. **Milestone 13 (`review_audit_workflow`) is planned** — see `docs/specs/ugh_review_audit_v1.md`. The codebase is a research/scaffold tool, not a production application.
 
 ---
 
@@ -51,7 +51,9 @@ src/ugh_quantamental/
 │   ├── projection.py         # 11 pure projection functions
 │   ├── projection_models.py  # QuestionFeatures, SignalFeatures, AlignmentInputs, ProjectionConfig, ProjectionEngineResult
 │   ├── state.py              # 8 pure state-lifecycle functions
-│   └── state_models.py       # StateEventFeatures, StateConfig, StateEngineResult
+│   ├── state_models.py       # StateEventFeatures, StateConfig, StateEngineResult
+│   ├── review_audit_models.py  # [M13 planned] ReviewObservation, ReviewIntentFeatures, FixActionFeatures, ReviewAuditConfig, ReviewAuditSnapshot, ReviewAuditEngineResult
+│   └── review_audit.py         # [M13 planned] pure review audit engine — compute_por, compute_delta_e, run_review_audit_engine
 ├── persistence/
 │   ├── __init__.py           # package exports
 │   ├── models.py             # ProjectionRunRecord, StateRunRecord, RegressionSuiteBaselineRecord (SQLAlchemy ORM)
@@ -78,7 +80,7 @@ src/ugh_quantamental/
     └── baselines.py           # make_baseline_id, create_regression_baseline, get_regression_baseline, compare_regression_baseline
 
 alembic/                       # Alembic migration environment
-alembic/versions/              # migration scripts (0001 initial, 0002 baselines)
+alembic/versions/              # migration scripts (0001 initial, 0002 baselines, 0005 review_audit [M13 planned])
 
 tests/
 ├── test_import_smoke.py
@@ -86,7 +88,9 @@ tests/
 │   ├── test_projection.py
 │   ├── test_projection_models.py
 │   ├── test_state.py
-│   └── test_state_models.py
+│   ├── test_state_models.py
+│   ├── test_review_audit_models.py   # [M13 planned]
+│   └── test_review_audit.py          # [M13 planned]
 ├── schemas/
 │   ├── test_market_svp.py
 │   ├── test_omega.py
@@ -95,11 +99,13 @@ tests/
 ├── persistence/
 │   ├── test_db.py
 │   ├── test_repositories.py
-│   └── test_baseline_repositories.py
+│   ├── test_baseline_repositories.py
+│   └── test_review_audit_repositories.py  # [M13 planned]
 ├── workflows/
 │   ├── conftest.py
 │   ├── test_models.py
-│   └── test_runners.py
+│   ├── test_runners.py
+│   └── test_review_audit_workflow.py  # [M13 planned]
 ├── query/
 │   ├── conftest.py
 │   └── test_readers.py
@@ -169,6 +175,9 @@ Workflows are thin, synchronous wrappers: call an engine function, persist via t
 
 ### Baseline layer (read-mostly, golden snapshot)
 `replay/baselines.py` persists named suite results as immutable baselines and supports comparison against future reruns. `create_regression_baseline` writes one baseline record (flush only). `get_regression_baseline` and `compare_regression_baseline` are read-only. Case deltas use `(group, name)` keys so projection and state cases with the same name produce independent deltas.
+
+### Review audit layer [Milestone 13 — planned, non-enforcing shadow mode]
+`engine/review_audit.py` is a pure deterministic engine that computes PoR (Probability of Relevance), ΔE (semantic divergence), and a verdict for a given PR review comment. Raw text is never passed into the engine. A three-layer extraction pipeline converts `ReviewContext` → `ReviewObservation` (symbolic) → `ReviewIntentFeatures` ([0,1] floats) before the engine is called. Replay is split into two levels: **engine replay** (re-runs engine from stored features) and **extractor replay** (re-extracts features from stored raw context). Bot integration is shadow-only in v1 — the verdict is persisted and logged but never used to block pushes.
 
 ---
 
@@ -249,6 +258,20 @@ Functions (in order): `compute_block_quality` → `compute_state_evidence` → `
 - `RegressionSuiteCaseDelta`: `group` (`"projection"` or `"state"`), `name`, `exists_in_baseline`, `exists_in_current`, `passed_match`
 - Import models from `replay.__init__` or `replay.baseline_models`; import functions from `replay.baselines`
 
+### Review audit engine [Milestone 13 — planned]
+Entry point: `run_review_audit_engine(audit_id, intent, action, config)` → `ReviewAuditEngineResult`.
+
+Three-layer feature extraction (extractor, not engine):
+`extract_review_observation(ReviewContext)` → `ReviewObservation` → `extract_review_intent_features(ReviewObservation)` → `ReviewIntentFeatures`
+
+Engine functions (in order): `compute_por` → `compute_delta_e` → `compute_mismatch_score` → `compute_verdict` → `build_audit_snapshot` → composed by `run_review_audit_engine`.
+
+- `PoR` (Probability of Relevance): weighted sum of `intent_clarity`, `locality_strength`, `mechanicalness`, `scope_boundness`
+- `ΔE` (semantic divergence): weighted L1 distance between intent vector and action vector; `None` when `action is None`
+- `verdict`: `"aligned" | "marginal" | "misaligned" | "insufficient_data"` — thresholds in spec
+- Engine replay and extractor replay are **separate operations** — see `docs/specs/ugh_review_audit_v1.md`
+- Import models from `engine.review_audit_models`; import engine from `engine.review_audit`
+
 ---
 
 ## Development conventions
@@ -327,6 +350,7 @@ Always include a ready-to-paste PR title and body (markdown) alongside the link.
 | `docs/specs/ugh_batch_replay_v1.md` | Batch replay / experiment runner (Milestone 10) |
 | `docs/specs/ugh_regression_suite_v1.md` | Regression suite runner and pass/fail policy (Milestone 11) |
 | `docs/specs/ugh_baseline_v1.md` | Baseline / golden snapshot management and comparison policy (Milestone 12) |
+| `docs/specs/ugh_review_audit_v1.md` | PR Review Semantic Audit Engine: three-layer feature extraction, PoR/ΔE math, shadow bot integration (Milestone 13 — planned) |
 
 When implementing a new milestone, read the corresponding spec first.
 
