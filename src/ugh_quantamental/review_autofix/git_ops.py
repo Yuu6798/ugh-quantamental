@@ -6,7 +6,7 @@ import subprocess
 def has_changes() -> bool:
     proc = subprocess.run("git status --porcelain", shell=True, capture_output=True, text=True, check=False)
     lines = [line for line in proc.stdout.splitlines() if line.strip()]
-    commitworthy = [line for line in lines if ".autofix-bot/state.json" not in line]
+    commitworthy = [line for line in lines if ".autofix-bot/" not in line]
     return bool(commitworthy)
 
 
