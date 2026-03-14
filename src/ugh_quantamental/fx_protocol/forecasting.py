@@ -123,6 +123,7 @@ def build_random_walk_forecast(
     forecast_batch_id: str,
     window_end_jst,
 ) -> ForecastRecord:
+    ctx = request.baseline_context
     return _make_base_record(
         request=request,
         forecast_batch_id=forecast_batch_id,
@@ -130,7 +131,10 @@ def build_random_walk_forecast(
         strategy_kind=StrategyKind.baseline_random_walk,
         forecast_direction=ForecastDirection.flat,
         expected_close_change_bp=0.0,
-        expected_range=None,
+        expected_range=_build_range_from_baseline_context(
+            ctx.current_spot,
+            ctx.trailing_mean_range_price,
+        ),
     )
 
 
@@ -149,7 +153,10 @@ def build_prev_day_direction_forecast(
         strategy_kind=StrategyKind.baseline_prev_day_direction,
         forecast_direction=_direction_from_bp(ctx.previous_close_change_bp),
         expected_close_change_bp=ctx.previous_close_change_bp,
-        expected_range=None,
+        expected_range=_build_range_from_baseline_context(
+            ctx.current_spot,
+            ctx.trailing_mean_range_price,
+        ),
     )
 
 
@@ -173,7 +180,10 @@ def build_simple_technical_forecast(
         strategy_kind=StrategyKind.baseline_simple_technical,
         forecast_direction=_direction_from_bp(expected_change_bp),
         expected_close_change_bp=expected_change_bp,
-        expected_range=None,
+        expected_range=_build_range_from_baseline_context(
+            ctx.current_spot,
+            ctx.trailing_mean_range_price,
+        ),
     )
 
 
