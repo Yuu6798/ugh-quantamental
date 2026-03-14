@@ -189,6 +189,71 @@ class TestBuildDailyOutcomeRequest:
 # ---------------------------------------------------------------------------
 
 
+class TestBuildDailyForecastRequest:
+    """Tests for build_daily_forecast_request."""
+
+    def _make_ugh_request(self) -> object:
+        """Build a minimal placeholder FullWorkflowRequest."""
+        from ugh_quantamental.fx_protocol.automation import _make_default_ugh_request
+
+        return _make_default_ugh_request("test-ref")
+
+    def test_returns_forecast_workflow_request(self) -> None:
+        from ugh_quantamental.fx_protocol.forecast_models import DailyForecastWorkflowRequest
+        from ugh_quantamental.fx_protocol.request_builders import build_daily_forecast_request
+
+        snap = _snapshot(20)
+        req = build_daily_forecast_request(
+            snap,
+            ugh_request=self._make_ugh_request(),
+            input_snapshot_ref="test-ref",
+            theory_version="v1",
+            engine_version="v1",
+            schema_version="v1",
+            protocol_version="v1",
+        )
+        assert isinstance(req, DailyForecastWorkflowRequest)
+        assert req.pair == snap.pair
+        assert req.as_of_jst == snap.as_of_jst
+
+    def test_version_fields_passed_through(self) -> None:
+        from ugh_quantamental.fx_protocol.request_builders import build_daily_forecast_request
+
+        snap = _snapshot(20)
+        req = build_daily_forecast_request(
+            snap,
+            ugh_request=self._make_ugh_request(),
+            input_snapshot_ref="ref-x",
+            theory_version="t2",
+            engine_version="e3",
+            schema_version="s4",
+            protocol_version="p5",
+        )
+        assert req.theory_version == "t2"
+        assert req.engine_version == "e3"
+        assert req.schema_version == "s4"
+        assert req.protocol_version == "p5"
+        assert req.input_snapshot_ref == "ref-x"
+
+    def test_baseline_context_derived(self) -> None:
+        from ugh_quantamental.fx_protocol.request_builders import build_daily_forecast_request
+
+        snap = _snapshot(25)
+        req = build_daily_forecast_request(
+            snap,
+            ugh_request=self._make_ugh_request(),
+            input_snapshot_ref="r",
+            theory_version="v1",
+            engine_version="v1",
+            schema_version="v1",
+            protocol_version="v1",
+        )
+        # BaselineContext must be populated.
+        assert req.baseline_context.warmup_window_count == 25
+        assert req.baseline_context.sma20 > 0
+        assert req.baseline_context.sma5 > 0
+
+
 class TestPreviousWindowMatches:
     def test_matches_when_newest_end_equals_as_of(self) -> None:
         wins = _build_windows(20)

@@ -19,8 +19,11 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
+      # FX_DATA_URL and FX_DATA_AUTH_TOKEN are not required.
+      # The built-in Yahoo Finance public provider is used by default.
+      # Set FX_DATA_URL as a repository secret only if you want to override
+      # with a private custom endpoint.
       FX_DATA_URL: ${{ secrets.FX_DATA_URL }}
-      FX_DATA_AUTH_TOKEN: ${{ secrets.FX_DATA_AUTH_TOKEN }}
       FX_DATA_BRANCH: ${{ vars.FX_DATA_BRANCH || 'fx-daily-data' }}
       FX_SQLITE_FILENAME: ${{ vars.FX_SQLITE_FILENAME || 'fx_protocol.db' }}
       FX_THEORY_VERSION: ${{ vars.FX_THEORY_VERSION || 'v1' }}

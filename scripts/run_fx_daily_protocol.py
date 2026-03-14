@@ -6,8 +6,9 @@ and runs one full daily protocol cycle for USDJPY.
 
 Environment variables
 ---------------------
-FX_DATA_URL          : market data endpoint URL (required)
-FX_DATA_AUTH_TOKEN   : optional bearer token for the data endpoint
+FX_DATA_URL          : optional custom market-data endpoint URL.
+                       If not set, the built-in Yahoo Finance public provider is used.
+FX_DATA_AUTH_TOKEN   : optional bearer token for a custom endpoint (FX_DATA_URL must be set).
 FX_DATA_BRANCH       : git data branch name (default: fx-daily-data, informational only)
 FX_SQLITE_FILENAME   : SQLite filename under the data directory (default: fx_protocol.db)
 FX_THEORY_VERSION    : UGH theory version (default: v1)
@@ -37,9 +38,9 @@ def _fail(msg: str) -> None:
 def main() -> None:
     """Run the daily FX protocol once and print a summary."""
     # --- Config from environment ---
+    # FX_DATA_URL is optional: when set, the custom HttpJsonFxMarketDataProvider is
+    # used; when absent, the built-in YahooFinanceFxMarketDataProvider is used.
     fx_data_url = _env("FX_DATA_URL")
-    if not fx_data_url:
-        _fail("FX_DATA_URL is required but not set.")
 
     theory_version = _env("FX_THEORY_VERSION", "v1")
     engine_version = _env("FX_ENGINE_VERSION", "v1")
@@ -57,6 +58,8 @@ def main() -> None:
     run_outcome = _env("FX_DISABLE_OUTCOME") != "1"
     run_forecast = _env("FX_DISABLE_FORECAST") != "1"
 
+    provider_name = f"custom ({fx_data_url})" if fx_data_url else "yahoo_finance (public)"
+    print(f"[INFO] provider        = {provider_name}")
     print(f"[INFO] sqlite_path     = {sqlite_path}")
     print(f"[INFO] data_branch     = {data_branch}")
     print(f"[INFO] protocol_version= {protocol_version}")
@@ -77,7 +80,10 @@ def main() -> None:
     try:
         from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
         from ugh_quantamental.fx_protocol.automation_models import FxDailyAutomationConfig
-        from ugh_quantamental.fx_protocol.data_sources import HttpJsonFxMarketDataProvider
+        from ugh_quantamental.fx_protocol.data_sources import (
+            HttpJsonFxMarketDataProvider,
+            YahooFinanceFxMarketDataProvider,
+        )
         from ugh_quantamental.persistence.db import (
             create_db_engine,
             create_session_factory,
@@ -114,6 +120,12 @@ def main() -> None:
     print("[INFO] Alembic migrations applied.")
     engine = create_db_engine(db_url)
 
+    # --- Instantiate provider ---
+    if fx_data_url:
+        provider = HttpJsonFxMarketDataProvider(url=fx_data_url)
+    else:
+        provider = YahooFinanceFxMarketDataProvider()
+
     # --- Run protocol ---
     config = FxDailyAutomationConfig(
         theory_version=theory_version,
@@ -125,8 +137,6 @@ def main() -> None:
         run_outcome_evaluation=run_outcome,
         run_forecast_generation=run_forecast,
     )
-
-    provider = HttpJsonFxMarketDataProvider(url=fx_data_url)
 
     session_factory = create_session_factory(engine)
     with session_factory() as session:

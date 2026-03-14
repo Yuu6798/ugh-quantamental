@@ -1,6 +1,11 @@
 """Market-data provider abstraction for the FX Daily Automation layer (v1).
 
-Provides a structural Protocol and a minimal HTTP JSON implementation.
+Provides:
+- ``FxMarketDataProvider``: structural protocol (unchanged)
+- ``YahooFinanceFxMarketDataProvider``: default public provider (no auth required)
+- ``HttpJsonFxMarketDataProvider``: optional custom-endpoint provider (retained for
+  users with private data feeds; requires ``FX_DATA_URL``)
+
 No provider-specific SDK dependency; uses only stdlib urllib.
 """
 
@@ -10,9 +15,11 @@ import json
 import os
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Protocol, runtime_checkable
+from zoneinfo import ZoneInfo
 
+from ugh_quantamental.fx_protocol.calendar import is_protocol_business_day, next_as_of_jst
 from ugh_quantamental.fx_protocol.data_models import (
     FxCompletedWindow,
     FxProtocolMarketSnapshot,
@@ -23,6 +30,8 @@ from ugh_quantamental.fx_protocol.models import (
     MarketDataProvenance,
     _to_jst,
 )
+
+_JST = ZoneInfo("Asia/Tokyo")
 
 
 class FxDataFetchError(Exception):
@@ -52,6 +61,266 @@ class FxMarketDataProvider(Protocol):
             On network failure, parse error, or schema validation error.
         """
         ...
+
+
+# ---------------------------------------------------------------------------
+# Yahoo Finance public provider (default; no auth required)
+# ---------------------------------------------------------------------------
+
+_YF_BASE_URL = "https://query2.finance.yahoo.com/v8/finance/chart"
+_YF_SYMBOL = "USDJPY=X"
+_YF_INTERVAL = "1d"
+_YF_RANGE = "60d"  # 60 calendar days → ~40 business-day bars; ensures >= 20 completed windows
+
+
+def _yahoo_bar_to_window(
+    ts: int,
+    open_p: float,
+    high_p: float,
+    low_p: float,
+    close_p: float,
+) -> FxCompletedWindow | None:
+    """Convert one Yahoo Finance daily bar into a protocol ``FxCompletedWindow``.
+
+    Normalization rule (deterministic)
+    -----------------------------------
+    Yahoo Finance daily bars for ``USDJPY=X`` carry Unix-second UTC timestamps
+    at midnight UTC of the trading date.  The protocol window is aligned to
+    08:00 JST, so the mapping is:
+
+    1. Convert the Unix timestamp to a UTC datetime, then to JST.
+    2. Extract the JST *date* (UTC midnight = JST 09:00; same calendar date).
+    3. Construct ``window_start_jst`` = 08:00 JST on that date.
+    4. Derive ``window_end_jst`` = ``next_as_of_jst(window_start_jst)``
+       (08:00 JST on the next protocol business day, skipping weekends).
+    5. Discard bars whose JST date falls on Saturday or Sunday.
+    6. If ``high_p < low_p`` (rare Yahoo Finance FX artefact), swap them.
+    7. Clamp ``open_p`` and ``close_p`` to ``[low_p, high_p]`` to tolerate
+       minor floating-point drift in the source data.
+
+    Returns ``None`` for weekend bars, bars with invalid timestamps, or bars
+    that fail ``FxCompletedWindow`` construction.
+    """
+    try:
+        ts_utc = datetime.fromtimestamp(ts, tz=timezone.utc)
+    except (OSError, OverflowError, ValueError):
+        return None
+
+    ts_jst = ts_utc.astimezone(_JST)
+    jst_date = ts_jst.date()
+
+    window_start = datetime(
+        jst_date.year, jst_date.month, jst_date.day, 8, 0, 0, tzinfo=_JST
+    )
+    if not is_protocol_business_day(window_start):
+        return None  # skip weekend / non-business bars
+
+    window_end = next_as_of_jst(window_start)
+
+    # Guard against inverted high/low (very rare in FX source data).
+    if high_p < low_p:
+        high_p, low_p = low_p, high_p
+
+    # Clamp open/close to [low, high] so the strict protocol validator accepts
+    # otherwise-valid bars that have minor floating-point drift.
+    open_p = max(low_p, min(high_p, open_p))
+    close_p = max(low_p, min(high_p, close_p))
+
+    try:
+        return FxCompletedWindow(
+            window_start_jst=window_start,
+            window_end_jst=window_end,
+            open_price=open_p,
+            high_price=high_p,
+            low_price=low_p,
+            close_price=close_p,
+        )
+    except ValueError:
+        return None
+
+
+def _parse_yahoo_snapshot(payload: dict, as_of_jst: datetime) -> FxProtocolMarketSnapshot:
+    """Parse a Yahoo Finance v8/finance/chart response into an ``FxProtocolMarketSnapshot``.
+
+    Parameters
+    ----------
+    payload:
+        Parsed JSON from ``{_YF_BASE_URL}/{_YF_SYMBOL}?interval=1d&range=60d``.
+    as_of_jst:
+        Canonical 08:00 JST timestamp from the protocol calendar.  Only windows
+        whose ``window_end_jst <= as_of_jst`` are included (completed windows).
+
+    Raises
+    ------
+    FxDataFetchError
+        On unexpected response shape, missing ``regularMarketPrice``, or fewer
+        than 20 completed protocol windows.
+    """
+    try:
+        result = payload["chart"]["result"][0]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise FxDataFetchError(
+            f"Unexpected Yahoo Finance response shape: {exc}"
+        ) from exc
+
+    # Current spot price from the response metadata.
+    meta = result.get("meta") or {}
+    raw_spot = meta.get("regularMarketPrice")
+    if raw_spot is None:
+        raise FxDataFetchError(
+            "Yahoo Finance response missing 'regularMarketPrice' in meta"
+        )
+    try:
+        current_spot = float(raw_spot)
+    except (TypeError, ValueError) as exc:
+        raise FxDataFetchError(f"Invalid regularMarketPrice: {exc}") from exc
+    if current_spot <= 0:
+        raise FxDataFetchError(
+            f"regularMarketPrice must be positive; got {current_spot}"
+        )
+
+    timestamps = result.get("timestamp") or []
+    quote_list = (result.get("indicators") or {}).get("quote") or [{}]
+    quote = quote_list[0] if quote_list else {}
+    opens = quote.get("open") or []
+    highs = quote.get("high") or []
+    lows = quote.get("low") or []
+    closes = quote.get("close") or []
+
+    windows: list[FxCompletedWindow] = []
+    for i, ts in enumerate(timestamps):
+        if ts is None:
+            continue
+        try:
+            open_p = opens[i] if i < len(opens) else None
+            high_p = highs[i] if i < len(highs) else None
+            low_p = lows[i] if i < len(lows) else None
+            close_p = closes[i] if i < len(closes) else None
+        except (IndexError, TypeError):
+            continue
+
+        if any(v is None for v in (open_p, high_p, low_p, close_p)):
+            continue
+
+        try:
+            win = _yahoo_bar_to_window(
+                int(ts),
+                float(open_p),  # type: ignore[arg-type]
+                float(high_p),  # type: ignore[arg-type]
+                float(low_p),  # type: ignore[arg-type]
+                float(close_p),  # type: ignore[arg-type]
+            )
+        except (TypeError, ValueError):
+            continue
+
+        if win is None:
+            continue
+
+        # Include only windows that have ended by as_of_jst (completed windows).
+        if win.window_end_jst <= as_of_jst:
+            windows.append(win)
+
+    # Sort oldest → newest (Yahoo Finance is usually pre-sorted, but be explicit).
+    windows.sort(key=lambda w: w.window_start_jst)
+
+    if len(windows) < 20:
+        raise FxDataFetchError(
+            f"Insufficient completed protocol windows: need ≥ 20, got {len(windows)} "
+            f"(as_of_jst={as_of_jst.isoformat()}). "
+            "The fetch range may need to be increased or the data source is lagging."
+        )
+
+    provenance = MarketDataProvenance(
+        vendor="yahoo_finance",
+        feed_name=f"chart/{_YF_SYMBOL}",
+        price_type="mid",
+        resolution="1d",
+        timezone="UTC",
+        retrieved_at_utc=datetime.now(timezone.utc),
+    )
+
+    return FxProtocolMarketSnapshot(
+        pair=CurrencyPair.USDJPY,
+        as_of_jst=as_of_jst,
+        current_spot=current_spot,
+        completed_windows=tuple(windows),
+        market_data_provenance=provenance,
+    )
+
+
+class YahooFinanceFxMarketDataProvider:
+    """USDJPY market data provider using the Yahoo Finance chart API.
+
+    No API key or secret required.  Uses only stdlib ``urllib``.
+
+    Endpoint::
+
+        https://query2.finance.yahoo.com/v8/finance/chart/USDJPY=X
+            ?interval=1d&range=60d
+
+    Normalization (see ``_yahoo_bar_to_window`` for full rules):
+
+    - Each daily bar timestamp (Unix UTC seconds) is converted to a JST date.
+    - Weekend bars (JST Saturday / Sunday) are discarded.
+    - Canonical protocol window: ``[08:00 JST date D, 08:00 JST next business day)``.
+    - Only windows whose end ≤ ``as_of_jst`` are returned (completed windows).
+    - ``current_spot`` is taken from ``meta.regularMarketPrice``.
+
+    In tests, stub this class by monkeypatching ``fetch_snapshot`` or by
+    patching ``urllib.request.urlopen``; no real network calls are made in tests.
+    """
+
+    def __init__(self, *, timeout: int = 30) -> None:
+        self._timeout = timeout
+
+    def fetch_snapshot(self, as_of_jst: datetime) -> FxProtocolMarketSnapshot:
+        """Fetch and parse a USDJPY snapshot from the Yahoo Finance chart API.
+
+        Raises
+        ------
+        FxDataFetchError
+            On network failure, non-200 response, invalid JSON, or fewer than
+            20 completed protocol windows in the response.
+        """
+        url = (
+            f"{_YF_BASE_URL}/{_YF_SYMBOL}"
+            f"?interval={_YF_INTERVAL}&range={_YF_RANGE}"
+        )
+        headers = {
+            "Accept": "application/json",
+            # Yahoo Finance blocks requests without a recognisable User-Agent.
+            "User-Agent": "Mozilla/5.0 (compatible; ugh-quantamental/1.0)",
+        }
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                status = resp.status
+                body = resp.read()
+        except urllib.error.HTTPError as exc:
+            raise FxDataFetchError(
+                f"HTTP {exc.code} from Yahoo Finance: {exc.reason}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise FxDataFetchError(
+                f"Network error fetching Yahoo Finance: {exc.reason}"
+            ) from exc
+
+        if status != 200:
+            raise FxDataFetchError(f"HTTP {status} from Yahoo Finance")
+
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise FxDataFetchError(
+                f"Invalid JSON from Yahoo Finance: {exc}"
+            ) from exc
+
+        return _parse_yahoo_snapshot(payload, as_of_jst)
+
+
+# ---------------------------------------------------------------------------
+# Custom-endpoint provider (optional; retained for users with private feeds)
+# ---------------------------------------------------------------------------
 
 
 def _parse_event_tags(raw: list[str] | None) -> tuple[EventTag, ...]:
@@ -107,7 +376,7 @@ def _parse_provenance(raw: dict) -> MarketDataProvenance:
 
 
 def _parse_snapshot(payload: dict, as_of_jst: datetime) -> FxProtocolMarketSnapshot:
-    """Parse the full JSON payload into an ``FxProtocolMarketSnapshot``."""
+    """Parse a custom-endpoint JSON payload into an ``FxProtocolMarketSnapshot``."""
     try:
         pair = CurrencyPair(payload.get("pair", CurrencyPair.USDJPY.value))
         current_spot = float(payload["current_spot"])
@@ -132,17 +401,18 @@ def _parse_snapshot(payload: dict, as_of_jst: datetime) -> FxProtocolMarketSnaps
 
 
 class HttpJsonFxMarketDataProvider:
-    """Minimal HTTP JSON market data provider using only stdlib urllib.
+    """Optional custom-endpoint provider using stdlib urllib.
+
+    Use this when a private or internal data feed is available.
+    If ``FX_DATA_URL`` is not set, use ``YahooFinanceFxMarketDataProvider``
+    (the default public provider) instead.
 
     Configuration via environment variables:
-    - ``FX_DATA_URL``: base URL for the data endpoint (required)
+    - ``FX_DATA_URL``: base URL for the data endpoint (required for this provider)
     - ``FX_DATA_AUTH_TOKEN``: optional bearer token
 
-    The endpoint is expected to return a JSON body conforming to the
+    The endpoint must return a JSON body conforming to the
     ``FxProtocolMarketSnapshot`` contract.
-
-    In tests, stub this provider by subclassing or monkeypatching
-    ``fetch_snapshot``; no real network calls are made in tests.
     """
 
     def __init__(
@@ -167,7 +437,8 @@ class HttpJsonFxMarketDataProvider:
         """
         if not self._url:
             raise FxDataFetchError(
-                "FX_DATA_URL is not set; cannot fetch market snapshot"
+                "FX_DATA_URL is not set; cannot fetch market snapshot. "
+                "Use YahooFinanceFxMarketDataProvider for the public default."
             )
 
         headers = {"Accept": "application/json"}
