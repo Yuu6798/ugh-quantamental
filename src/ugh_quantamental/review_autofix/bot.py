@@ -4,12 +4,14 @@ import logging
 import os
 
 from .classifier import classify_review
+from .codex_executor import build_executor
 from .config import BotConfig, load_config
+from .executor_models import CodexExecutionStatus
 from .git_ops import commit_changes, has_changes, push_head_branch
 from .github_client import GithubClient, build_review_context, is_review_event, load_event_from_env
 from .models import Classification, ProcessResult
-from .rules import RuleRegistry
 from .state_store import FileStateStore
+from .task_builder import build_fix_task
 from .validator import run_validation
 
 _VALID_BOT_MODES = {"detect_only", "propose_only", "apply_and_push", "apply_push_and_resolve"}
@@ -59,11 +61,6 @@ def run() -> ProcessResult:
     except ValueError:
         return ProcessResult("event:invalid", Classification.skip, None, False, False, False, False, "invalid-event-payload")
 
-    logging.debug(
-        "review_autofix context: reviewer_login=%r target_reviewers=%r",
-        context.reviewer_login,
-        config.target_reviewers,
-    )
     if not should_process_actor(context.reviewer_login, config):
         return ProcessResult("actor:ignored", Classification.skip, None, False, False, False, False, "ignored-actor")
 
@@ -96,25 +93,33 @@ def run() -> ProcessResult:
     if not context.same_repo and not config.allow_push_on_fork:
         classification = Classification.propose_only
 
-    registry = RuleRegistry()
-    rule = registry.match(context)
-    if rule is None:
-        state.mark(key)
-        return ProcessResult(key, Classification.skip, None, False, False, False, False, "no-matching-rule")
-
+    task = build_fix_task(context, key)
     changed = False
     pushed = False
     validation_ok = False
+    reason = "skip"
 
     if config.bot_mode in {"detect_only"}:
         reason = "detect-only"
+    elif config.bot_mode in {"propose_only"} or config.dry_run or classification == Classification.propose_only:
+        reason = "proposed-only"
     else:
-        applied = rule.apply(context)
-        changed = applied.changed
-        if not changed:
-            reason = "no-change"
-        elif config.bot_mode in {"propose_only"} or config.dry_run or classification == Classification.propose_only:
-            reason = "proposed-only"
+        executor = build_executor(command=config.codex_command, timeout_seconds=config.codex_timeout_seconds)
+        handle = executor.submit_fix_task(task)
+        result = executor.wait_for_result(handle)
+        apply_result = executor.apply_or_confirm_branch_update(handle, result)
+        changed = apply_result.changed
+
+        if result.status == CodexExecutionStatus.timeout:
+            reason = "codex-timeout"
+        elif result.status == CodexExecutionStatus.malformed:
+            reason = "codex-malformed-response"
+        elif result.status == CodexExecutionStatus.failed:
+            reason = apply_result.summary or "codex-failed"
+        elif result.status == CodexExecutionStatus.no_op or not changed:
+            reason = "codex-no-op"
+        elif not has_changes() and not apply_result.branch_updated:
+            reason = "no-change-after-codex"
         else:
             validation = run_validation(config.all_validation_commands)
             validation_ok = validation.ok
@@ -122,8 +127,11 @@ def run() -> ProcessResult:
                 reason = "validation-failed"
             else:
                 if has_changes():
-                    commit_changes(f"AUTO: apply {rule.rule_id} for PR #{context.pr_number} ({key})")
+                    commit_changes(f"AUTO: apply codex fix task for PR #{context.pr_number} ({key})")
                     push_head_branch(context.head_ref)
+                    pushed = True
+                    reason = "pushed"
+                elif apply_result.branch_updated:
                     pushed = True
                     reason = "pushed"
                 else:
@@ -142,7 +150,7 @@ def run() -> ProcessResult:
                 _reply(
                     client,
                     context,
-                    f"✅ Auto-fix applied by rule `{rule.rule_id}` and pushed to `{context.head_ref}`.\n\n{marker}",
+                    f"✅ Codex fix applied and pushed to `{context.head_ref}`.\n\n{marker}",
                 )
                 replied = True
             except Exception:
@@ -151,14 +159,14 @@ def run() -> ProcessResult:
             client.persist_marker(context, marker)
         if reason != "pushed" and config.reply_on_failure:
             try:
-                _reply(client, context, f"ℹ️ Auto-fix processed (`{rule.rule_id}`): {reason}. No push was performed.\n\n{marker}")
+                _reply(client, context, f"ℹ️ Codex autofix processed: {reason}. No push was performed.\n\n{marker}")
                 replied = True
             except Exception:
                 if not nonfatal_comment_writes:
                     raise
 
     state.mark(key)
-    return ProcessResult(key, classification, rule.rule_id, changed, validation_ok, pushed, replied, reason)
+    return ProcessResult(key, classification, "codex-task", changed, validation_ok, pushed, replied, reason)
 
 
 if __name__ == "__main__":

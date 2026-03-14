@@ -75,6 +75,8 @@ jobs:
           REPLY_ON_FAILURE: ${{ vars.REPLY_ON_FAILURE || 'true' }}
           AUTO_RESOLVE: ${{ vars.AUTO_RESOLVE || 'false' }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
+          CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
+          CODEX_EXECUTOR_TIMEOUT_SECONDS: ${{ vars.CODEX_EXECUTOR_TIMEOUT_SECONDS || '900' }}
         run: |
           python - <<'PY'
           import os
