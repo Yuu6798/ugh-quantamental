@@ -22,7 +22,9 @@ from ugh_quantamental.fx_protocol.data_sources import (
     FxDataFetchError,
     FxMarketDataProvider,
     HttpJsonFxMarketDataProvider,
+    YahooFinanceFxMarketDataProvider,
     _parse_snapshot,
+    _parse_yahoo_snapshot,
 )
 from ugh_quantamental.fx_protocol.models import CurrencyPair, MarketDataProvenance
 
@@ -255,6 +257,212 @@ class TestParseSnapshot:
         payload = _snapshot_payload(19, as_of_jst=as_of.isoformat())
         with pytest.raises((FxDataFetchError, ValueError)):
             _parse_snapshot(payload, as_of)
+
+
+# ---------------------------------------------------------------------------
+# Yahoo Finance provider helpers and tests
+# ---------------------------------------------------------------------------
+
+
+def _build_yf_payload(n_bars: int, as_of_jst: datetime) -> dict:
+    """Build a mock Yahoo Finance chart API response with n_bars business-day bars.
+
+    The newest bar's window_end_jst == as_of_jst (freshness constraint).
+    Yahoo Finance uses UTC midnight timestamps for daily FX bars.
+    """
+    bar_dates = []
+    current = as_of_jst - timedelta(days=1)
+    while len(bar_dates) < n_bars:
+        if current.weekday() not in {5, 6}:  # Monday=0 … Friday=4 in JST
+            bar_dates.append(current.date())
+        current -= timedelta(days=1)
+    bar_dates.reverse()  # oldest first
+
+    timestamps = [
+        int(datetime(d.year, d.month, d.day, 0, 0, 0, tzinfo=timezone.utc).timestamp())
+        for d in bar_dates
+    ]
+    n = len(timestamps)
+    return {
+        "chart": {
+            "result": [{
+                "timestamp": timestamps,
+                "meta": {
+                    "regularMarketPrice": 150.5,
+                    "currency": "JPY",
+                    "symbol": "USDJPY=X",
+                },
+                "indicators": {
+                    "quote": [{
+                        "open": [149.5] * n,
+                        "high": [151.5] * n,
+                        "low": [148.5] * n,
+                        "close": [150.5] * n,
+                    }],
+                },
+            }],
+            "error": None,
+        },
+    }
+
+
+class TestYahooFinanceFxMarketDataProvider:
+    """Tests for YahooFinanceFxMarketDataProvider — no real network calls."""
+
+    _AS_OF = datetime(2026, 3, 10, 8, 0, 0, tzinfo=ZoneInfo("Asia/Tokyo"))  # Tuesday
+
+    def _make_provider(self) -> YahooFinanceFxMarketDataProvider:
+        return YahooFinanceFxMarketDataProvider()
+
+    def _mock_urlopen(self, payload: dict):
+        body = json.dumps(payload).encode()
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.status = 200
+        mock_resp.read.return_value = body
+        return mock_resp
+
+    def test_successful_fetch_returns_valid_snapshot(self) -> None:
+        payload = _build_yf_payload(22, self._AS_OF)
+        provider = self._make_provider()
+        mock_resp = self._mock_urlopen(payload)
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            snap = provider.fetch_snapshot(self._AS_OF)
+
+        assert snap.pair == CurrencyPair.USDJPY
+        assert len(snap.completed_windows) >= 20
+        assert snap.current_spot == 150.5
+        # Newest completed window must end at as_of_jst (freshness constraint).
+        assert snap.completed_windows[-1].window_end_jst == self._AS_OF
+
+    def test_network_error_raises(self) -> None:
+        import urllib.error
+        provider = self._make_provider()
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("connection refused"),
+        ):
+            with pytest.raises(FxDataFetchError, match="Network error"):
+                provider.fetch_snapshot(self._AS_OF)
+
+    def test_non_200_status_raises(self) -> None:
+        provider = self._make_provider()
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.status = 429
+        mock_resp.read.return_value = b'{"error": "rate limited"}'
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            with pytest.raises(FxDataFetchError, match="429"):
+                provider.fetch_snapshot(self._AS_OF)
+
+    def test_invalid_json_raises(self) -> None:
+        provider = self._make_provider()
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.status = 200
+        mock_resp.read.return_value = b"NOT JSON AT ALL"
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            with pytest.raises(FxDataFetchError, match="JSON"):
+                provider.fetch_snapshot(self._AS_OF)
+
+    def test_insufficient_windows_raises(self) -> None:
+        # Only 5 bars → cannot satisfy the >= 20 completed-windows requirement.
+        payload = _build_yf_payload(5, self._AS_OF)
+        provider = self._make_provider()
+        mock_resp = self._mock_urlopen(payload)
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            with pytest.raises(FxDataFetchError, match="Insufficient"):
+                provider.fetch_snapshot(self._AS_OF)
+
+    def test_provider_satisfies_protocol(self) -> None:
+        provider = self._make_provider()
+        assert isinstance(provider, FxMarketDataProvider)
+
+    def test_no_network_in_tests(self) -> None:
+        """Confirm tests never hit the real network."""
+        import urllib.error
+        provider = self._make_provider()
+        with patch(
+            "urllib.request.urlopen",
+            side_effect=urllib.error.URLError("no network in tests"),
+        ):
+            with pytest.raises(FxDataFetchError, match="Network error"):
+                provider.fetch_snapshot(self._AS_OF)
+
+    def test_requires_no_auth_token_or_url(self) -> None:
+        """No FX_DATA_URL or FX_DATA_AUTH_TOKEN needed to instantiate."""
+        provider = YahooFinanceFxMarketDataProvider()
+        assert isinstance(provider, YahooFinanceFxMarketDataProvider)
+
+
+class TestParseYahooSnapshot:
+    """Tests for _parse_yahoo_snapshot helper."""
+
+    _AS_OF = datetime(2026, 3, 10, 8, 0, 0, tzinfo=ZoneInfo("Asia/Tokyo"))
+
+    def test_parses_valid_payload(self) -> None:
+        payload = _build_yf_payload(22, self._AS_OF)
+        snap = _parse_yahoo_snapshot(payload, self._AS_OF)
+        assert snap.pair == CurrencyPair.USDJPY
+        assert snap.current_spot == 150.5
+        assert len(snap.completed_windows) >= 20
+        assert snap.completed_windows[-1].window_end_jst == self._AS_OF
+
+    def test_missing_regular_market_price_raises(self) -> None:
+        payload = _build_yf_payload(22, self._AS_OF)
+        del payload["chart"]["result"][0]["meta"]["regularMarketPrice"]
+        with pytest.raises(FxDataFetchError, match="regularMarketPrice"):
+            _parse_yahoo_snapshot(payload, self._AS_OF)
+
+    def test_bad_response_shape_raises(self) -> None:
+        with pytest.raises(FxDataFetchError, match="response shape"):
+            _parse_yahoo_snapshot({}, self._AS_OF)
+
+    def test_weekend_bars_excluded(self) -> None:
+        payload = _build_yf_payload(22, self._AS_OF)
+        # Insert a Saturday bar (2026-03-07 = Saturday).
+        sat_ts = int(datetime(2026, 3, 7, 0, 0, 0, tzinfo=timezone.utc).timestamp())
+        result = payload["chart"]["result"][0]
+        result["timestamp"].insert(0, sat_ts)
+        for key in ("open", "high", "low", "close"):
+            result["indicators"]["quote"][0][key].insert(0, 150.0)
+
+        snap = _parse_yahoo_snapshot(payload, self._AS_OF)
+        # Saturday bar must not appear in completed windows.
+        for win in snap.completed_windows:
+            assert win.window_start_jst.weekday() < 5  # Mon=0 … Fri=4
+
+    def test_windows_ordered_oldest_to_newest(self) -> None:
+        payload = _build_yf_payload(22, self._AS_OF)
+        snap = _parse_yahoo_snapshot(payload, self._AS_OF)
+        starts = [w.window_start_jst for w in snap.completed_windows]
+        assert starts == sorted(starts)
+
+    def test_future_bars_excluded(self) -> None:
+        """Bars whose window_end > as_of_jst must not appear."""
+        payload = _build_yf_payload(22, self._AS_OF)
+        snap = _parse_yahoo_snapshot(payload, self._AS_OF)
+        for win in snap.completed_windows:
+            assert win.window_end_jst <= self._AS_OF
+
+    def test_normalization_maps_utc_midnight_to_jst_date(self) -> None:
+        """UTC midnight Monday 2026-03-09 → window_start = 2026-03-09 08:00 JST."""
+        from ugh_quantamental.fx_protocol.data_sources import _yahoo_bar_to_window
+        from zoneinfo import ZoneInfo
+        _JST_local = ZoneInfo("Asia/Tokyo")
+        # 2026-03-09 (Monday) 00:00 UTC
+        ts = int(datetime(2026, 3, 9, 0, 0, 0, tzinfo=timezone.utc).timestamp())
+        win = _yahoo_bar_to_window(ts, 149.5, 151.5, 148.5, 150.5)
+        assert win is not None
+        assert win.window_start_jst == datetime(2026, 3, 9, 8, 0, 0, tzinfo=_JST_local)
+        assert win.window_end_jst == datetime(2026, 3, 10, 8, 0, 0, tzinfo=_JST_local)
 
 
 # ---------------------------------------------------------------------------
@@ -501,8 +709,15 @@ class TestSqlitePathHandling:
 class TestScriptConfigValidation:
     """Tests for script-level config validation logic, no network access."""
 
-    def test_missing_fx_data_url_detected(self, monkeypatch) -> None:
-        """FX_DATA_URL must not be empty for the provider to work."""
+    def test_default_provider_requires_no_url(self, monkeypatch) -> None:
+        """FX_DATA_URL is NOT required — Yahoo Finance is the default provider."""
+        monkeypatch.delenv("FX_DATA_URL", raising=False)
+        # YahooFinanceFxMarketDataProvider can be instantiated with no env vars.
+        provider = YahooFinanceFxMarketDataProvider()
+        assert isinstance(provider, FxMarketDataProvider)
+
+    def test_http_provider_still_requires_url_when_used_explicitly(self, monkeypatch) -> None:
+        """HttpJsonFxMarketDataProvider still raises when its own URL is empty."""
         monkeypatch.delenv("FX_DATA_URL", raising=False)
         provider = HttpJsonFxMarketDataProvider(url="")
         as_of = datetime(2026, 3, 10, 8, 0, 0, tzinfo=_JST)

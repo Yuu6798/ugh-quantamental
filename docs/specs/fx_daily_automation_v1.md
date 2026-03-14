@@ -64,19 +64,48 @@ class FxMarketDataProvider(Protocol):
     def fetch_snapshot(self, as_of_jst: datetime) -> FxProtocolMarketSnapshot: ...
 ```
 
-### `HttpJsonFxMarketDataProvider`
+### `YahooFinanceFxMarketDataProvider` (default, public)
 
-Minimal HTTP JSON provider using only stdlib (`urllib.request`) and existing dependencies.
+The default provider.  Uses the Yahoo Finance chart API with no authentication.
+
+Endpoint:
+```
+https://query2.finance.yahoo.com/v8/finance/chart/USDJPY=X?interval=1d&range=60d
+```
+
+- No API key, no GitHub Secrets required.
+- Uses only stdlib `urllib.request`.
+- Returns the last 60 calendar days of daily OHLC bars.
+
+### `HttpJsonFxMarketDataProvider` (optional, custom endpoint)
+
+Retained for users who have a private data feed.  Requires `FX_DATA_URL`.
 
 Configuration via environment variables:
-- `FX_DATA_URL` — base URL for the data endpoint
+- `FX_DATA_URL` — base URL for the data endpoint (required for this provider only)
 - `FX_DATA_AUTH_TOKEN` — optional bearer token
 
-Behavior:
-- Sends a GET request to `{FX_DATA_URL}` with optional `Authorization: Bearer {token}` header
-- Expects a JSON response conforming to the snapshot contract
-- Validates and constructs a typed `FxProtocolMarketSnapshot`
-- Raises `FxDataFetchError` on network or parse failures
+When `FX_DATA_URL` is not set, the script automatically uses `YahooFinanceFxMarketDataProvider`.
+
+---
+
+## Normalization rule: public source → protocol windows
+
+Yahoo Finance returns Unix-second UTC timestamps at midnight UTC for each daily bar.
+USDJPY bars are mapped to protocol windows as follows (deterministic):
+
+| Step | Operation |
+|---|---|
+| 1 | Convert Unix timestamp to UTC datetime |
+| 2 | Convert to JST: UTC+0000 → JST+0900 (same calendar date for midnight UTC) |
+| 3 | Discard bars whose JST date is Saturday or Sunday |
+| 4 | `window_start_jst` = 08:00 JST on the JST date of the bar |
+| 5 | `window_end_jst` = `next_as_of_jst(window_start_jst)` = 08:00 JST next business day |
+| 6 | Only include windows where `window_end_jst ≤ as_of_jst` (completed windows) |
+| 7 | If `high < low` (rare FX artefact): swap them |
+| 8 | Clamp `open` and `close` to `[low, high]` to tolerate floating-point drift |
+
+`current_spot` is taken from `meta.regularMarketPrice` in the response.
 
 ---
 
@@ -195,10 +224,13 @@ Required to push to the data branch.
 
 ### Environment variables
 
+No GitHub Secrets are required.  The built-in Yahoo Finance public provider is used
+by default.
+
 | Variable | Required | Description |
 |---|---|---|
-| `FX_DATA_URL` | Yes | Market data endpoint URL |
-| `FX_DATA_AUTH_TOKEN` | No | Optional bearer token |
+| `FX_DATA_URL` | No | Override with a custom private endpoint; if absent, Yahoo Finance is used |
+| `FX_DATA_AUTH_TOKEN` | No | Bearer token for custom endpoint only |
 | `FX_DATA_BRANCH` | No | Data branch name (default: `fx-daily-data`) |
 | `FX_SQLITE_FILENAME` | No | SQLite filename (default: `fx_protocol.db`) |
 | `FX_THEORY_VERSION` | No | Theory version (default: `v1`) |

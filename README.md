@@ -257,12 +257,23 @@ day at **08:00 JST** (23:00 UTC the previous day, Mon–Fri).
 4. If any data changed, the SQLite file is committed and pushed back to the
    `fx-daily-data` branch only (never to `main`).
 
-### Required environment variables / secrets
+### Data source
+
+USDJPY market data is fetched from the **Yahoo Finance chart API** — a public,
+unauthenticated HTTPS endpoint.  No API key, no GitHub Secrets, and no private
+endpoint configuration is required to run the automation.
+
+If you have a private data feed, set `FX_DATA_URL` as a repository secret; the
+script will use your endpoint instead of Yahoo Finance.
+
+### Environment variables / secrets
+
+No secrets are required for default operation.
 
 | Variable | Where | Description |
 |---|---|---|
-| `FX_DATA_URL` | GitHub Secret | Market data endpoint URL (required) |
-| `FX_DATA_AUTH_TOKEN` | GitHub Secret | Optional bearer token for the endpoint |
+| `FX_DATA_URL` | GitHub Secret (optional) | Override with a private endpoint; default uses Yahoo Finance |
+| `FX_DATA_AUTH_TOKEN` | GitHub Secret (optional) | Bearer token for custom endpoint only |
 | `FX_DATA_BRANCH` | GitHub Variable | Data branch name (default: `fx-daily-data`) |
 | `FX_SQLITE_FILENAME` | GitHub Variable | SQLite filename (default: `fx_protocol.db`) |
 | `FX_THEORY_VERSION` | GitHub Variable | UGH theory version (default: `v1`) |
@@ -273,8 +284,12 @@ day at **08:00 JST** (23:00 UTC the previous day, Mon–Fri).
 ### Running locally
 
 ```bash
-export FX_DATA_URL="https://your-data-endpoint/usdjpy"
+# No secrets needed — Yahoo Finance is used by default.
 export FX_DATA_DIR="./data"
+python scripts/run_fx_daily_protocol.py
+
+# Optional: use a custom private endpoint instead.
+export FX_DATA_URL="https://your-data-endpoint/usdjpy"
 python scripts/run_fx_daily_protocol.py
 ```
 
