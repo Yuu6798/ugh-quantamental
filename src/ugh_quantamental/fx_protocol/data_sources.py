@@ -10,7 +10,7 @@ import json
 import os
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Protocol, runtime_checkable
 
 from ugh_quantamental.fx_protocol.data_models import (
@@ -88,9 +88,11 @@ def _parse_provenance(raw: dict) -> MarketDataProvenance:
     try:
         retrieved_at_raw = raw.get("retrieved_at_utc")
         if retrieved_at_raw is None:
-            retrieved_at = datetime.now(timezone.utc)
-        else:
-            retrieved_at = datetime.fromisoformat(retrieved_at_raw)
+            raise FxDataFetchError(
+                "market_data_provenance.retrieved_at_utc is required but missing; "
+                "injecting wall-clock time would break deterministic replay."
+            )
+        retrieved_at = datetime.fromisoformat(retrieved_at_raw)
         return MarketDataProvenance(
             vendor=raw["vendor"],
             feed_name=raw["feed_name"],
