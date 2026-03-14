@@ -501,6 +501,89 @@ def test_fork_propose_only_reply_failure_is_non_fatal(tmp_path: Path, monkeypatc
     assert result.pushed is False
 
 
+def test_codex_bot_processed_when_allowed_reviewers_env_unset(tmp_path: Path, monkeypatch) -> None:
+    """ALLOWED_BOT_REVIEWERS unset → default kicks in → Codex is NOT ignored-actor."""
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="chatgpt-codex-connector[bot]")
+
+    _set_common_env(monkeypatch, tmp_path, event_path)
+    monkeypatch.delenv("ALLOWED_BOT_REVIEWERS", raising=False)
+
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    result = bot.run()
+    assert result.reason != "ignored-actor"
+
+
+def test_codex_bot_processed_when_allowed_reviewers_env_empty(tmp_path: Path, monkeypatch) -> None:
+    """ALLOWED_BOT_REVIEWERS='' → default kicks in → Codex is NOT ignored-actor."""
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    event_path = tmp_path / "event.json"
+    _write_event(event_path, reviewer="chatgpt-codex-connector[bot]")
+
+    _set_common_env(monkeypatch, tmp_path, event_path)
+    monkeypatch.setenv("ALLOWED_BOT_REVIEWERS", "")
+
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    result = bot.run()
+    assert result.reason != "ignored-actor"
+
+
+def test_codex_submitted_review_is_processed(tmp_path: Path, monkeypatch) -> None:
+    """pull_request_review (submitted review body) from Codex is NOT ignored-actor."""
+    dummy = tmp_path / "dummy.py"
+    dummy.write_text("range_hit = 1\n", encoding="utf-8")
+    event_path = tmp_path / "event.json"
+    _write_review_event(
+        event_path,
+        body="file: dummy.py\nP1 please set range_hit to None",
+        reviewer="chatgpt-codex-connector[bot]",
+    )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(event_path))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request_review")
+    monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state.json"))
+    monkeypatch.setenv("BOT_MODE", "apply_and_push")
+    monkeypatch.setenv("TARGET_REVIEWERS", "chatgpt-codex-connector[bot]")
+    monkeypatch.setenv("ALLOWED_BOT_REVIEWERS", "chatgpt-codex-connector[bot]")
+    monkeypatch.setenv("DRY_RUN", "false")
+    monkeypatch.setenv("VALIDATION_LINT_COMMANDS", "true")
+    monkeypatch.setenv("VALIDATION_TEST_COMMANDS", "true")
+
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    result = bot.run()
+    assert result.reason != "ignored-actor"
+
+
+def test_non_codex_actors_still_ignored_when_allowed_reviewers_is_default(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Human reviewers and unknown bots remain ignored-actor even with default allowlist."""
+    for reviewer in ("alice", "github-actions[bot]", "unknown-bot[bot]"):
+        event_path = tmp_path / f"event_{reviewer.replace('[', '').replace(']', '')}.json"
+        _write_event(event_path, reviewer=reviewer)
+
+        _set_common_env(monkeypatch, tmp_path, event_path)
+        monkeypatch.delenv("ALLOWED_BOT_REVIEWERS", raising=False)
+
+        result = bot.run()
+        assert result.reason == "ignored-actor", (
+            f"Expected ignored-actor for reviewer={reviewer!r}, got {result.reason!r}"
+        )
+
+
 def test_same_repo_propose_only_reply_failure_remains_fatal(tmp_path: Path, monkeypatch) -> None:
     _FailingReplyGithubClient.markers = set()
     event_path = tmp_path / "event.json"

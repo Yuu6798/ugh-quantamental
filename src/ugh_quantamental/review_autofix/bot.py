@@ -16,6 +16,12 @@ _VALID_BOT_MODES = {"detect_only", "propose_only", "apply_and_push", "apply_push
 
 
 def should_process_actor(login: str | None, config: BotConfig) -> bool:
+    logging.debug(
+        "review_autofix actor_check: login=%r allowed_bot_reviewers=%r self_bot_actors=%r",
+        login,
+        config.allowed_bot_reviewers,
+        config.self_bot_actors,
+    )
     if not login:
         return False
     if login in config.self_bot_actors:
@@ -53,6 +59,11 @@ def run() -> ProcessResult:
     except ValueError:
         return ProcessResult("event:invalid", Classification.skip, None, False, False, False, False, "invalid-event-payload")
 
+    logging.debug(
+        "review_autofix context: reviewer_login=%r target_reviewers=%r",
+        context.reviewer_login,
+        config.target_reviewers,
+    )
     if not should_process_actor(context.reviewer_login, config):
         return ProcessResult("actor:ignored", Classification.skip, None, False, False, False, False, "ignored-actor")
 
