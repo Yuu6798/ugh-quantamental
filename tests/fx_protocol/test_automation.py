@@ -282,13 +282,18 @@ class TestRunFxDailyProtocolOnce:
         return provider
 
     def _make_snapshot_no_previous_window(self) -> FxProtocolMarketSnapshot:
-        """Snapshot where as_of_jst does NOT match newest window end (no outcome)."""
+        """Snapshot that passes the freshness guard (newest_end == as_of_jst).
+
+        Whether outcome evaluation actually runs is controlled by
+        config.run_outcome_evaluation or by patching previous_window_matches
+        in individual tests — not by making the snapshot stale.
+        """
         wins = _build_windows_raw(20)
-        # Force as_of to be 7 days after newest window end (no match).
-        future_as_of = wins[-1].window_end_jst + timedelta(days=7)
+        # as_of_jst must equal the newest window_end_jst to pass the freshness guard.
+        as_of = wins[-1].window_end_jst
         return FxProtocolMarketSnapshot(
             pair=CurrencyPair.USDJPY,
-            as_of_jst=future_as_of,
+            as_of_jst=as_of,
             current_spot=150.0,
             completed_windows=wins,
             market_data_provenance=MarketDataProvenance(

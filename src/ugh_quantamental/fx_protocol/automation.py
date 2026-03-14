@@ -216,6 +216,21 @@ def run_fx_daily_protocol_once(
     # --- Step 2: fetch snapshot ---
     snapshot = provider.fetch_snapshot(as_of_jst)
 
+    # Freshness guard: the newest completed window must close at exactly as_of_jst.
+    # A lagging or cached provider would return a window_end_jst in the past,
+    # causing today's forecast batch to be built from stale history.  Once
+    # persisted it would be treated as idempotent-complete by later reruns,
+    # permanently blocking regeneration with correct data.
+    if not snapshot.completed_windows:
+        raise ValueError("Provider returned a snapshot with no completed windows.")
+    newest_end = snapshot.completed_windows[-1].window_end_jst
+    if newest_end != as_of_jst:
+        raise ValueError(
+            f"Stale snapshot: newest completed window ends at {newest_end.isoformat()} "
+            f"but as_of_jst is {as_of_jst.isoformat()}. "
+            "Provider data may be lagging or cached."
+        )
+
     # --- Step 3: forecast generation ---
     forecast_batch_id: str | None = None
     forecast_created = False
