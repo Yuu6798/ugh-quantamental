@@ -14,6 +14,7 @@ def test_review_autofix_workflow_uses_trusted_execution_and_pr_data_checkout() -
     assert 'working-directory: trusted-bot' in workflow
     assert 'working-directory: pr-head' in workflow
     assert 'TRUSTED_SRC: ${{ github.workspace }}/trusted-bot/src' in workflow
+    assert 'os.environ["PYTHONPATH"] = trusted_src' in workflow
     assert 'runpy.run_module("ugh_quantamental.review_autofix.bot", run_name="__main__")' in workflow
     assert 'group: review-autofix-${{ github.event.pull_request.number || github.ref_name }}' in workflow
     assert 'cancel-in-progress: false' in workflow
