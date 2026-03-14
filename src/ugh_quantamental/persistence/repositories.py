@@ -18,10 +18,13 @@ from ugh_quantamental.engine.state_models import StateConfig, StateEngineResult,
 from sqlalchemy import select
 
 from ugh_quantamental.persistence.models import (
+    FxForecastRecord,
     ProjectionRunRecord,
     RegressionSuiteBaselineRecord,
     StateRunRecord,
 )
+from ugh_quantamental.fx_protocol.forecast_models import PersistedDailyForecastBatch
+from ugh_quantamental.fx_protocol.models import ForecastRecord
 from ugh_quantamental.persistence.serializers import (
     dump_model_json,
     projection_payload_to_models,
@@ -190,6 +193,59 @@ class RegressionSuiteBaselineRepository:
             description=record.description,
             suite_request_json=record.suite_request_json,
             suite_result_json=record.suite_result_json,
+        )
+
+
+class FxForecastRepository:
+    """Persistence adapter for FX forecast batch records."""
+
+    @staticmethod
+    def save_fx_forecast_batch(
+        session: Session,
+        *,
+        forecast_batch_id: str,
+        forecasts: tuple[ForecastRecord, ...],
+    ) -> PersistedDailyForecastBatch:
+        for forecast in forecasts:
+            record = FxForecastRecord(
+                forecast_id=forecast.forecast_id,
+                forecast_batch_id=forecast_batch_id,
+                pair=forecast.pair.value,
+                strategy_kind=forecast.strategy_kind.value,
+                as_of_jst=_normalize_created_at(forecast.as_of_jst),
+                window_end_jst=_normalize_created_at(forecast.window_end_jst),
+                protocol_version=forecast.protocol_version,
+                payload_json=dump_model_json(forecast),
+            )
+            session.add(record)
+        session.flush()
+        return PersistedDailyForecastBatch(
+            forecast_batch_id=forecast_batch_id,
+            forecasts=forecasts,
+        )
+
+    @staticmethod
+    def load_fx_forecast_batch(
+        session: Session,
+        forecast_batch_id: str,
+    ) -> PersistedDailyForecastBatch | None:
+        records = tuple(
+            session.execute(
+                select(FxForecastRecord)
+                .where(FxForecastRecord.forecast_batch_id == forecast_batch_id)
+                .order_by(FxForecastRecord.forecast_id.asc())
+            ).scalars()
+        )
+        if not records:
+            return None
+
+        forecasts = tuple(
+            ForecastRecord.model_validate(record.payload_json)
+            for record in records
+        )
+        return PersistedDailyForecastBatch(
+            forecast_batch_id=forecast_batch_id,
+            forecasts=forecasts,
         )
 
 

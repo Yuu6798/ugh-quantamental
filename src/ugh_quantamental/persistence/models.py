@@ -51,6 +51,21 @@ class StateRunRecord(Base):
     result_json: Mapped[dict] = mapped_column(JSON, nullable=False)
 
 
+class FxForecastRecord(Base):
+    """JSON-backed FX forecast record with minimal searchable metadata columns."""
+
+    __tablename__ = "fx_forecast_records"
+
+    forecast_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    forecast_batch_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    pair: Mapped[str] = mapped_column(String(16), nullable=False)
+    strategy_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    as_of_jst: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    window_end_jst: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+    protocol_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
 class RegressionSuiteBaselineRecord(Base):
     """Persisted regression suite baseline (golden snapshot)."""
 
