@@ -114,9 +114,6 @@ def _process_classified_context(
 
     replied = False
     if client is not None:
-        nonfatal_comment_writes = (
-            (reason != "pushed") and (classification == Classification.propose_only) and (not context.same_repo)
-        )
         if (
             reason == "pushed"
             and config.bot_mode == "apply_push_and_resolve"
@@ -144,8 +141,14 @@ def _process_classified_context(
                 _reply(client, context, f"ℹ️ Codex autofix processed: {reason}. No push was performed.\n\n{marker}")
                 replied = True
             except Exception:
-                if not nonfatal_comment_writes:
-                    raise
+                # Reply failure is non-fatal: the comment may have been deleted or may be
+                # inaccessible (e.g. 404 on fork PRs).  Log and continue so that
+                # state.mark() is always reached and the event is not retried.
+                logging.warning(
+                    "review_autofix: failure reply could not be posted for key=%s"
+                    " (comment deleted or inaccessible); continuing",
+                    key,
+                )
 
     state.mark(key)
     return ProcessResult(key, classification, "codex-task", changed, validation_ok, pushed, replied, reason)
