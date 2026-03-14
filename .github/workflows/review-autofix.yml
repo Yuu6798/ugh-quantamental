@@ -13,7 +13,20 @@ permissions:
 
 jobs:
   review-autofix:
-    if: github.event_name != 'pull_request_review' || github.event.review.state != 'approved'
+    # Only fire for reviews/comments authored by the trusted Codex bot.
+    # This prevents the job from spinning up for every human review comment.
+    # The secondary actor check inside bot.py enforces the same rule in software.
+    if: >-
+      (
+        github.event_name == 'pull_request_review_comment' &&
+        github.event.comment.user.login == 'chatgpt-codex-connector[bot]'
+      ) || (
+        github.event_name == 'pull_request_review' &&
+        github.event.review.state != 'approved' &&
+        github.event.review.user.login == 'chatgpt-codex-connector[bot]'
+      ) || (
+        github.event_name == 'workflow_dispatch'
+      )
     runs-on: ubuntu-latest
     concurrency:
       group: review-autofix-${{ github.event.pull_request.number || github.ref_name }}

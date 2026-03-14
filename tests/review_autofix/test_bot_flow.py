@@ -315,6 +315,56 @@ def test_noop_artifact_only_does_not_push(tmp_path: Path, monkeypatch) -> None:
     assert result.pushed is False
 
 
+def test_codex_review_without_legacy_keywords_reaches_executor(tmp_path: Path, monkeypatch) -> None:
+    """A Codex review body that matches none of the legacy auto-keywords must still
+    reach the executor and succeed (classify_codex_review defaults to auto_fixable)."""
+    event = tmp_path / "event.json"
+    payload = {
+        "repository": {"full_name": "acme/repo"},
+        "pull_request": {
+            "number": 12,
+            "base": {"ref": "main"},
+            "head": {"ref": "feature", "sha": "abc", "repo": {"full_name": "acme/repo"}},
+        },
+        "comment": {
+            "id": 99,
+            "pull_request_review_id": 10,
+            "user": {"login": "chatgpt-codex-connector[bot]"},
+            "body": "Please rename this variable to snake_case.",  # no legacy keywords
+            "path": "src/foo.py",
+            "diff_hunk": "@@",
+            "line": 3,
+            "start_line": 3,
+            "updated_at": "2024-06-01T00:00:00Z",
+            "node_id": "PRRC_node_99",
+        },
+    }
+    event.write_text(json.dumps(payload), encoding="utf-8")
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review_comment")
+
+    submitted: list[str] = []
+
+    class _Stub:
+        def submit_fix_task(self, task):
+            submitted.append(task.prompt)
+            return CodexTaskHandle(task_id=task.task_id)
+
+        def wait_for_result(self, handle):
+            return CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok")
+
+        def apply_or_confirm_branch_update(self, handle, result):
+            return CodexApplyResult(changed=True, branch_updated=False, summary="ok")
+
+    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: _Stub())
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    result = bot.run()
+    assert result.reason == "pushed"
+    assert submitted, "executor must have been called"
+
+
 def test_invalid_review_body_path_hint_skips_without_executor(tmp_path: Path, monkeypatch) -> None:
     event = tmp_path / "event.json"
     _write_review_event(event)

@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import os
 
-from .classifier import classify_review
+from .classifier import classify_codex_review
 from .codex_executor import build_executor
 from .config import BotConfig, load_config
 from .executor_models import CodexExecutionStatus
@@ -85,7 +85,7 @@ def run() -> ProcessResult:
     if config.target_reviewers and (context.reviewer_login or "") not in config.target_reviewers:
         return ProcessResult(key, Classification.skip, None, False, False, False, False, "reviewer-filter")
 
-    classification = classify_review(context)
+    classification = classify_codex_review(context)
     if classification == Classification.skip:
         state.mark(key)
         return ProcessResult(key, classification, None, False, False, False, False, "skip")

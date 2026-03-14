@@ -41,3 +41,22 @@ def classify_review(context: ReviewContext) -> Classification:
     if any(token in body for token in ("should", "提案", "consider")):
         return Classification.propose_only
     return Classification.skip
+
+
+def classify_codex_review(context: ReviewContext) -> Classification:
+    """Classify a review that has already been verified to come from a trusted Codex actor.
+
+    Unlike ``classify_review``, this function does NOT require the review body to match
+    auto-fix keyword patterns.  The Codex bot only comments on things it can fix, so the
+    default disposition is ``auto_fixable``.  We only skip for:
+
+    * Explicit skip keywords (large-scale design / refactor directives).
+    * ``review_body`` events without any file-location hint (ambiguous target — fail-closed).
+    """
+    body = context.body.lower()
+    if any(word in body for word in _SKIP_KEYWORDS):
+        return Classification.skip
+    if context.path is None and context.kind.value == "review_body":
+        if "file:" not in body and "path:" not in body:
+            return Classification.skip
+    return Classification.auto_fixable
