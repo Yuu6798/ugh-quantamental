@@ -404,6 +404,17 @@ def test_disconfirmer_event_tag_miss() -> None:
     assert "r1" not in hit
 
 
+
+def test_disconfirmer_event_tag_unsupported_operator_raises() -> None:
+    outcome = build_outcome_record(_outcome_request(event_tags=(EventTag.fomc,)))
+    forecast = _make_ugh_forecast(
+        disconfirmers=(
+            _rule("r1_bad_op", "event_tag", "invalid_op", "fomc", target_field="event_tags"),
+        )
+    )
+    with pytest.raises(ValueError, match="r1_bad_op"):
+        compute_disconfirmers_hit(forecast, outcome, None)
+
 def test_disconfirmer_close_change_bp_gt_hit() -> None:
     outcome = _outcome_up()  # bp > 0
     forecast = _make_ugh_forecast(
@@ -494,6 +505,17 @@ def test_disconfirmer_unsupported_audit_kind_raises() -> None:
     with pytest.raises(ValueError, match="unsupported operator"):
         compute_disconfirmers_hit(forecast, outcome, None)
 
+
+
+def test_disconfirmer_range_break_unsupported_operator_raises() -> None:
+    outcome = _outcome_up()
+    forecast = _make_ugh_forecast(
+        disconfirmers=(
+            _rule("r10_bad_op", "range_break", "invalid_op", "below_expected_low"),
+        ),
+    )
+    with pytest.raises(ValueError, match="r10_bad_op"):
+        compute_disconfirmers_hit(forecast, outcome, None)
 
 def test_disconfirmer_range_break_unsupported_threshold_raises() -> None:
     outcome = _outcome_up()

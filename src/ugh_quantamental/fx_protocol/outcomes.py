@@ -29,6 +29,8 @@ if TYPE_CHECKING:
 
 _CLOSE_CHANGE_BP_OPERATORS: frozenset[str] = frozenset({"gt", "gte", "lt", "lte", "eq", "ne"})
 _STATE_PROXY_OPERATORS: frozenset[str] = frozenset({"eq", "ne"})
+_EVENT_TAG_OPERATORS: frozenset[str] = frozenset({"check"})
+_RANGE_BREAK_OPERATORS: frozenset[str] = frozenset({"check"})
 _RANGE_BREAK_THRESHOLDS: frozenset[str] = frozenset(
     {"below_expected_low", "above_expected_high", "outside_expected_range"}
 )
@@ -95,6 +97,12 @@ def _evaluate_disconfirmer(
     combinations.  Rules are never silently skipped.
     """
     if rule.audit_kind == "event_tag":
+        if rule.operator not in _EVENT_TAG_OPERATORS:
+            raise ValueError(
+                f"DisconfirmerRule {rule.rule_id!r}: unsupported operator "
+                f"{rule.operator!r} for audit_kind='event_tag'; "
+                f"supported: {sorted(_EVENT_TAG_OPERATORS)}"
+            )
         if not isinstance(rule.threshold_value, str):
             raise ValueError(
                 f"DisconfirmerRule {rule.rule_id!r}: audit_kind='event_tag' requires "
@@ -149,6 +157,12 @@ def _evaluate_disconfirmer(
             return realized_state_proxy != rule.threshold_value
 
     if rule.audit_kind == "range_break":
+        if rule.operator not in _RANGE_BREAK_OPERATORS:
+            raise ValueError(
+                f"DisconfirmerRule {rule.rule_id!r}: unsupported operator "
+                f"{rule.operator!r} for audit_kind='range_break'; "
+                f"supported: {sorted(_RANGE_BREAK_OPERATORS)}"
+            )
         if forecast.expected_range is None:
             raise ValueError(
                 f"DisconfirmerRule {rule.rule_id!r}: audit_kind='range_break' requires "
