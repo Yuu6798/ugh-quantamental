@@ -288,10 +288,13 @@ jobs:
             || _probe_exit=$?
           rm -f "${_probe_file}"
 
-          echo "codex-cli-auth-probe: exit_code=${_probe_exit} (0=auth OK)"
+          echo "codex-cli-auth-probe: exit_code=${_probe_exit} (0=OK, same cwd as executor)"
           if [ "${_probe_exit}" != "0" ]; then
-            echo "::warning::Codex CLI probe failed (exit ${_probe_exit})."
-            echo "::warning::Key is valid (/v1/models 200) but CLI cannot auth — check OPENAI_API_KEY scope for /v1/responses."
+            echo "::warning::Codex CLI probe failed (exit ${_probe_exit}) — ran from pr-head, same cwd as real executor."
+            echo "::warning::curl /v1/models returned 200, so the key is valid at HTTP level."
+            echo "::warning::Remaining causes: (1) Codex CLI auth handling differs from raw HTTP;"
+            echo "::warning::(2) key scope lacks /v1/responses permission; (3) command invocation"
+            echo "::warning::differences between probe and real executor path."
           fi
           echo "=== Codex CLI auth probe done ==="
 
