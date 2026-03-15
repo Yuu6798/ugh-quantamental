@@ -65,41 +65,45 @@ jobs:
           python -m pip install -e .
           python -m pip install pytest ruff
 
-      # Install Node.js only when the executor is likely to run.
-      # detect_only, propose_only, and DRY_RUN=true (or unset) never call the
-      # executor, so Node.js and the Codex CLI are not needed.  Gating these
-      # two steps avoids a hard dependency on npm registry availability in
-      # read-only modes, which would abort the workflow before the bot can post
-      # review guidance.
-      #
-      # Condition mirrors the _likely_execute logic in the preflight step:
-      #   BOT_MODE must be set and must not be detect_only / propose_only
-      #   DRY_RUN must be set to an explicit falsy value (not empty / not truthy)
+      # Compute executor gate — normalise BOT_MODE and DRY_RUN case-insensitively
+      # using the same rules as config.py _parse_bool ({1,true,yes,on} → dry).
+      # GitHub Actions `if:` expressions are case-sensitive, so literal-value
+      # checks in `if:` would silently pass for values like "TRUE" or "Yes",
+      # triggering npm install in dry-run modes and introducing a spurious
+      # dependency on the npm registry.  Using a shell-computed output avoids
+      # that gap.
+      - name: Compute executor gate
+        id: gate
+        env:
+          BOT_MODE: ${{ vars.BOT_MODE || 'detect_only' }}
+          DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+        run: |
+          _mode=$(printf '%s' "${BOT_MODE}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+          _dry=$(printf '%s'  "${DRY_RUN}"  | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+          _install=false
+          if [ "${_mode}" != '' ] && \
+             [ "${_mode}" != 'detect_only' ] && \
+             [ "${_mode}" != 'propose_only' ]; then
+            case "${_dry}" in
+              1|true|yes|on) ;;
+              *) _install=true ;;
+            esac
+          fi
+          echo "should_install=${_install}" >> "$GITHUB_OUTPUT"
+
+      # Install Node.js only when the executor gate says execution is likely.
+      # detect_only, propose_only, and any DRY_RUN truthy value (case-insensitive)
+      # skip this step so transient npm failures cannot abort the workflow before
+      # the bot posts its review guidance.
       - name: Set up Node.js
-        if: >-
-          vars.BOT_MODE != '' &&
-          vars.BOT_MODE != 'detect_only' &&
-          vars.BOT_MODE != 'propose_only' &&
-          vars.DRY_RUN != '' &&
-          vars.DRY_RUN != 'true' &&
-          vars.DRY_RUN != '1' &&
-          vars.DRY_RUN != 'yes' &&
-          vars.DRY_RUN != 'on'
+        if: steps.gate.outputs.should_install == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       # Install the OpenAI Codex CLI globally (execution modes only — see above).
       - name: Install Codex CLI
-        if: >-
-          vars.BOT_MODE != '' &&
-          vars.BOT_MODE != 'detect_only' &&
-          vars.BOT_MODE != 'propose_only' &&
-          vars.DRY_RUN != '' &&
-          vars.DRY_RUN != 'true' &&
-          vars.DRY_RUN != '1' &&
-          vars.DRY_RUN != 'yes' &&
-          vars.DRY_RUN != 'on'
+        if: steps.gate.outputs.should_install == 'true'
         run: npm install -g @openai/codex
 
       - name: Configure git author
