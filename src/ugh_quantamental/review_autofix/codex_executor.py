@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 import os
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
 from .executor_models import CodexApplyResult, CodexExecutionResult, CodexExecutionStatus, CodexFixTask, CodexTaskHandle
+
+logger = logging.getLogger(__name__)
 
 
 class CodexExecutor(Protocol):
@@ -44,7 +48,33 @@ class LocalSubprocessCodexExecutor:
         prompt_path.write_text(submitted.task.prompt, encoding="utf-8")
 
         env = os.environ.copy()
+        # Explicitly preserve OPENAI_API_KEY so the Codex subprocess always
+        # receives it.  os.environ.copy() already includes it when present, but
+        # the explicit assignment makes the dependency visible and ensures it
+        # cannot be accidentally dropped by future refactors.
+        if "OPENAI_API_KEY" in os.environ:
+            env["OPENAI_API_KEY"] = os.environ["OPENAI_API_KEY"]
         env["CODEX_TASK_FILE"] = str(prompt_path)
+
+        # Safe diagnostics — values are never logged.
+        # Use shlex.split for shell-aware tokenization so that quoted values
+        # (e.g. SECRET='top secret' codex …) are handled correctly before we
+        # skip leading KEY=value env-prefix tokens to find the binary name.
+        try:
+            _tokens = shlex.split(self._command) if self._command else []
+        except ValueError:
+            _tokens = []
+        _bin = next(
+            (t for t in _tokens if not ("=" in t and t.split("=", 1)[0].replace("_", "").isalnum())),
+            "(none)",
+        )
+        logger.debug(
+            "codex executor launch: binary=%r OPENAI_API_KEY_present=%s CODEX_TASK_FILE=%s",
+            _bin,
+            "OPENAI_API_KEY" in env,
+            env.get("CODEX_TASK_FILE"),
+        )
+
         try:
             proc = subprocess.run(
                 self._command,

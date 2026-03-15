@@ -193,12 +193,10 @@ jobs:
           fi
           echo "=== preflight OK ==="
 
-      # TEMPORARY DIAGNOSTIC STEP — remove once 401 root-cause is confirmed.
-      # Checks:
-      #   (a) Whether OPENAI_API_KEY authenticates successfully against
-      #       /v1/models (HTTP 200 = key works; 401 = key invalid or missing).
-      #   (b) The value of CODEX_EXECUTOR_COMMAND with embedded secrets masked.
-      # This step never fails the job (continue-on-error: true).
+      # TEMPORARY DIAGNOSTIC STEPS — remove once 401 root-cause is confirmed.
+      # Step A: curl-level probe — confirms OPENAI_API_KEY is valid.
+      # Step B: Codex CLI probe — confirms the CLI itself receives and uses the key.
+      # Both steps never fail the job (continue-on-error: true).
       - name: Diagnose — OpenAI auth and executor command
         continue-on-error: true
         env:
@@ -235,6 +233,72 @@ jobs:
             echo "CODEX_EXECUTOR_COMMAND: set (${_word_count} token(s); binary='${_cmd_token}')"
           fi
           echo "=== diagnostic done ==="
+
+      # TEMPORARY — Codex CLI auth probe.
+      # Runs only when execution is expected (gate=true).  Installs codex
+      # (same path as the bot step), then exercises the real CLI with a
+      # trivial prompt so we can observe whether it authenticates or exits 1.
+      # Output of the codex subprocess is suppressed; only the exit code is
+      # printed to avoid leaking any LLM response content to the log.
+      - name: Diagnose — Codex CLI auth probe
+        if: steps.gate.outputs.should_install == 'true'
+        continue-on-error: true
+        working-directory: pr-head
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
+          CODEX_EXECUTOR_TIMEOUT_SECONDS: ${{ vars.CODEX_EXECUTOR_TIMEOUT_SECONDS || '900' }}
+          _CODEX_INSTALL_NEEDED: ${{ steps.gate.outputs.should_install }}
+        run: |
+          echo "=== Codex CLI auth probe ==="
+
+          # Install codex (mirrors bot step; failure is non-fatal).
+          if [ "${_CODEX_INSTALL_NEEDED}" = "true" ]; then
+            (cd "$GITHUB_WORKSPACE" && npm install -g @openai/codex --ignore-scripts) \
+              || { echo "::warning::codex install failed — CLI probe skipped."; exit 0; }
+          fi
+
+          # Guard: OPENAI_API_KEY must be present (never print value).
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "::warning::OPENAI_API_KEY is empty in this step — Codex will fail with 401."
+            exit 0
+          fi
+          echo "OPENAI_API_KEY : present"
+
+          # Guard: codex binary must be resolvable after install.
+          if ! command -v codex >/dev/null 2>&1; then
+            echo "::warning::codex binary not found after install attempt — probe cannot run."
+            exit 0
+          fi
+          echo "codex binary   : $(command -v codex)"
+
+          # Guard: executor command must be configured.
+          if [ -z "${CODEX_EXECUTOR_COMMAND}" ]; then
+            echo "CODEX_EXECUTOR_COMMAND: (empty) — probe skipped."
+            exit 0
+          fi
+
+          # Run the actual executor command with a trivial prompt.
+          # CODEX_TASK_FILE is injected exactly as the bot step does it.
+          # stdout/stderr from codex are suppressed to avoid leaking LLM output.
+          _probe_file=$(mktemp)
+          printf 'Reply with exactly: OK' > "${_probe_file}"
+          _probe_exit=0
+          CODEX_TASK_FILE="${_probe_file}" \
+            timeout "${CODEX_EXECUTOR_TIMEOUT_SECONDS:-30}" \
+            sh -c "${CODEX_EXECUTOR_COMMAND}" > /tmp/codex-probe-out.txt 2>&1 \
+            || _probe_exit=$?
+          rm -f "${_probe_file}"
+
+          echo "codex-cli-auth-probe: exit_code=${_probe_exit} (0=OK, same cwd as executor)"
+          if [ "${_probe_exit}" != "0" ]; then
+            echo "::warning::Codex CLI probe failed (exit ${_probe_exit}) — ran from pr-head, same cwd as real executor."
+            echo "::warning::curl /v1/models returned 200, so the key is valid at HTTP level."
+            echo "::warning::Remaining causes: (1) Codex CLI auth handling differs from raw HTTP;"
+            echo "::warning::(2) key scope lacks /v1/responses permission; (3) command invocation"
+            echo "::warning::differences between probe and real executor path."
+          fi
+          echo "=== Codex CLI auth probe done ==="
 
       - name: Run review autofix bot
         working-directory: pr-head
