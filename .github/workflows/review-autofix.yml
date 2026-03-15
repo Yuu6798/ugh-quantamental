@@ -107,19 +107,26 @@ jobs:
             echo "CODEX_EXECUTOR_COMMAND: (empty — executor will skip with 'codex-command-not-configured')"
           else
             echo "CODEX_EXECUTOR_COMMAND: (set)"
-            # Extract the first token (the binary/launcher) from the command string.
-            # The value may contain shell substitutions like $(cat "$CODEX_TASK_FILE");
-            # we only need the leading word to verify PATH availability.
-            _cmd_token=$(printf '%s' "${CODEX_EXECUTOR_COMMAND}" | awk '{print $1}')
-            if ! command -v "${_cmd_token}" >/dev/null 2>&1; then
+            # Extract the first executable token from the command string.
+            # Leading KEY=value assignments (e.g. OPENAI_API_KEY=... codex exec ...)
+            # are valid shell syntax and must be skipped before checking PATH,
+            # because the executor runs the full command with shell=True and handles
+            # them natively.  Only tokens that do NOT match the KEY=value pattern
+            # are considered as the binary name.
+            _cmd_token=$(printf '%s' "${CODEX_EXECUTOR_COMMAND}" | \
+              awk '{for(i=1;i<=NF;i++){if($i !~ /^[A-Za-z_][A-Za-z0-9_]*=/){print $i; exit}}}')
+            if [ -z "${_cmd_token}" ]; then
+              echo "executor binary       : (could not determine — skipping PATH check)"
+            elif ! command -v "${_cmd_token}" >/dev/null 2>&1; then
               echo "::error::Executor binary '${_cmd_token}' not found on PATH."
               echo "::error::Either the @openai/codex npm package failed to install,"
               echo "::error::or CODEX_EXECUTOR_COMMAND uses a binary that is not available."
               echo "::error::To use npx instead, set: CODEX_EXECUTOR_COMMAND=npx @openai/codex exec \"\$(cat \"\$CODEX_TASK_FILE\")\""
               exit 1
+            else
+              echo "executor binary       : $(command -v "${_cmd_token}")"
+              "${_cmd_token}" --version 2>/dev/null || true
             fi
-            echo "executor binary       : $(command -v "${_cmd_token}")"
-            "${_cmd_token}" --version 2>/dev/null || true
           fi
           echo "=== preflight OK ==="
 
