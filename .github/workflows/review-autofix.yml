@@ -105,6 +105,11 @@ jobs:
       # before bot.py posts its outcome.
       - name: Set up Node.js
         if: steps.gate.outputs.should_install == 'true'
+        # continue-on-error so a transient GitHub CDN failure does not abort
+        # the job before bot.py can post its outcome.  If this step fails,
+        # the npm install inside the bot step will also fail, but that is
+        # already non-blocking (|| echo "::warning::...").
+        continue-on-error: true
         uses: actions/setup-node@v4
         with:
           node-version: '20'
