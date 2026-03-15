@@ -56,7 +56,13 @@ class LocalSubprocessCodexExecutor:
         env["CODEX_TASK_FILE"] = str(prompt_path)
 
         # Safe diagnostics — values are never logged.
-        _bin = self._command.split()[0] if self._command else "(none)"
+        # Skip leading KEY=value env-prefix tokens (e.g. "OPENAI_MODEL=x codex …")
+        # to avoid emitting a credential value instead of the binary name.
+        _tokens = self._command.split() if self._command else []
+        _bin = next(
+            (t for t in _tokens if not ("=" in t and t.split("=", 1)[0].replace("_", "").isalnum())),
+            "(none)",
+        )
         logger.debug(
             "codex executor launch: binary=%r OPENAI_API_KEY_present=%s CODEX_TASK_FILE=%s",
             _bin,

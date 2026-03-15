@@ -284,6 +284,7 @@ jobs:
           printf 'Reply with exactly: OK' > "${_probe_file}"
           _probe_exit=0
           CODEX_TASK_FILE="${_probe_file}" \
+            timeout "${CODEX_EXECUTOR_TIMEOUT_SECONDS:-30}" \
             sh -c "${CODEX_EXECUTOR_COMMAND}" > /tmp/codex-probe-out.txt 2>&1 \
             || _probe_exit=$?
           rm -f "${_probe_file}"
