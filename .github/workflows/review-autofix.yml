@@ -42,6 +42,10 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           fetch-depth: 0
           path: trusted-bot
+          # Do not persist credentials in .git/config.  Credentials are
+          # injected explicitly after npm install completes so that no
+          # postinstall hook can read write-capable tokens from the filesystem.
+          persist-credentials: false
 
       - name: Check out PR head branch as data workspace
         uses: actions/checkout@v4
@@ -50,6 +54,10 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
           path: pr-head
+          # Do not persist credentials in .git/config — same rationale as above.
+          # The remote URL is set with GITHUB_TOKEN in the "Configure git author"
+          # step, which runs after npm install, so bot.py retains push capability.
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -124,9 +132,17 @@ jobs:
 
       - name: Configure git author
         working-directory: pr-head
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Re-inject push credentials explicitly now that npm install has run.
+          # persist-credentials: false on checkout prevents .git/config from
+          # holding write-capable tokens during the npm install step; we restore
+          # them here so that bot.py can push commits to the PR branch.
+          git remote set-url origin \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
       # Preflight: emit key runtime settings and surface a ::warning:: if the
       # executor binary is not resolvable.  This step is intentionally
