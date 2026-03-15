@@ -253,9 +253,16 @@ jobs:
           echo "=== Codex CLI auth probe ==="
 
           # Install codex (mirrors bot step; failure is non-fatal).
+          # --ignore-scripts is intentionally omitted: @openai/codex uses a
+          # postinstall script to build its native binary, so skipping scripts
+          # leaves the binary non-functional.
           if [ "${_CODEX_INSTALL_NEEDED}" = "true" ]; then
-            (cd "$GITHUB_WORKSPACE" && npm install -g @openai/codex --ignore-scripts) \
+            (cd "$GITHUB_WORKSPACE" && npm install -g @openai/codex) \
               || { echo "::warning::codex install failed — CLI probe skipped."; exit 0; }
+            # Ensure npm global bin is on PATH regardless of how setup-node
+            # configured the prefix (avoids "command not found" when the install
+            # succeeds but the bin dir is not yet in PATH).
+            export PATH="$(npm prefix -g)/bin:$PATH"
           fi
 
           # Guard: OPENAI_API_KEY must be present (never print value).
@@ -343,11 +350,15 @@ jobs:
           #
           # Security: run inside a subshell that cd-s to GITHUB_WORKSPACE so
           # that a malicious pr-head/.npmrc cannot redirect the npm registry.
-          # --ignore-scripts prevents lifecycle scripts from executing during
-          # install, eliminating a code-execution vector via package.json hooks.
+          # --ignore-scripts is intentionally omitted: @openai/codex uses a
+          # postinstall script to build its native binary, so skipping scripts
+          # leaves the binary non-functional (causes "codex not found on PATH").
           if [ "${_CODEX_INSTALL_NEEDED}" = "true" ]; then
-            (cd "$GITHUB_WORKSPACE" && npm install -g @openai/codex --ignore-scripts) \
+            (cd "$GITHUB_WORKSPACE" && npm install -g @openai/codex) \
               || echo "::warning::npm install -g @openai/codex failed; executor will be unavailable."
+            # Ensure npm global bin is on PATH regardless of how setup-node
+            # configured the prefix.
+            export PATH="$(npm prefix -g)/bin:$PATH"
           fi
 
           python - <<'PY'
