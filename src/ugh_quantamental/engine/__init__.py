@@ -1,5 +1,21 @@
-"""Deterministic projection engine exports."""
+"""Deterministic engine exports — projection, state, and review audit."""
 
+from ugh_quantamental.engine.review_audit import (
+    build_audit_snapshot,
+    compute_delta_e,
+    compute_mismatch_score,
+    compute_por,
+    compute_verdict,
+    run_review_audit_engine,
+)
+from ugh_quantamental.engine.review_audit_models import (
+    FixActionFeatures,
+    ReviewAuditConfig,
+    ReviewAuditEngineResult,
+    ReviewAuditSnapshot,
+    ReviewIntentFeatures,
+    ReviewObservation,
+)
 from ugh_quantamental.engine.projection import (
     build_projection_snapshot,
     compute_alignment,
@@ -38,6 +54,18 @@ from ugh_quantamental.engine.state_models import (
 )
 
 __all__ = [
+    "FixActionFeatures",
+    "ReviewAuditConfig",
+    "ReviewAuditEngineResult",
+    "ReviewAuditSnapshot",
+    "ReviewIntentFeatures",
+    "ReviewObservation",
+    "build_audit_snapshot",
+    "compute_delta_e",
+    "compute_mismatch_score",
+    "compute_por",
+    "compute_verdict",
+    "run_review_audit_engine",
     "AlignmentInputs",
     "ProjectionConfig",
     "ProjectionEngineResult",

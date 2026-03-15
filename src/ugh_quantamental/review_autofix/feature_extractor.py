@@ -3,19 +3,32 @@
 Three-layer extraction:
   ReviewContext -> ReviewObservation (symbolic) -> ReviewIntentFeatures ([0,1] floats)
 
-These local Pydantic model definitions are intended to be moved to
-``engine/review_audit_models.py`` in Milestone 3. Naming and docstrings are
-written to survive that migration without changes.
+The canonical ``ReviewObservation`` and ``ReviewIntentFeatures`` models now live
+in ``engine/review_audit_models.py`` (added in Milestone 3).  They are
+re-exported from this module so that existing callers continue to work without
+modification.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from ugh_quantamental.engine.review_audit_models import (
+    ReviewIntentFeatures,
+    ReviewObservation,
+)
 
 from .classifier import _AUTO_KEYWORDS, _SKIP_KEYWORDS, extract_priority
 from .models import ReviewContext
 
+# Re-export canonical models for backwards-compatible imports.
+__all__ = [
+    "ReviewObservation",
+    "ReviewIntentFeatures",
+    "extract_review_observation",
+    "extract_review_intent_features",
+    "extract_review_features",
+]
+
 # ---------------------------------------------------------------------------
-# Symbolic-layer model (will migrate to engine/review_audit_models.py in M13)
+# Keyword lookup tables used by extract_review_observation
 # ---------------------------------------------------------------------------
 
 _BEHAVIOR_PRESERVATION_KEYWORDS: tuple[str, ...] = (
@@ -47,83 +60,6 @@ _AMBIGUITY_KEYWORDS: tuple[str, ...] = (
     "提案",
     "検討",
 )
-
-
-class ReviewObservation(BaseModel):
-    """Symbolic representation of a raw ``ReviewContext``.
-
-    All fields are derived deterministically from ``ReviewContext`` without
-    any external I/O or randomness.  Intended as the intermediate layer
-    between raw GitHub event data and the numeric ``ReviewIntentFeatures``.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    has_path_hint: bool
-    """True when ``context.path`` is not ``None``."""
-
-    has_line_anchor: bool
-    """True when at least one of ``context.line`` or ``context.start_line`` is set."""
-
-    has_diff_hunk: bool
-    """True when ``context.diff_hunk`` is not ``None``."""
-
-    priority: str
-    """Priority extracted from the review body — one of P0/P1/P2/P3."""
-
-    mechanical_keyword_hits: int = Field(ge=0)
-    """Number of distinct ``_AUTO_KEYWORDS`` found in the lower-cased body."""
-
-    skip_keyword_hits: int = Field(ge=0)
-    """Number of distinct ``_SKIP_KEYWORDS`` found in the lower-cased body."""
-
-    behavior_preservation_signal: bool
-    """True when the body contains any behavior-preservation keyword."""
-
-    scope_limit_signal: bool
-    """True when the body contains any scope-limiting keyword."""
-
-    ambiguity_signal_count: int = Field(ge=0)
-    """Number of distinct ambiguity keywords found in the body."""
-
-    target_file_present: bool
-    """True when ``context.path`` is not ``None`` (alias of ``has_path_hint``)."""
-
-    review_kind: str
-    """String value of ``context.kind`` — ``"diff_comment"`` or ``"review_body"``."""
-
-
-# ---------------------------------------------------------------------------
-# Numeric-layer model (will migrate to engine/review_audit_models.py in M13)
-# ---------------------------------------------------------------------------
-
-
-class ReviewIntentFeatures(BaseModel):
-    """Normalised [0, 1] feature vector for the review audit engine.
-
-    All fields are derived deterministically from a ``ReviewObservation``
-    without any external I/O or randomness.
-    """
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    intent_clarity: float = Field(ge=0.0, le=1.0)
-    """Weighted average of structural signals and extracted priority."""
-
-    locality_strength: float = Field(ge=0.0, le=1.0)
-    """How precisely the comment targets a specific code location."""
-
-    mechanicalness: float = Field(ge=0.0, le=1.0)
-    """Degree to which the comment requests a mechanical / automatable change."""
-
-    scope_boundness: float = Field(ge=0.0, le=1.0)
-    """How well-scoped / contained the requested change appears to be."""
-
-    semantic_change_risk: float = Field(ge=0.0, le=1.0)
-    """Estimated risk of semantic drift from applying the suggested change."""
-
-    validation_intensity: float = Field(ge=0.0, le=1.0)
-    """Suggested depth of validation needed before accepting the change."""
 
 
 # ---------------------------------------------------------------------------
