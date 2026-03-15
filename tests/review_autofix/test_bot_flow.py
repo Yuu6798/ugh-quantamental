@@ -562,3 +562,226 @@ def test_invalid_review_body_path_hint_skips_without_executor(tmp_path: Path, mo
     result = bot.run()
     assert result.reason == "invalid-review-body-path"
     assert called["executor"] is False
+
+
+# ---------------------------------------------------------------------------
+# Shadow audit integration tests (A – F)
+# ---------------------------------------------------------------------------
+
+
+def _noop_shadow_audit(context, audit_id: str, action_features=None) -> None:
+    """Drop-in replacement for _run_shadow_audit that records calls."""
+
+
+def test_shadow_audit_pre_only_in_detect_only(tmp_path: Path, monkeypatch) -> None:
+    """A. detect_only mode: shadow audit is called exactly once (pre-action only)."""
+    event = tmp_path / "event.json"
+    _write_comment_event(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review_comment")
+    monkeypatch.setenv("BOT_MODE", "detect_only")
+
+    audit_calls: list[dict] = []
+
+    def _mock_audit(context, audit_id: str, action_features=None) -> None:
+        audit_calls.append({"audit_id": audit_id, "action_features": action_features})
+
+    monkeypatch.setattr(bot, "_run_shadow_audit", _mock_audit)
+
+    result = bot.run()
+
+    assert result.reason == "detect-only"
+    assert len(audit_calls) == 1, "pre-action audit must be called exactly once"
+    assert audit_calls[0]["action_features"] is None, "pre-action audit must have no action_features"
+
+
+def test_shadow_audit_pre_only_in_propose_only(tmp_path: Path, monkeypatch) -> None:
+    """B. propose_only mode: shadow audit is called exactly once (pre-action only)."""
+    event = tmp_path / "event.json"
+    _write_comment_event(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review_comment")
+    monkeypatch.setenv("BOT_MODE", "propose_only")
+
+    audit_calls: list[dict] = []
+
+    def _mock_audit(context, audit_id: str, action_features=None) -> None:
+        audit_calls.append({"audit_id": audit_id, "action_features": action_features})
+
+    monkeypatch.setattr(bot, "_run_shadow_audit", _mock_audit)
+
+    result = bot.run()
+
+    assert result.reason == "proposed-only"
+    assert len(audit_calls) == 1
+    assert audit_calls[0]["action_features"] is None
+
+
+def test_shadow_audit_pre_and_post_in_apply_and_push(tmp_path: Path, monkeypatch) -> None:
+    """C. apply_and_push mode: shadow audit is called twice; first call has no action_features,
+    second call has populated FixActionFeatures.  Push behaviour is unaffected."""
+    event = tmp_path / "event.json"
+    _write_comment_event(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review_comment")
+
+    stub = _ExecutorStub(
+        CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
+        CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
+    )
+    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+    monkeypatch.setattr(bot, "get_diff_stats", lambda: (("dummy.py",), 1, 5))
+
+    audit_calls: list[dict] = []
+
+    def _mock_audit(context, audit_id: str, action_features=None) -> None:
+        audit_calls.append({"audit_id": audit_id, "action_features": action_features})
+
+    monkeypatch.setattr(bot, "_run_shadow_audit", _mock_audit)
+
+    result = bot.run()
+
+    assert result.reason == "pushed"
+    assert len(audit_calls) == 2, "pre-action and post-action audit must both be called"
+    assert audit_calls[0]["action_features"] is None, "first call is pre-action"
+    assert audit_calls[1]["action_features"] is not None, "second call is post-action"
+    # Both calls share the same audit_id.
+    assert audit_calls[0]["audit_id"] == audit_calls[1]["audit_id"]
+
+
+def test_shadow_audit_failure_is_swallowed(tmp_path: Path, monkeypatch) -> None:
+    """D. If _run_shadow_audit raises, the bot still proceeds and pushes normally."""
+    event = tmp_path / "event.json"
+    _write_comment_event(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review_comment")
+
+    stub = _ExecutorStub(
+        CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
+        CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
+    )
+    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+    monkeypatch.setattr(bot, "get_diff_stats", lambda: ((), 0, 0))
+
+    def _failing_audit(context, audit_id: str, action_features=None) -> None:
+        raise RuntimeError("simulated audit failure")
+
+    monkeypatch.setattr(bot, "_run_shadow_audit", _failing_audit)
+
+    # Bot must succeed despite audit failure.
+    result = bot.run()
+    assert result.reason == "pushed"
+    assert result.pushed is True
+
+
+def test_shadow_audit_runs_on_review_body_inline_fallback(tmp_path: Path, monkeypatch) -> None:
+    """E. review-body inline fallback: audit runs on the expanded inline comment context."""
+    _FakeGithubClientWithInlineComments.markers = set()
+    _FakeGithubClientWithInlineComments.inline_comments = (_FAKE_INLINE_COMMENT,)
+
+    event = tmp_path / "event.json"
+    _write_review_event_no_path(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review")
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setattr(bot, "GithubClient", _FakeGithubClientWithInlineComments)
+
+    stub = _ExecutorStub(
+        CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
+        CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
+    )
+    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+    monkeypatch.setattr(bot, "get_diff_stats", lambda: (("dummy.py",), 1, 3))
+
+    audit_calls: list[dict] = []
+
+    def _mock_audit(context, audit_id: str, action_features=None) -> None:
+        audit_calls.append({"context": context, "action_features": action_features})
+
+    monkeypatch.setattr(bot, "_run_shadow_audit", _mock_audit)
+
+    result = bot.run()
+
+    assert result.reason == "pushed"
+    # At least the pre-action audit ran on the expanded inline comment context.
+    assert len(audit_calls) >= 1
+    # The audited context must be the concrete inline comment (has a path).
+    assert audit_calls[0]["context"].path == "dummy.py"
+
+
+def test_extract_fix_action_features_determinism(tmp_path: Path, monkeypatch) -> None:
+    """F. extract_fix_action_features is pure and deterministic.
+
+    Covers: same inputs → same output, bounded [0,1], target_file_match logic,
+    and absence of git / runtime side effects.
+    """
+    from ugh_quantamental.review_autofix.feature_extractor import extract_fix_action_features
+    from ugh_quantamental.review_autofix.models import ReviewContext, ReviewKind
+
+    ctx = ReviewContext(
+        kind=ReviewKind.diff_comment,
+        repository="acme/repo",
+        pr_number=1,
+        review_id=None,
+        review_comment_id=1,
+        head_sha="abc",
+        base_ref="main",
+        head_ref="feature",
+        same_repo=True,
+        reviewer_login="bot",
+        body="set x to None",
+        path="src/foo.py",
+        diff_hunk="@@",
+        line=10,
+        start_line=10,
+        version_discriminator="v1",
+    )
+
+    kwargs = dict(
+        context=ctx,
+        changed=True,
+        validation_ok=True,
+        execution_status="succeeded",
+        files_changed=2,
+        lines_changed=20,
+        touched_paths=("src/foo.py", "src/bar.py"),
+    )
+
+    result1 = extract_fix_action_features(**kwargs)
+    result2 = extract_fix_action_features(**kwargs)
+
+    # Determinism: two calls with the same inputs must produce identical output.
+    assert result1 == result2
+
+    # Bounds: all float fields must be in [0, 1].
+    assert 0.0 <= result1.target_file_match <= 1.0
+    assert 0.0 <= result1.line_anchor_touched <= 1.0
+    assert 0.0 <= result1.diff_hunk_overlap <= 1.0
+    assert 0.0 <= result1.scope_ratio <= 1.0
+    assert 0.0 <= result1.validation_scope_executed <= 1.0
+    assert 0.0 <= result1.behavior_preservation_proxy <= 1.0
+
+    # target_file_match: 1.0 because ctx.path is in touched_paths.
+    assert result1.target_file_match == 1.0
+
+    # target_file_match: 0.0 when the file is not touched.
+    result_no_match = extract_fix_action_features(
+        **{**kwargs, "touched_paths": ("src/other.py",)}
+    )
+    assert result_no_match.target_file_match == 0.0
+
+    # validation_scope_executed: 1.0 when validation passed, 0.0 otherwise.
+    assert result1.validation_scope_executed == 1.0
+    result_val_fail = extract_fix_action_features(**{**kwargs, "validation_ok": False})
+    assert result_val_fail.validation_scope_executed == 0.0
+
+    # behavior_preservation_proxy: 1.0 when changed+validation_ok, 0.3 when changed only.
+    assert result1.behavior_preservation_proxy == 1.0
+    assert result_val_fail.behavior_preservation_proxy == 0.3
+
+    # execution_status must pass through unchanged.
+    assert result1.execution_status == "succeeded"

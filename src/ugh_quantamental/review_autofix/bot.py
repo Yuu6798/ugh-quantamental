@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 
 from .classifier import classify_codex_review
 from .codex_executor import build_executor
 from .config import BotConfig, load_config
 from .executor_models import CodexExecutionStatus
-from .git_ops import commit_changes, has_changes, push_head_branch
+from .git_ops import commit_changes, get_diff_stats, has_changes, push_head_branch
 from .github_client import (
     GithubClient,
     build_context_from_inline_comment,
@@ -21,6 +22,77 @@ from .task_builder import build_fix_task
 from .validator import run_validation
 
 _VALID_BOT_MODES = {"detect_only", "propose_only", "apply_and_push", "apply_push_and_resolve"}
+
+# ---------------------------------------------------------------------------
+# Shadow audit helpers — best-effort, never block push
+# ---------------------------------------------------------------------------
+
+
+def _shadow_audit_db_url() -> str:
+    """Return the SQLite URL for shadow audit persistence.
+
+    Defaults to ``.autofix-bot/shadow-audit.db`` relative to the working directory.
+    Override with the ``REVIEW_AUDIT_DB_URL`` environment variable.
+    """
+    return os.getenv("REVIEW_AUDIT_DB_URL", "sqlite+pysqlite:///.autofix-bot/shadow-audit.db")
+
+
+def _run_shadow_audit(context, audit_id: str, action_features=None) -> None:
+    """Run one shadow audit pass.  Best-effort — any exception is logged and swallowed.
+
+    If *action_features* is ``None`` this is a pre-action audit.  Otherwise it is a
+    post-action audit.  The verdict is never used to block push or change bot state.
+    SQLAlchemy and workflow imports are deferred so that ``bot`` remains importable
+    without those packages.
+    """
+    try:
+        import pathlib
+
+        from ugh_quantamental.persistence.db import (
+            create_all_tables,
+            create_db_engine,
+            create_session_factory,
+        )
+        from ugh_quantamental.workflows.models import ReviewAuditWorkflowRequest, make_run_id
+        from ugh_quantamental.workflows.runners import run_review_audit_workflow
+
+        from .feature_extractor import extract_review_intent_features, extract_review_observation
+
+        observation = extract_review_observation(context)
+        intent_features = extract_review_intent_features(observation)
+
+        db_url = _shadow_audit_db_url()
+        # Ensure parent directory exists for file-backed SQLite URLs.
+        if "/:memory:" not in db_url and "///" in db_url:
+            pathlib.Path(db_url.split("///", 1)[1]).parent.mkdir(parents=True, exist_ok=True)
+
+        engine = create_db_engine(db_url)
+        create_all_tables(engine)
+        session_factory = create_session_factory(engine)
+
+        run_id = make_run_id("raudit-")
+        request = ReviewAuditWorkflowRequest(
+            audit_id=audit_id,
+            pr_number=context.pr_number,
+            reviewer_login=context.reviewer_login,
+            review_context=context,
+            observation=observation,
+            intent_features=intent_features,
+            action_features=action_features,
+        )
+
+        with session_factory() as session:
+            run_review_audit_workflow(session, request)
+            session.commit()
+
+        logging.debug(
+            "shadow audit: audit_id=%s run_id=%s action=%s",
+            audit_id,
+            run_id,
+            "present" if action_features is not None else "absent",
+        )
+    except Exception:
+        logging.exception("shadow audit failed for audit_id=%s; continuing", audit_id)
 
 
 def should_process_actor(login: str | None, config: BotConfig) -> bool:
@@ -68,6 +140,15 @@ def _process_classified_context(
     if not context.same_repo and not config.allow_push_on_fork:
         classification = Classification.propose_only
 
+    # Shadow audit — pre-action pass.  Always runs; never blocks execution.
+    _audit_id = f"audit-{uuid.uuid4().hex[:12]}"
+    try:
+        _run_shadow_audit(context, _audit_id)
+    except Exception:
+        logging.exception(
+            "shadow audit pre-action failed for audit_id=%s; continuing", _audit_id
+        )
+
     task = build_fix_task(context, key)
     changed = False
     pushed = False
@@ -84,6 +165,9 @@ def _process_classified_context(
         result = executor.wait_for_result(handle)
         apply_result = executor.apply_or_confirm_branch_update(handle, result)
         changed = apply_result.changed
+
+        # Capture diff stats now — before any commit — for the post-action audit.
+        _touched_paths, _files_changed, _lines_changed = get_diff_stats()
 
         if result.status == CodexExecutionStatus.timeout:
             reason = "codex-timeout"
@@ -111,6 +195,25 @@ def _process_classified_context(
                     reason = "pushed"
                 else:
                     reason = "no-change-after-validation"
+
+        # Shadow audit — post-action pass.  Best-effort; never blocks execution.
+        try:
+            from .feature_extractor import extract_fix_action_features
+
+            _action_features = extract_fix_action_features(
+                context=context,
+                changed=changed,
+                validation_ok=validation_ok,
+                execution_status=result.status.value,
+                files_changed=_files_changed,
+                lines_changed=_lines_changed,
+                touched_paths=_touched_paths,
+            )
+            _run_shadow_audit(context, _audit_id, action_features=_action_features)
+        except Exception:
+            logging.exception(
+                "shadow audit post-action failed for audit_id=%s; continuing", _audit_id
+            )
 
     replied = False
     if client is not None:
