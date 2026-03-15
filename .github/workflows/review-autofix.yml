@@ -65,11 +65,125 @@ jobs:
           python -m pip install -e .
           python -m pip install pytest ruff
 
+      # Compute executor gate — three independent conditions must all be true
+      # before Node.js / npm install are needed:
+      #   1. BOT_MODE is an executing mode (not detect_only / propose_only)
+      #   2. DRY_RUN is falsy — normalised case-insensitively to match
+      #      config.py _parse_bool ({1,true,yes,on} → dry)
+      #   3. CODEX_EXECUTOR_COMMAND is non-empty — when empty, bot.py returns
+      #      early with "codex-command-not-configured" and never calls the CLI
+      #
+      # All three checks are done in shell to avoid GitHub Actions `if:`
+      # expression case-sensitivity issues.
+      - name: Compute executor gate
+        id: gate
+        env:
+          BOT_MODE: ${{ vars.BOT_MODE || 'detect_only' }}
+          DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+          CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
+        run: |
+          _mode=$(printf '%s' "${BOT_MODE}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+          _dry=$(printf '%s'  "${DRY_RUN}"  | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+          _install=false
+          if [ "${_mode}" != '' ] && \
+             [ "${_mode}" != 'detect_only' ] && \
+             [ "${_mode}" != 'propose_only' ] && \
+             [ -n "${CODEX_EXECUTOR_COMMAND}" ]; then
+            case "${_dry}" in
+              1|true|yes|on) ;;
+              *) _install=true ;;
+            esac
+          fi
+          echo "should_install=${_install}" >> "$GITHUB_OUTPUT"
+
+      # Install Node.js only when the executor gate says execution is likely.
+      # detect_only, propose_only, and any DRY_RUN truthy value (case-insensitive)
+      # skip this step.  Node.js is needed so that the just-in-time
+      # `npm install -g @openai/codex` in the bot step can run; it is not
+      # installed separately because deferring the npm install to inside the
+      # bot's run block ensures an npm registry failure cannot abort the job
+      # before bot.py posts its outcome.
+      - name: Set up Node.js
+        if: steps.gate.outputs.should_install == 'true'
+        # continue-on-error so a transient GitHub CDN failure does not abort
+        # the job before bot.py can post its outcome.  If this step fails,
+        # the npm install inside the bot step will also fail, but that is
+        # already non-blocking (|| echo "::warning::...").
+        continue-on-error: true
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Configure git author
         working-directory: pr-head
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # Preflight: emit key runtime settings and surface a ::warning:: if the
+      # executor binary is not resolvable.  This step is intentionally
+      # advisory-only and never exits with a non-zero code.
+      #
+      # Rationale: bot.py has multiple runtime branches (fork PR downgrade,
+      # non-actionable classification, …) where the executor is never called
+      # even in apply_* modes.  A hard-fail here would abort the job before the
+      # bot can post its outcome.  The ::warning:: annotation is still visible
+      # in the GitHub Actions summary, replacing the previous cryptic exit-127
+      # buried in bot log output, while letting the bot decide for itself
+      # whether execution is appropriate.
+      - name: Preflight — verify executor environment
+        env:
+          BOT_MODE: ${{ vars.BOT_MODE || 'detect_only' }}
+          DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+          CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
+        run: |
+          echo "=== review-autofix preflight ==="
+          echo "BOT_MODE              : ${BOT_MODE}"
+          echo "DRY_RUN               : ${DRY_RUN}"
+
+          # Normalise DRY_RUN using the same truthy set as config.py _parse_bool:
+          # {1, true, yes, on}.  Used only for the informational "executor will
+          # run" line; does not gate any exit.
+          _dry_run_norm=$(printf '%s' "${DRY_RUN}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+          case "${_dry_run_norm}" in
+            1|true|yes|on) _dry_run_bool=true ;;
+            *)              _dry_run_bool=false ;;
+          esac
+
+          _likely_execute=false
+          if [ "${BOT_MODE}" != "detect_only" ] && \
+             [ "${BOT_MODE}" != "propose_only" ] && \
+             [ "${_dry_run_bool}" != "true" ]; then
+            _likely_execute=true
+          fi
+          echo "executor likely runs  : ${_likely_execute} (runtime branches may still skip)"
+
+          if [ -z "${CODEX_EXECUTOR_COMMAND}" ]; then
+            echo "CODEX_EXECUTOR_COMMAND: (empty — executor will skip with 'codex-command-not-configured')"
+          else
+            echo "CODEX_EXECUTOR_COMMAND: (set)"
+            # Extract the first executable token from the command string.
+            # Leading KEY=value assignments (e.g. OPENAI_API_KEY=... codex exec ...)
+            # are valid shell syntax and must be skipped before checking PATH,
+            # because the executor runs the full command with shell=True and handles
+            # them natively.  Only tokens that do NOT match the KEY=value pattern
+            # are considered as the binary name.
+            _cmd_token=$(printf '%s' "${CODEX_EXECUTOR_COMMAND}" | \
+              awk '{for(i=1;i<=NF;i++){if($i !~ /^[A-Za-z_][A-Za-z0-9_]*=/){print $i; exit}}}')
+            if [ -z "${_cmd_token}" ]; then
+              echo "executor binary       : (could not determine — skipping PATH check)"
+            elif ! command -v "${_cmd_token}" >/dev/null 2>&1; then
+              echo "::warning::Executor binary '${_cmd_token}' not found on PATH."
+              echo "::warning::If execution is expected, ensure @openai/codex installed correctly"
+              echo "::warning::or update CODEX_EXECUTOR_COMMAND to use npx @openai/codex exec \"\$(cat \"\$CODEX_TASK_FILE\")\"."
+            else
+              # Report the resolved path only — do not invoke the binary.
+              # Running with --version has no timeout guard and could hang or
+              # trigger side effects for executors that don't support that flag.
+              echo "executor binary       : $(command -v "${_cmd_token}")"
+            fi
+          fi
+          echo "=== preflight OK ==="
 
       - name: Run review autofix bot
         working-directory: pr-head
@@ -92,7 +206,30 @@ jobs:
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
           CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
           CODEX_EXECUTOR_TIMEOUT_SECONDS: ${{ vars.CODEX_EXECUTOR_TIMEOUT_SECONDS || '900' }}
+          # Passed from the gate step so the just-in-time install below can
+          # skip itself in detect_only / propose_only / dry-run modes.
+          _CODEX_INSTALL_NEEDED: ${{ steps.gate.outputs.should_install }}
         run: |
+          # Install the Codex CLI just-in-time, deferred to here so that a
+          # transient npm registry failure cannot abort the job before bot.py
+          # runs.  The install is skipped entirely in non-executing modes
+          # (detect_only, propose_only, DRY_RUN truthy) because the gate step
+          # sets _CODEX_INSTALL_NEEDED=false for those cases.
+          #
+          # If the install fails despite being needed, bot.py handles the
+          # missing binary gracefully (codex-command-exit-127) and still posts
+          # its outcome to the PR before exiting.  The ::warning:: annotation
+          # surfaces the failure visibly in the Actions summary.
+          #
+          # Security: run inside a subshell that cd-s to GITHUB_WORKSPACE so
+          # that a malicious pr-head/.npmrc cannot redirect the npm registry.
+          # --ignore-scripts prevents lifecycle scripts from executing during
+          # install, eliminating a code-execution vector via package.json hooks.
+          if [ "${_CODEX_INSTALL_NEEDED}" = "true" ]; then
+            (cd "$GITHUB_WORKSPACE" && npm install -g @openai/codex --ignore-scripts) \
+              || echo "::warning::npm install -g @openai/codex failed; executor will be unavailable."
+          fi
+
           python - <<'PY'
           import os
           import runpy
