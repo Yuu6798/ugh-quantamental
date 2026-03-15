@@ -42,6 +42,10 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           fetch-depth: 0
           path: trusted-bot
+          # Do not persist credentials in .git/config.  Credentials are
+          # injected explicitly after npm install completes so that no
+          # postinstall hook can read write-capable tokens from the filesystem.
+          persist-credentials: false
 
       - name: Check out PR head branch as data workspace
         uses: actions/checkout@v4
@@ -50,6 +54,10 @@ jobs:
           ref: ${{ github.event.pull_request.head.ref || github.ref_name }}
           fetch-depth: 0
           path: pr-head
+          # Do not persist credentials in .git/config — same rationale as above.
+          # The remote URL is set with GITHUB_TOKEN in the "Configure git author"
+          # step, which runs after npm install, so bot.py retains push capability.
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -98,27 +106,50 @@ jobs:
 
       # Install Node.js only when the executor gate says execution is likely.
       # detect_only, propose_only, and any DRY_RUN truthy value (case-insensitive)
-      # skip this step.  Node.js is needed so that the just-in-time
-      # `npm install -g @openai/codex` in the bot step can run; it is not
-      # installed separately because deferring the npm install to inside the
-      # bot's run block ensures an npm registry failure cannot abort the job
-      # before bot.py posts its outcome.
+      # skip this step.
       - name: Set up Node.js
         if: steps.gate.outputs.should_install == 'true'
         # continue-on-error so a transient GitHub CDN failure does not abort
-        # the job before bot.py can post its outcome.  If this step fails,
-        # the npm install inside the bot step will also fail, but that is
-        # already non-blocking (|| echo "::warning::...").
+        # the job before bot.py can post its outcome.
         continue-on-error: true
         uses: actions/setup-node@v4
         with:
           node-version: '22'
 
+      # Install the Codex CLI in a dedicated step that carries NO secrets.
+      # Separating installation from execution means any postinstall hooks in
+      # @openai/codex (or its dependency tree) cannot access GITHUB_TOKEN or
+      # OPENAI_API_KEY.  The install is skipped in non-executing modes
+      # (detect_only, propose_only, DRY_RUN truthy) via the gate output.
+      # continue-on-error so a transient npm registry failure does not abort
+      # the job before bot.py can post its outcome.
+      - name: Install Codex CLI
+        if: steps.gate.outputs.should_install == 'true'
+        continue-on-error: true
+        run: |
+          (cd "$GITHUB_WORKSPACE" && npm install -g --ignore-scripts @openai/codex) \
+            || echo "::warning::npm install -g @openai/codex failed; executor will be unavailable."
+
       - name: Configure git author
         working-directory: pr-head
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Mirror the repository expression used in the "Check out PR head
+          # branch" step so that origin always points at the repository that
+          # was actually checked out (fork or base).  Using GITHUB_REPOSITORY
+          # here would rewrite origin to the base repo for fork PRs, causing
+          # bot.py to push to the wrong repository when ALLOW_PUSH_ON_FORK=true.
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Re-inject push credentials explicitly now that npm install has run.
+          # persist-credentials: false on checkout prevents .git/config from
+          # holding write-capable tokens during the npm install step; we restore
+          # them here (pointing at the head repo, not the base repo) so that
+          # bot.py pushes to the correct fork when ALLOW_PUSH_ON_FORK=true.
+          git remote set-url origin \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${HEAD_REPO}.git"
 
       # Preflight: emit key runtime settings and surface a ::warning:: if the
       # executor binary is not resolvable.  This step is intentionally
@@ -252,10 +283,15 @@ jobs:
         run: |
           echo "=== Codex CLI auth probe ==="
 
-          # Install codex (mirrors bot step; failure is non-fatal).
+          # Codex was installed in the dedicated "Install Codex CLI" step where
+          # no secrets are present.  Here we only need to add the npm global
+          # bin directory to PATH so the binary is resolvable.
           if [ "${_CODEX_INSTALL_NEEDED}" = "true" ]; then
-            (cd "$GITHUB_WORKSPACE" && npm install -g @openai/codex --ignore-scripts) \
-              || { echo "::warning::codex install failed — CLI probe skipped."; exit 0; }
+            if command -v npm >/dev/null 2>&1; then
+              export PATH="$(npm prefix -g)/bin:$PATH"
+            else
+              echo "::warning::npm not found — codex binary may not be on PATH."
+            fi
           fi
 
           # Guard: OPENAI_API_KEY must be present (never print value).
@@ -330,24 +366,20 @@ jobs:
           # skip itself in detect_only / propose_only / dry-run modes.
           _CODEX_INSTALL_NEEDED: ${{ steps.gate.outputs.should_install }}
         run: |
-          # Install the Codex CLI just-in-time, deferred to here so that a
-          # transient npm registry failure cannot abort the job before bot.py
-          # runs.  The install is skipped entirely in non-executing modes
-          # (detect_only, propose_only, DRY_RUN truthy) because the gate step
-          # sets _CODEX_INSTALL_NEEDED=false for those cases.
-          #
-          # If the install fails despite being needed, bot.py handles the
-          # missing binary gracefully (codex-command-exit-127) and still posts
-          # its outcome to the PR before exiting.  The ::warning:: annotation
-          # surfaces the failure visibly in the Actions summary.
-          #
-          # Security: run inside a subshell that cd-s to GITHUB_WORKSPACE so
-          # that a malicious pr-head/.npmrc cannot redirect the npm registry.
-          # --ignore-scripts prevents lifecycle scripts from executing during
-          # install, eliminating a code-execution vector via package.json hooks.
+          # Codex was installed in the dedicated "Install Codex CLI" step where
+          # no secrets are present (P1 security fix: installation must not run
+          # in an environment that holds GITHUB_TOKEN or OPENAI_API_KEY).
+          # Here we only add the npm global bin directory to PATH so the binary
+          # is resolvable.  The guard prevents a hard-fail when npm itself is
+          # unavailable (P2 fix: unconditional `npm prefix -g` could abort this
+          # step before bot.py runs even when the install step had already
+          # soft-failed with continue-on-error).
           if [ "${_CODEX_INSTALL_NEEDED}" = "true" ]; then
-            (cd "$GITHUB_WORKSPACE" && npm install -g @openai/codex --ignore-scripts) \
-              || echo "::warning::npm install -g @openai/codex failed; executor will be unavailable."
+            if command -v npm >/dev/null 2>&1; then
+              export PATH="$(npm prefix -g)/bin:$PATH"
+            else
+              echo "::warning::npm not found — codex binary may not be on PATH; executor may fail."
+            fi
           fi
 
           python - <<'PY'
