@@ -224,11 +224,15 @@ jobs:
           if [ -z "${CODEX_EXECUTOR_COMMAND}" ]; then
             echo "CODEX_EXECUTOR_COMMAND: (empty)"
           else
-            # Mask any KEY=value tokens where the value looks like a secret
-            # (alphanumeric + punctuation, length >= 16) before printing.
-            _masked=$(printf '%s' "${CODEX_EXECUTOR_COMMAND}" | \
-              sed -E 's/([A-Za-z_][A-Za-z0-9_]*=)([^[:space:]]{16,})/\1***/g')
-            echo "CODEX_EXECUTOR_COMMAND: ${_masked}"
+            # Never print the full command — credentials can appear in formats
+            # that are hard to mask completely (e.g. --api-key TOKEN, positional
+            # arguments, env-prefixed values).  Instead, emit only the binary
+            # name (the first non-KEY=value token, safe to log) and a token
+            # count so the structure is visible without leaking any values.
+            _cmd_token=$(printf '%s' "${CODEX_EXECUTOR_COMMAND}" | \
+              awk '{for(i=1;i<=NF;i++){if($i !~ /^[A-Za-z_][A-Za-z0-9_]*=/){print $i; exit}}}')
+            _word_count=$(printf '%s' "${CODEX_EXECUTOR_COMMAND}" | wc -w | tr -d ' ')
+            echo "CODEX_EXECUTOR_COMMAND: set (${_word_count} token(s); binary='${_cmd_token}')"
           fi
           echo "=== diagnostic done ==="
 
