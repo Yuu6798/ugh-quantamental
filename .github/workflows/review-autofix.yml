@@ -112,7 +112,7 @@ jobs:
         continue-on-error: true
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Configure git author
         working-directory: pr-head
@@ -173,9 +173,17 @@ jobs:
             if [ -z "${_cmd_token}" ]; then
               echo "executor binary       : (could not determine — skipping PATH check)"
             elif ! command -v "${_cmd_token}" >/dev/null 2>&1; then
-              echo "::warning::Executor binary '${_cmd_token}' not found on PATH."
-              echo "::warning::If execution is expected, ensure @openai/codex installed correctly"
-              echo "::warning::or update CODEX_EXECUTOR_COMMAND to use npx @openai/codex exec \"\$(cat \"\$CODEX_TASK_FILE\")\"."
+              # Only emit a warning when execution is actually expected at runtime.
+              # In detect_only / propose_only / DRY_RUN modes the executor is never
+              # called, so a missing binary is normal and should not clutter the
+              # Actions summary with misleading warnings.
+              if [ "${_likely_execute}" = "true" ]; then
+                echo "::warning::Executor binary '${_cmd_token}' not found on PATH."
+                echo "::warning::If execution is expected, ensure @openai/codex installed correctly"
+                echo "::warning::or update CODEX_EXECUTOR_COMMAND to use npx @openai/codex exec \"\$(cat \"\$CODEX_TASK_FILE\")\"."
+              else
+                echo "executor binary       : '${_cmd_token}' not found on PATH (non-executing mode — advisory only)"
+              fi
             else
               # Report the resolved path only — do not invoke the binary.
               # Running with --version has no timeout guard and could hang or
