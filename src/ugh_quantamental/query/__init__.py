@@ -1,4 +1,4 @@
-"""Read-only query layer for persisted projection and state runs (v1).
+"""Read-only query layer for persisted projection, state, and review audit runs (v1).
 
 Query models, summary types, and bundle types are importable without SQLAlchemy::
 
@@ -7,6 +7,7 @@ Query models, summary types, and bundle types are importable without SQLAlchemy:
         ProjectionRunQuery, StateRunQuery,
         ProjectionRunSummary, StateRunSummary,
         ProjectionRunBundle, StateRunBundle,
+        ReviewAuditRunQuery, ReviewAuditRunSummary, ReviewAuditRunBundle,
     )
 
 Reader functions require SQLAlchemy and must be imported from the submodule directly::
@@ -16,6 +17,8 @@ Reader functions require SQLAlchemy and must be imported from the submodule dire
         list_state_run_summaries,
         get_projection_run_bundle,
         get_state_run_bundle,
+        list_review_audit_run_summaries,
+        get_review_audit_run_bundle,
     )
 """
 
@@ -26,6 +29,9 @@ from ugh_quantamental.query.models import (
     ProjectionRunBundle,
     ProjectionRunQuery,
     ProjectionRunSummary,
+    ReviewAuditRunBundle,
+    ReviewAuditRunQuery,
+    ReviewAuditRunSummary,
     StateRunBundle,
     StateRunQuery,
     StateRunSummary,
@@ -36,6 +42,9 @@ __all__ = [
     "ProjectionRunBundle",
     "ProjectionRunQuery",
     "ProjectionRunSummary",
+    "ReviewAuditRunBundle",
+    "ReviewAuditRunQuery",
+    "ReviewAuditRunSummary",
     "StateRunBundle",
     "StateRunQuery",
     "StateRunSummary",
