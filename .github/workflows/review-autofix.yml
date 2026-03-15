@@ -193,6 +193,45 @@ jobs:
           fi
           echo "=== preflight OK ==="
 
+      # TEMPORARY DIAGNOSTIC STEP — remove once 401 root-cause is confirmed.
+      # Checks:
+      #   (a) Whether OPENAI_API_KEY authenticates successfully against
+      #       /v1/models (HTTP 200 = key works; 401 = key invalid or missing).
+      #   (b) The value of CODEX_EXECUTOR_COMMAND with embedded secrets masked.
+      # This step never fails the job (continue-on-error: true).
+      - name: Diagnose — OpenAI auth and executor command
+        continue-on-error: true
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
+        run: |
+          echo "=== OpenAI auth probe ==="
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "::warning::OPENAI_API_KEY is empty — secret may not be set in this repository."
+          else
+            _status=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+              https://api.openai.com/v1/models)
+            echo "GET /v1/models HTTP status: ${_status}"
+            if [ "${_status}" = "200" ]; then
+              echo "auth probe: OK (key authenticates)"
+            else
+              echo "::warning::auth probe: FAILED (status ${_status}) — key may be invalid, expired, or lack /v1/responses access."
+            fi
+          fi
+
+          echo "=== CODEX_EXECUTOR_COMMAND ==="
+          if [ -z "${CODEX_EXECUTOR_COMMAND}" ]; then
+            echo "CODEX_EXECUTOR_COMMAND: (empty)"
+          else
+            # Mask any KEY=value tokens where the value looks like a secret
+            # (alphanumeric + punctuation, length >= 16) before printing.
+            _masked=$(printf '%s' "${CODEX_EXECUTOR_COMMAND}" | \
+              sed -E 's/([A-Za-z_][A-Za-z0-9_]*=)([^[:space:]]{16,})/\1***/g')
+            echo "CODEX_EXECUTOR_COMMAND: ${_masked}"
+          fi
+          echo "=== diagnostic done ==="
+
       - name: Run review autofix bot
         working-directory: pr-head
         env:
