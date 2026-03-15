@@ -14,6 +14,12 @@ from ugh_quantamental.engine.projection_models import (
     QuestionFeatures,
     SignalFeatures,
 )
+from ugh_quantamental.engine.review_audit_models import (
+    FixActionFeatures,
+    ReviewAuditEngineResult,
+    ReviewIntentFeatures,
+    ReviewObservation,
+)
 from ugh_quantamental.engine.state_models import StateConfig, StateEngineResult, StateEventFeatures
 from sqlalchemy import select
 
@@ -23,15 +29,19 @@ from ugh_quantamental.persistence.models import (
     FxOutcomeRecord,
     ProjectionRunRecord,
     RegressionSuiteBaselineRecord,
+    ReviewAuditRunRecord,
     StateRunRecord,
 )
 from ugh_quantamental.fx_protocol.forecast_models import PersistedDailyForecastBatch
 from ugh_quantamental.fx_protocol.models import EvaluationRecord, ForecastRecord, OutcomeRecord
 from ugh_quantamental.persistence.serializers import (
     dump_model_json,
+    dump_review_context_json,
     projection_payload_to_models,
+    review_audit_payload_to_models,
     state_payload_to_models,
 )
+from ugh_quantamental.review_autofix.models import ReviewContext
 from ugh_quantamental.schemas.omega import Omega
 from ugh_quantamental.schemas.ssv import SSVSnapshot
 
@@ -195,6 +205,89 @@ class RegressionSuiteBaselineRepository:
             description=record.description,
             suite_request_json=record.suite_request_json,
             suite_result_json=record.suite_result_json,
+        )
+
+
+@dataclass(frozen=True)
+class ReviewAuditRun:
+    """Rehydrated review audit run record from the persistence layer."""
+
+    run_id: str
+    created_at: datetime
+    audit_id: str
+    pr_number: int
+    reviewer_login: str | None
+    verdict: str
+    extractor_version: str
+    feature_spec_version: str
+    review_context: ReviewContext
+    observation: ReviewObservation
+    intent_features: ReviewIntentFeatures
+    action_features: FixActionFeatures | None
+    result: ReviewAuditEngineResult
+
+
+class ReviewAuditRunRepository:
+    """Persistence adapter for review audit run records."""
+
+    @staticmethod
+    def save_run(
+        session: Session,
+        *,
+        run_id: str,
+        audit_id: str,
+        pr_number: int,
+        reviewer_login: str | None,
+        review_context: ReviewContext,
+        observation: ReviewObservation,
+        intent_features: ReviewIntentFeatures,
+        action_features: FixActionFeatures | None,
+        result: ReviewAuditEngineResult,
+        created_at: datetime | None = None,
+    ) -> ReviewAuditRunRecord:
+        """Persist a new review audit run record. Flushes but does not commit."""
+        record = ReviewAuditRunRecord(
+            run_id=run_id,
+            created_at=_normalize_created_at(created_at),
+            audit_id=audit_id,
+            pr_number=pr_number,
+            reviewer_login=reviewer_login,
+            verdict=result.audit_snapshot.verdict,
+            extractor_version=result.config.extractor_version,
+            feature_spec_version=result.config.feature_spec_version,
+            review_context_json=dump_review_context_json(review_context),
+            observation_json=dump_model_json(observation),
+            intent_features_json=dump_model_json(intent_features),
+            action_features_json=dump_model_json(action_features) if action_features is not None else None,
+            engine_result_json=dump_model_json(result),
+        )
+        session.add(record)
+        session.flush()
+        return record
+
+    @staticmethod
+    def load_run(session: Session, run_id: str) -> ReviewAuditRun | None:
+        """Load and rehydrate a review audit run record by primary key."""
+        record = session.get(ReviewAuditRunRecord, run_id)
+        if record is None:
+            return None
+        review_context, observation, intent_features, action_features, result = (
+            review_audit_payload_to_models(record.__dict__)
+        )
+        return ReviewAuditRun(
+            run_id=record.run_id,
+            created_at=record.created_at,
+            audit_id=record.audit_id,
+            pr_number=record.pr_number,
+            reviewer_login=record.reviewer_login,
+            verdict=record.verdict,
+            extractor_version=record.extractor_version,
+            feature_spec_version=record.feature_spec_version,
+            review_context=review_context,
+            observation=observation,
+            intent_features=intent_features,
+            action_features=action_features,
+            result=result,
         )
 
 

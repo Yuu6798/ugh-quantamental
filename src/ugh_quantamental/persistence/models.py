@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, Float, JSON, String
+from sqlalchemy import DateTime, Float, Integer, JSON, String
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -93,6 +93,28 @@ class FxEvaluationRecord(Base):
     window_end_jst: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
     protocol_version: Mapped[str] = mapped_column(String(32), nullable=False)
     payload_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+
+
+class ReviewAuditRunRecord(Base):
+    """JSON-backed review audit run record with searchable metadata columns."""
+
+    __tablename__ = "review_audit_runs"
+
+    run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
+
+    audit_id: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    pr_number: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    reviewer_login: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    verdict: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    extractor_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    feature_spec_version: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    review_context_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    observation_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    intent_features_json: Mapped[dict] = mapped_column(JSON, nullable=False)
+    action_features_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    engine_result_json: Mapped[dict] = mapped_column(JSON, nullable=False)
 
 
 class RegressionSuiteBaselineRecord(Base):
