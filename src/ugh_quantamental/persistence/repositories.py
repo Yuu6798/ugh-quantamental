@@ -235,33 +235,39 @@ class ReviewAuditRunRepository:
         session: Session,
         *,
         run_id: str,
-        pr_number: int,
-        reviewer_login: str | None,
         review_context: ReviewContext,
         observation: ReviewObservation,
-        intent_features: ReviewIntentFeatures,
-        action_features: FixActionFeatures | None,
         result: ReviewAuditEngineResult,
         created_at: datetime | None = None,
     ) -> ReviewAuditRunRecord:
         """Persist a new review audit run record. Flushes but does not commit.
 
-        ``audit_id`` is derived from ``result.audit_snapshot.audit_id`` so that
-        the indexed column is always consistent with the stored engine result JSON.
+        All indexed metadata columns are derived from authoritative sources to
+        guarantee consistency with the stored JSON payloads:
+
+        - ``audit_id``        ← ``result.audit_snapshot.audit_id``
+        - ``pr_number``       ← ``review_context.pr_number``
+        - ``reviewer_login``  ← ``review_context.reviewer_login``
+        - ``verdict``         ← ``result.audit_snapshot.verdict``
+        - ``extractor_version``    ← ``result.config.extractor_version``
+        - ``feature_spec_version`` ← ``result.config.feature_spec_version``
+        - ``intent_features_json`` ← ``result.intent_features``
+        - ``action_features_json`` ← ``result.action_features``
         """
+        action = result.action_features
         record = ReviewAuditRunRecord(
             run_id=run_id,
             created_at=_normalize_created_at(created_at),
             audit_id=result.audit_snapshot.audit_id,
-            pr_number=pr_number,
-            reviewer_login=reviewer_login,
+            pr_number=review_context.pr_number,
+            reviewer_login=review_context.reviewer_login,
             verdict=result.audit_snapshot.verdict,
             extractor_version=result.config.extractor_version,
             feature_spec_version=result.config.feature_spec_version,
             review_context_json=dump_review_context_json(review_context),
             observation_json=dump_model_json(observation),
-            intent_features_json=dump_model_json(intent_features),
-            action_features_json=dump_model_json(action_features) if action_features is not None else None,
+            intent_features_json=dump_model_json(result.intent_features),
+            action_features_json=dump_model_json(action) if action is not None else None,
             engine_result_json=dump_model_json(result),
         )
         session.add(record)

@@ -135,20 +135,14 @@ def test_save_load_round_trip_with_action_features() -> None:
 
     context = _make_review_context()
     observation = _make_observation()
-    intent = _make_intent_features()
-    action = _make_action_features()
     result = _make_engine_result(with_action=True)
 
     with _session() as session:
         ReviewAuditRunRepository.save_run(
             session,
             run_id="audit-run-001",
-            pr_number=42,
-            reviewer_login="alice",
             review_context=context,
             observation=observation,
-            intent_features=intent,
-            action_features=action,
             result=result,
         )
         session.commit()
@@ -158,8 +152,8 @@ def test_save_load_round_trip_with_action_features() -> None:
     assert loaded is not None
     assert loaded.run_id == "audit-run-001"
     assert loaded.audit_id == "audit-test-001"
-    assert loaded.pr_number == 42
-    assert loaded.reviewer_login == "alice"
+    assert loaded.pr_number == 42        # derived from review_context.pr_number
+    assert loaded.reviewer_login == "alice"  # derived from review_context.reviewer_login
     assert loaded.verdict == "aligned"
     assert loaded.extractor_version == "v1"
     assert loaded.feature_spec_version == "v1"
@@ -168,8 +162,8 @@ def test_save_load_round_trip_with_action_features() -> None:
     assert loaded.review_context.kind.value == "diff_comment"
     # Pydantic model round-trips
     assert loaded.observation == observation
-    assert loaded.intent_features == intent
-    assert loaded.action_features == action
+    assert loaded.intent_features == result.intent_features
+    assert loaded.action_features == result.action_features
     assert loaded.result == result
     # naive UTC timestamp
     assert loaded.created_at.tzinfo is None
@@ -181,19 +175,14 @@ def test_save_load_round_trip_without_action_features() -> None:
 
     context = _make_review_context()
     observation = _make_observation()
-    intent = _make_intent_features()
     result = _make_engine_result(with_action=False)
 
     with _session() as session:
         ReviewAuditRunRepository.save_run(
             session,
             run_id="audit-run-002",
-            pr_number=42,
-            reviewer_login=None,
             review_context=context,
             observation=observation,
-            intent_features=intent,
-            action_features=None,
             result=result,
         )
         session.commit()
@@ -202,7 +191,7 @@ def test_save_load_round_trip_without_action_features() -> None:
 
     assert loaded is not None
     assert loaded.action_features is None
-    assert loaded.reviewer_login is None
+    assert loaded.reviewer_login == "alice"  # derived from review_context.reviewer_login
     assert loaded.verdict == "insufficient_data"
     assert loaded.review_context == context
 
@@ -229,12 +218,8 @@ def test_timezone_aware_created_at_normalized_to_naive_utc() -> None:
         ReviewAuditRunRepository.save_run(
             session,
             run_id="audit-run-003",
-            pr_number=7,
-            reviewer_login=None,
             review_context=context,
             observation=_make_observation(),
-            intent_features=_make_intent_features(),
-            action_features=_make_action_features(),
             result=result,
             created_at=aware_dt,
         )
