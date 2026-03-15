@@ -8,13 +8,20 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 from ugh_quantamental.engine.projection import run_projection_engine
+from ugh_quantamental.engine.review_audit import run_review_audit_engine
 from ugh_quantamental.engine.state import run_state_engine
-from ugh_quantamental.persistence.repositories import ProjectionRunRepository, StateRunRepository
+from ugh_quantamental.persistence.repositories import (
+    ProjectionRunRepository,
+    ReviewAuditRunRepository,
+    StateRunRepository,
+)
 from ugh_quantamental.workflows.models import (
     FullWorkflowRequest,
     FullWorkflowResult,
     ProjectionWorkflowRequest,
     ProjectionWorkflowResult,
+    ReviewAuditWorkflowRequest,
+    ReviewAuditWorkflowResult,
     StateWorkflowRequest,
     StateWorkflowResult,
     make_run_id,  # re-exported for callers who import from runners
@@ -109,6 +116,43 @@ def run_state_workflow(
         raise RuntimeError(f"Failed to reload state run {run_id!r} after save")
 
     return StateWorkflowResult(
+        run_id=run_id,
+        engine_result=engine_result,
+        persisted_run=persisted_run,
+    )
+
+
+def run_review_audit_workflow(
+    session: Session,
+    request: ReviewAuditWorkflowRequest,
+) -> ReviewAuditWorkflowResult:
+    """Run the review audit engine, persist the result, reload it, and return both.
+
+    The caller owns the session and must commit or roll back after this call returns.
+    """
+    run_id = request.run_id or make_run_id("raudit-")
+
+    engine_result = run_review_audit_engine(
+        audit_id=request.audit_id,
+        intent=request.intent_features,
+        action=request.action_features,
+        config=request.config,
+    )
+
+    ReviewAuditRunRepository.save_run(
+        session,
+        run_id=run_id,
+        review_context=request.review_context,
+        observation=request.observation,
+        result=engine_result,
+        created_at=request.created_at,
+    )
+
+    persisted_run = ReviewAuditRunRepository.load_run(session, run_id)
+    if persisted_run is None:
+        raise RuntimeError(f"Failed to reload review audit run {run_id!r} after save")
+
+    return ReviewAuditWorkflowResult(
         run_id=run_id,
         engine_result=engine_result,
         persisted_run=persisted_run,

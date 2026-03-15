@@ -16,12 +16,20 @@ from ugh_quantamental.engine.projection_models import (
     QuestionFeatures,
     SignalFeatures,
 )
+from ugh_quantamental.engine.review_audit_models import (
+    FixActionFeatures,
+    ReviewAuditConfig,
+    ReviewAuditEngineResult,
+    ReviewIntentFeatures,
+    ReviewObservation,
+)
 from ugh_quantamental.engine.state_models import StateConfig, StateEngineResult, StateEventFeatures
+from ugh_quantamental.review_autofix.models import ReviewContext
 from ugh_quantamental.schemas.omega import Omega
 from ugh_quantamental.schemas.ssv import SSVSnapshot
 
 if TYPE_CHECKING:
-    from ugh_quantamental.persistence.repositories import ProjectionRun, StateRun
+    from ugh_quantamental.persistence.repositories import ProjectionRun, ReviewAuditRun, StateRun
 
 
 def make_run_id(prefix: str) -> str:
@@ -115,6 +123,32 @@ class StateWorkflowResult:
     run_id: str
     engine_result: StateEngineResult
     persisted_run: StateRun
+
+
+class ReviewAuditWorkflowRequest(BaseModel):
+    """All inputs needed to run and persist a single deterministic review audit."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    audit_id: str = Field(min_length=1)
+    pr_number: int = Field(ge=1)
+    reviewer_login: str | None = None
+    review_context: ReviewContext
+    observation: ReviewObservation
+    intent_features: ReviewIntentFeatures
+    action_features: FixActionFeatures | None = None
+    config: ReviewAuditConfig = Field(default_factory=ReviewAuditConfig)
+    run_id: str | None = None
+    created_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class ReviewAuditWorkflowResult:
+    """Outputs from a completed review audit workflow run."""
+
+    run_id: str
+    engine_result: ReviewAuditEngineResult
+    persisted_run: ReviewAuditRun
 
 
 @dataclass(frozen=True)
