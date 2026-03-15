@@ -241,6 +241,20 @@ def test_config_zero_weight_rejected() -> None:
         ReviewAuditConfig(w_clarity=0.0)
 
 
+@pytest.mark.parametrize("field,value", [
+    ("w_clarity", float("inf")),
+    ("w_clarity", float("-inf")),
+    ("w_clarity", float("nan")),
+    ("w_locality", float("inf")),
+    ("w_mechanical", float("nan")),
+    ("w_scope", float("inf")),
+])
+def test_config_non_finite_weight_rejected(field: str, value: float) -> None:
+    """inf / -inf / nan weights must be rejected to prevent inf/inf=nan PoR corruption."""
+    with pytest.raises(ValidationError):
+        ReviewAuditConfig(**{field: value})
+
+
 # ---------------------------------------------------------------------------
 # 4. Frozen invariant
 # ---------------------------------------------------------------------------

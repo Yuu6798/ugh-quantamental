@@ -10,7 +10,9 @@ prevent accidental field additions.
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import math
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ReviewObservation(BaseModel):
@@ -149,6 +151,20 @@ class ReviewAuditConfig(BaseModel):
 
     w_scope: float = Field(default=0.25, gt=0.0)
     """Weight applied to ``scope_boundness`` in PoR computation."""
+
+    @field_validator("w_clarity", "w_locality", "w_mechanical", "w_scope")
+    @classmethod
+    def _weight_must_be_finite(cls, v: float) -> float:
+        """Reject ``inf`` and ``nan`` weights.
+
+        ``gt=0.0`` already blocks non-positive values; this validator
+        additionally blocks non-finite ones so that ``compute_por`` cannot
+        produce ``inf / inf = nan`` (which ``_clamp01`` would silently convert
+        to ``1.0``, corrupting downstream audit metrics).
+        """
+        if not math.isfinite(v):
+            raise ValueError(f"PoR weight must be a finite positive number, got {v!r}")
+        return v
 
     extractor_version: str = "v1"
     """Tracks which keyword / rule set was active when the observation was produced."""
