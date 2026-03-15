@@ -45,3 +45,14 @@ def commit_changes(message: str) -> None:
 
 def push_head_branch(branch: str) -> None:
     subprocess.run(["git", "push", "origin", f"HEAD:{branch}"], check=True)
+
+
+def list_untracked_files() -> list[str]:
+    """Return a list of untracked file paths in the working directory."""
+    result = subprocess.run(
+        "git ls-files --others --exclude-standard",
+        shell=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.splitlines()
