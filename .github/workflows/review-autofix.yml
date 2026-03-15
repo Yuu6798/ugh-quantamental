@@ -208,8 +208,13 @@ jobs:
           # missing binary gracefully (codex-command-exit-127) and still posts
           # its outcome to the PR before exiting.  The ::warning:: annotation
           # surfaces the failure visibly in the Actions summary.
+          #
+          # Security: run inside a subshell that cd-s to GITHUB_WORKSPACE so
+          # that a malicious pr-head/.npmrc cannot redirect the npm registry.
+          # --ignore-scripts prevents lifecycle scripts from executing during
+          # install, eliminating a code-execution vector via package.json hooks.
           if [ "${_CODEX_INSTALL_NEEDED}" = "true" ]; then
-            npm install -g @openai/codex \
+            (cd "$GITHUB_WORKSPACE" && npm install -g @openai/codex --ignore-scripts) \
               || echo "::warning::npm install -g @openai/codex failed; executor will be unavailable."
           fi
 
