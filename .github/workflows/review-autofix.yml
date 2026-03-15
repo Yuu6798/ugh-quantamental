@@ -65,11 +65,63 @@ jobs:
           python -m pip install -e .
           python -m pip install pytest ruff
 
+      # Install Node.js so that the @openai/codex CLI can be installed globally.
+      # This is required whenever CODEX_EXECUTOR_COMMAND references the `codex` binary
+      # (e.g. `codex exec "$(cat "$CODEX_TASK_FILE")"`).
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Install the OpenAI Codex CLI globally.
+      # The `codex` binary is expected by the default CODEX_EXECUTOR_COMMAND value.
+      # If a custom command using `npx` or another runner is preferred, this step
+      # can be skipped by setting the BOT_MODE variable to `detect_only`; however,
+      # the preflight check below will still validate that the first token of
+      # CODEX_EXECUTOR_COMMAND is resolvable on PATH before the bot runs.
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
+
       - name: Configure git author
         working-directory: pr-head
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      # Preflight: emit key runtime settings and verify the executor binary is
+      # resolvable before the bot process starts.  A missing binary produces a
+      # clear ::error:: annotation instead of a cryptic "exit 127" buried in bot
+      # log output.  When CODEX_EXECUTOR_COMMAND is empty the bot will naturally
+      # skip execution with reason='codex-command-not-configured'; this step only
+      # hard-fails when the variable is non-empty but the binary cannot be found.
+      - name: Preflight — verify executor environment
+        env:
+          BOT_MODE: ${{ vars.BOT_MODE || 'detect_only' }}
+          DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+          CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
+        run: |
+          echo "=== review-autofix preflight ==="
+          echo "BOT_MODE              : ${BOT_MODE}"
+          echo "DRY_RUN               : ${DRY_RUN}"
+          if [ -z "${CODEX_EXECUTOR_COMMAND}" ]; then
+            echo "CODEX_EXECUTOR_COMMAND: (empty — executor will skip with 'codex-command-not-configured')"
+          else
+            echo "CODEX_EXECUTOR_COMMAND: (set)"
+            # Extract the first token (the binary/launcher) from the command string.
+            # The value may contain shell substitutions like $(cat "$CODEX_TASK_FILE");
+            # we only need the leading word to verify PATH availability.
+            _cmd_token=$(printf '%s' "${CODEX_EXECUTOR_COMMAND}" | awk '{print $1}')
+            if ! command -v "${_cmd_token}" >/dev/null 2>&1; then
+              echo "::error::Executor binary '${_cmd_token}' not found on PATH."
+              echo "::error::Either the @openai/codex npm package failed to install,"
+              echo "::error::or CODEX_EXECUTOR_COMMAND uses a binary that is not available."
+              echo "::error::To use npx instead, set: CODEX_EXECUTOR_COMMAND=npx @openai/codex exec \"\$(cat \"\$CODEX_TASK_FILE\")\""
+              exit 1
+            fi
+            echo "executor binary       : $(command -v "${_cmd_token}")"
+            "${_cmd_token}" --version 2>/dev/null || true
+          fi
+          echo "=== preflight OK ==="
 
       - name: Run review autofix bot
         working-directory: pr-head
