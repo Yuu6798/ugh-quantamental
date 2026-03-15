@@ -114,10 +114,20 @@ jobs:
           # Determine whether the executor will actually be invoked.
           # Mirrors bot.py: executor runs only when mode is not detect_only /
           # propose_only AND DRY_RUN is not true.
+          # Normalise DRY_RUN to a canonical boolean using the same truthy set
+          # as config.py _parse_bool: {1, true, yes, on} → dry; everything
+          # else (including the default "true") is also checked below.
+          # This prevents false hard-fails when DRY_RUN=1/yes/on is set.
+          _dry_run_norm=$(printf '%s' "${DRY_RUN}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
+          case "${_dry_run_norm}" in
+            1|true|yes|on) _dry_run_bool=true ;;
+            *)              _dry_run_bool=false ;;
+          esac
+
           _will_execute=false
           if [ "${BOT_MODE}" != "detect_only" ] && \
              [ "${BOT_MODE}" != "propose_only" ] && \
-             [ "${DRY_RUN}" != "true" ]; then
+             [ "${_dry_run_bool}" != "true" ]; then
             _will_execute=true
           fi
           echo "executor will run     : ${_will_execute}"
