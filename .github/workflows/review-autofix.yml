@@ -65,25 +65,30 @@ jobs:
           python -m pip install -e .
           python -m pip install pytest ruff
 
-      # Compute executor gate — normalise BOT_MODE and DRY_RUN case-insensitively
-      # using the same rules as config.py _parse_bool ({1,true,yes,on} → dry).
-      # GitHub Actions `if:` expressions are case-sensitive, so literal-value
-      # checks in `if:` would silently pass for values like "TRUE" or "Yes",
-      # triggering npm install in dry-run modes and introducing a spurious
-      # dependency on the npm registry.  Using a shell-computed output avoids
-      # that gap.
+      # Compute executor gate — three independent conditions must all be true
+      # before Node.js / npm install are needed:
+      #   1. BOT_MODE is an executing mode (not detect_only / propose_only)
+      #   2. DRY_RUN is falsy — normalised case-insensitively to match
+      #      config.py _parse_bool ({1,true,yes,on} → dry)
+      #   3. CODEX_EXECUTOR_COMMAND is non-empty — when empty, bot.py returns
+      #      early with "codex-command-not-configured" and never calls the CLI
+      #
+      # All three checks are done in shell to avoid GitHub Actions `if:`
+      # expression case-sensitivity issues.
       - name: Compute executor gate
         id: gate
         env:
           BOT_MODE: ${{ vars.BOT_MODE || 'detect_only' }}
           DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
+          CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
         run: |
           _mode=$(printf '%s' "${BOT_MODE}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
           _dry=$(printf '%s'  "${DRY_RUN}"  | tr '[:upper:]' '[:lower:]' | tr -d ' ')
           _install=false
           if [ "${_mode}" != '' ] && \
              [ "${_mode}" != 'detect_only' ] && \
-             [ "${_mode}" != 'propose_only' ]; then
+             [ "${_mode}" != 'propose_only' ] && \
+             [ -n "${CODEX_EXECUTOR_COMMAND}" ]; then
             case "${_dry}" in
               1|true|yes|on) ;;
               *) _install=true ;;
