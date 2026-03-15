@@ -65,21 +65,41 @@ jobs:
           python -m pip install -e .
           python -m pip install pytest ruff
 
-      # Install Node.js so that the @openai/codex CLI can be installed globally.
-      # This is required whenever CODEX_EXECUTOR_COMMAND references the `codex` binary
-      # (e.g. `codex exec "$(cat "$CODEX_TASK_FILE")"`).
+      # Install Node.js only when the executor is likely to run.
+      # detect_only, propose_only, and DRY_RUN=true (or unset) never call the
+      # executor, so Node.js and the Codex CLI are not needed.  Gating these
+      # two steps avoids a hard dependency on npm registry availability in
+      # read-only modes, which would abort the workflow before the bot can post
+      # review guidance.
+      #
+      # Condition mirrors the _likely_execute logic in the preflight step:
+      #   BOT_MODE must be set and must not be detect_only / propose_only
+      #   DRY_RUN must be set to an explicit falsy value (not empty / not truthy)
       - name: Set up Node.js
+        if: >-
+          vars.BOT_MODE != '' &&
+          vars.BOT_MODE != 'detect_only' &&
+          vars.BOT_MODE != 'propose_only' &&
+          vars.DRY_RUN != '' &&
+          vars.DRY_RUN != 'true' &&
+          vars.DRY_RUN != '1' &&
+          vars.DRY_RUN != 'yes' &&
+          vars.DRY_RUN != 'on'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      # Install the OpenAI Codex CLI globally.
-      # The `codex` binary is expected by the default CODEX_EXECUTOR_COMMAND value.
-      # If a custom command using `npx` or another runner is preferred, this step
-      # can be skipped by setting the BOT_MODE variable to `detect_only`; however,
-      # the preflight check below will still validate that the first token of
-      # CODEX_EXECUTOR_COMMAND is resolvable on PATH before the bot runs.
+      # Install the OpenAI Codex CLI globally (execution modes only — see above).
       - name: Install Codex CLI
+        if: >-
+          vars.BOT_MODE != '' &&
+          vars.BOT_MODE != 'detect_only' &&
+          vars.BOT_MODE != 'propose_only' &&
+          vars.DRY_RUN != '' &&
+          vars.DRY_RUN != 'true' &&
+          vars.DRY_RUN != '1' &&
+          vars.DRY_RUN != 'yes' &&
+          vars.DRY_RUN != 'on'
         run: npm install -g @openai/codex
 
       - name: Configure git author
