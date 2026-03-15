@@ -172,8 +172,10 @@ jobs:
               echo "::warning::If execution is expected, ensure @openai/codex installed correctly"
               echo "::warning::or update CODEX_EXECUTOR_COMMAND to use npx @openai/codex exec \"\$(cat \"\$CODEX_TASK_FILE\")\"."
             else
+              # Report the resolved path only — do not invoke the binary.
+              # Running with --version has no timeout guard and could hang or
+              # trigger side effects for executors that don't support that flag.
               echo "executor binary       : $(command -v "${_cmd_token}")"
-              "${_cmd_token}" --version 2>/dev/null || true
             fi
           fi
           echo "=== preflight OK ==="
