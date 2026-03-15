@@ -134,15 +134,22 @@ jobs:
         working-directory: pr-head
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Mirror the repository expression used in the "Check out PR head
+          # branch" step so that origin always points at the repository that
+          # was actually checked out (fork or base).  Using GITHUB_REPOSITORY
+          # here would rewrite origin to the base repo for fork PRs, causing
+          # bot.py to push to the wrong repository when ALLOW_PUSH_ON_FORK=true.
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # Re-inject push credentials explicitly now that npm install has run.
           # persist-credentials: false on checkout prevents .git/config from
           # holding write-capable tokens during the npm install step; we restore
-          # them here so that bot.py can push commits to the PR branch.
+          # them here (pointing at the head repo, not the base repo) so that
+          # bot.py pushes to the correct fork when ALLOW_PUSH_ON_FORK=true.
           git remote set-url origin \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/${HEAD_REPO}.git"
 
       # Preflight: emit key runtime settings and surface a ::warning:: if the
       # executor binary is not resolvable.  This step is intentionally
