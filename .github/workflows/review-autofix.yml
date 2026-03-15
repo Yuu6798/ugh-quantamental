@@ -247,6 +247,7 @@ jobs:
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
+          CODEX_EXECUTOR_TIMEOUT_SECONDS: ${{ vars.CODEX_EXECUTOR_TIMEOUT_SECONDS || '900' }}
           _CODEX_INSTALL_NEEDED: ${{ steps.gate.outputs.should_install }}
         run: |
           echo "=== Codex CLI auth probe ==="
