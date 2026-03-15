@@ -235,7 +235,6 @@ class ReviewAuditRunRepository:
         session: Session,
         *,
         run_id: str,
-        audit_id: str,
         pr_number: int,
         reviewer_login: str | None,
         review_context: ReviewContext,
@@ -245,11 +244,15 @@ class ReviewAuditRunRepository:
         result: ReviewAuditEngineResult,
         created_at: datetime | None = None,
     ) -> ReviewAuditRunRecord:
-        """Persist a new review audit run record. Flushes but does not commit."""
+        """Persist a new review audit run record. Flushes but does not commit.
+
+        ``audit_id`` is derived from ``result.audit_snapshot.audit_id`` so that
+        the indexed column is always consistent with the stored engine result JSON.
+        """
         record = ReviewAuditRunRecord(
             run_id=run_id,
             created_at=_normalize_created_at(created_at),
-            audit_id=audit_id,
+            audit_id=result.audit_snapshot.audit_id,
             pr_number=pr_number,
             reviewer_login=reviewer_login,
             verdict=result.audit_snapshot.verdict,

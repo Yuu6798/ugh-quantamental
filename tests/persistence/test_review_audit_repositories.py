@@ -143,7 +143,6 @@ def test_save_load_round_trip_with_action_features() -> None:
         ReviewAuditRunRepository.save_run(
             session,
             run_id="audit-run-001",
-            audit_id="audit-test-001",
             pr_number=42,
             reviewer_login="alice",
             review_context=context,
@@ -189,7 +188,6 @@ def test_save_load_round_trip_without_action_features() -> None:
         ReviewAuditRunRepository.save_run(
             session,
             run_id="audit-run-002",
-            audit_id="audit-test-001",
             pr_number=42,
             reviewer_login=None,
             review_context=context,
@@ -231,7 +229,6 @@ def test_timezone_aware_created_at_normalized_to_naive_utc() -> None:
         ReviewAuditRunRepository.save_run(
             session,
             run_id="audit-run-003",
-            audit_id="audit-test-tz",
             pr_number=7,
             reviewer_login=None,
             review_context=context,
