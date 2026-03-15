@@ -11,6 +11,7 @@ modification.
 from __future__ import annotations
 
 from ugh_quantamental.engine.review_audit_models import (
+    FixActionFeatures,
     ReviewIntentFeatures,
     ReviewObservation,
 )
@@ -20,11 +21,13 @@ from .models import ReviewContext
 
 # Re-export canonical models for backwards-compatible imports.
 __all__ = [
+    "FixActionFeatures",
     "ReviewObservation",
     "ReviewIntentFeatures",
     "extract_review_observation",
     "extract_review_intent_features",
     "extract_review_features",
+    "extract_fix_action_features",
 ]
 
 # ---------------------------------------------------------------------------
@@ -202,3 +205,86 @@ def extract_review_features(
     obs = extract_review_observation(context)
     features = extract_review_intent_features(obs)
     return obs, features
+
+
+def extract_fix_action_features(
+    *,
+    context: ReviewContext,
+    changed: bool,
+    validation_ok: bool,
+    execution_status: str,
+    files_changed: int,
+    lines_changed: int,
+    touched_paths: tuple[str, ...],
+) -> FixActionFeatures:
+    """Build a deterministic ``FixActionFeatures`` vector from post-execution state.
+
+    All formulas are pure and produce values in [0, 1].  No git commands or
+    I/O are performed inside this function.
+
+    Parameters
+    ----------
+    context:
+        The ``ReviewContext`` that was audited (supplies path/line anchors).
+    changed:
+        Whether the executor produced any working-tree change.
+    validation_ok:
+        Whether the post-fix validation pass succeeded.
+    execution_status:
+        Raw executor outcome string (``"succeeded" | "no_op" | "failed" | ...``).
+    files_changed:
+        Number of files touched by the applied fix.
+    lines_changed:
+        Total lines added+removed by the applied fix.
+    touched_paths:
+        Tuple of file paths touched by the applied fix.
+    """
+    # target_file_match: 1.0 if the reviewer's referenced file was actually touched.
+    if context.path is not None and context.path in touched_paths:
+        target_file_match = 1.0
+    else:
+        target_file_match = 0.0
+
+    # line_anchor_touched: 1.0 if a change was made and the comment had a line anchor.
+    if changed and (context.line is not None or context.start_line is not None):
+        line_anchor_touched = 1.0
+    else:
+        line_anchor_touched = 0.0
+
+    # diff_hunk_overlap: 1.0 if a change was made and the comment carried a diff hunk.
+    if changed and context.diff_hunk is not None:
+        diff_hunk_overlap = 1.0
+    else:
+        diff_hunk_overlap = 0.0
+
+    # scope_ratio: monotonic broadness proxy — larger edits produce a higher ratio.
+    # Normalised: 10 files → file component saturates; 200 lines → line component saturates.
+    file_component = min(1.0, files_changed / 10.0) if files_changed > 0 else 0.0
+    line_component = min(1.0, lines_changed / 200.0) if lines_changed > 0 else 0.0
+    scope_ratio = _clamp01(0.5 * file_component + 0.5 * line_component)
+
+    # validation_scope_executed: 1.0 when validation ran and passed.
+    validation_scope_executed = 1.0 if validation_ok else 0.0
+
+    # behavior_preservation_proxy: conservative deterministic proxy.
+    # Highest when the fix was applied and validation confirmed correctness.
+    if changed and validation_ok:
+        behavior_preservation_proxy = 1.0
+    elif changed:
+        behavior_preservation_proxy = 0.3
+    else:
+        behavior_preservation_proxy = 0.5
+
+    return FixActionFeatures(
+        changed=changed,
+        validation_ok=validation_ok,
+        lines_changed=lines_changed,
+        files_changed=files_changed,
+        target_file_match=target_file_match,
+        line_anchor_touched=line_anchor_touched,
+        diff_hunk_overlap=diff_hunk_overlap,
+        scope_ratio=scope_ratio,
+        validation_scope_executed=validation_scope_executed,
+        behavior_preservation_proxy=behavior_preservation_proxy,
+        execution_status=execution_status,
+    )

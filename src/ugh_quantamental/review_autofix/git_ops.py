@@ -3,6 +3,34 @@ from __future__ import annotations
 import subprocess
 
 
+def get_diff_stats() -> tuple[tuple[str, ...], int, int]:
+    """Return ``(touched_paths, files_changed, lines_changed)`` for uncommitted changes.
+
+    Runs ``git diff HEAD --numstat`` to enumerate modified files and line deltas.
+    Returns ``((), 0, 0)`` on any error.  Intended for best-effort shadow audit use only.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "diff", "HEAD", "--numstat"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        paths: list[str] = []
+        total_lines = 0
+        for line in proc.stdout.splitlines():
+            parts = line.split("\t", 2)
+            if len(parts) == 3:
+                try:
+                    total_lines += int(parts[0]) + int(parts[1])
+                except ValueError:
+                    pass
+                paths.append(parts[2])
+        return tuple(paths), len(paths), total_lines
+    except Exception:
+        return (), 0, 0
+
+
 def has_changes() -> bool:
     proc = subprocess.run("git status --porcelain", shell=True, capture_output=True, text=True, check=False)
     lines = [line for line in proc.stdout.splitlines() if line.strip()]
