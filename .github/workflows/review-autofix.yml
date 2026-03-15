@@ -93,18 +93,16 @@ jobs:
 
       # Install Node.js only when the executor gate says execution is likely.
       # detect_only, propose_only, and any DRY_RUN truthy value (case-insensitive)
-      # skip this step so transient npm failures cannot abort the workflow before
-      # the bot posts its review guidance.
+      # skip this step.  Node.js is needed so that the just-in-time
+      # `npm install -g @openai/codex` in the bot step can run; it is not
+      # installed separately because deferring the npm install to inside the
+      # bot's run block ensures an npm registry failure cannot abort the job
+      # before bot.py posts its outcome.
       - name: Set up Node.js
         if: steps.gate.outputs.should_install == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      # Install the OpenAI Codex CLI globally (execution modes only — see above).
-      - name: Install Codex CLI
-        if: steps.gate.outputs.should_install == 'true'
-        run: npm install -g @openai/codex
 
       - name: Configure git author
         working-directory: pr-head
@@ -196,7 +194,25 @@ jobs:
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
           CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
           CODEX_EXECUTOR_TIMEOUT_SECONDS: ${{ vars.CODEX_EXECUTOR_TIMEOUT_SECONDS || '900' }}
+          # Passed from the gate step so the just-in-time install below can
+          # skip itself in detect_only / propose_only / dry-run modes.
+          _CODEX_INSTALL_NEEDED: ${{ steps.gate.outputs.should_install }}
         run: |
+          # Install the Codex CLI just-in-time, deferred to here so that a
+          # transient npm registry failure cannot abort the job before bot.py
+          # runs.  The install is skipped entirely in non-executing modes
+          # (detect_only, propose_only, DRY_RUN truthy) because the gate step
+          # sets _CODEX_INSTALL_NEEDED=false for those cases.
+          #
+          # If the install fails despite being needed, bot.py handles the
+          # missing binary gracefully (codex-command-exit-127) and still posts
+          # its outcome to the PR before exiting.  The ::warning:: annotation
+          # surfaces the failure visibly in the Actions summary.
+          if [ "${_CODEX_INSTALL_NEEDED}" = "true" ]; then
+            npm install -g @openai/codex \
+              || echo "::warning::npm install -g @openai/codex failed; executor will be unavailable."
+          fi
+
           python - <<'PY'
           import os
           import runpy
