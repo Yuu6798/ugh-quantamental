@@ -48,11 +48,15 @@ def push_head_branch(branch: str) -> None:
 
 
 def list_untracked_files() -> list[str]:
-    """Return a list of untracked file paths in the working directory."""
+    """Return a list of untracked file paths in the working directory.
+
+    Raises ``subprocess.CalledProcessError`` if git exits non-zero (e.g. when
+    called outside a git worktree).
+    """
     result = subprocess.run(
-        "git ls-files --others --exclude-standard",
-        shell=True,
+        ["git", "ls-files", "--others", "--exclude-standard"],
         capture_output=True,
         text=True,
+        check=True,
     )
     return result.stdout.splitlines()
