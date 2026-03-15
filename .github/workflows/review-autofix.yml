@@ -190,6 +190,11 @@ jobs:
         env:
           TRUSTED_SRC: ${{ github.workspace }}/trusted-bot/src
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Required by the Codex CLI to authenticate with the OpenAI API.
+          # Store the key as a repository secret named OPENAI_API_KEY.
+          # Without this the executor returns HTTP 401 ("Missing bearer or
+          # basic authentication in header") even when the binary is installed.
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           BOT_MODE: ${{ vars.BOT_MODE || 'detect_only' }}
           TARGET_REVIEWERS: ${{ vars.TARGET_REVIEWERS || '' }}
           ALLOWED_BOT_REVIEWERS: ${{ vars.ALLOWED_BOT_REVIEWERS || 'chatgpt-codex-connector[bot]' }}
