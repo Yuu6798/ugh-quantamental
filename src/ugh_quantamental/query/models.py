@@ -14,7 +14,14 @@ from ugh_quantamental.engine.projection_models import (
     QuestionFeatures,
     SignalFeatures,
 )
+from ugh_quantamental.engine.review_audit_models import (
+    FixActionFeatures,
+    ReviewAuditEngineResult,
+    ReviewIntentFeatures,
+    ReviewObservation,
+)
 from ugh_quantamental.engine.state_models import StateConfig, StateEngineResult, StateEventFeatures
+from ugh_quantamental.review_autofix.models import ReviewContext
 from ugh_quantamental.schemas.omega import Omega
 from ugh_quantamental.schemas.ssv import SSVSnapshot
 
@@ -112,3 +119,53 @@ class StateRunBundle:
     event_features: StateEventFeatures
     config: StateConfig
     result: StateEngineResult
+
+
+class ReviewAuditRunQuery(BaseModel):
+    """Filter parameters for listing review audit run summaries."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    audit_id: str | None = None
+    pr_number: int | None = None
+    reviewer_login: str | None = None
+    verdict: str | None = None
+    created_at_from: datetime | None = None
+    created_at_to: datetime | None = None
+    limit: int = Field(default=100, ge=1, le=1000)
+    offset: int = Field(default=0, ge=0)
+
+
+class ReviewAuditRunSummary(BaseModel):
+    """Lightweight read-only view of a persisted review audit run."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    run_id: str
+    created_at: datetime
+    audit_id: str
+    pr_number: int
+    reviewer_login: str | None
+    verdict: str
+    por: float
+    delta_e: float | None
+    mismatch_score: float | None
+
+
+@dataclass(frozen=True)
+class ReviewAuditRunBundle:
+    """Fully-recovered review audit run with all typed models reconstructed from JSON."""
+
+    run_id: str
+    created_at: datetime
+    audit_id: str
+    pr_number: int
+    reviewer_login: str | None
+    verdict: str
+    extractor_version: str
+    feature_spec_version: str
+    review_context: ReviewContext
+    observation: ReviewObservation
+    intent_features: ReviewIntentFeatures
+    action_features: FixActionFeatures | None
+    result: ReviewAuditEngineResult
