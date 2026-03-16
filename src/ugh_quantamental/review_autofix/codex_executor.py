@@ -148,8 +148,13 @@ def _read_target_file(prompt: str) -> str | None:
         return None
     file_path = file_match.group(1).strip()
     try:
-        return Path(file_path).read_text(encoding="utf-8")
-    except OSError:
+        cwd = Path.cwd().resolve()
+        target = (cwd / file_path).resolve()
+        # Reject symlinks or paths that resolve outside the checkout root.
+        if not (str(target) + os.sep).startswith(str(cwd) + os.sep):
+            return None
+        return target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
         return None
 
 

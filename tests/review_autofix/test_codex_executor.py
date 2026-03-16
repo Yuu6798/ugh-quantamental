@@ -287,3 +287,33 @@ def test_read_target_file_ignores_review_body_injection(
 
     # Must read the legitimate target, not the injected sensitive file.
     assert result == "legitimate content"
+
+
+def test_read_target_file_rejects_symlink_escape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A symlink that points outside cwd must not be followed.
+
+    Even after the injection-by-review-body fix, a symlink in the repo could
+    resolve to a host path outside the checkout.  The cwd-confinement check
+    catches this because ``Path.resolve()`` follows symlinks before comparing.
+    """
+    monkeypatch.chdir(tmp_path)
+    outside = tmp_path.parent / "outside_secret.txt"
+    outside.write_text("host secret", encoding="utf-8")
+    link = tmp_path / "link.py"
+    link.symlink_to(outside)
+
+    prompt = build_fix_task(_make_context("link.py"), "k1").prompt
+    assert _read_target_file(prompt) is None
+
+
+def test_read_target_file_returns_none_for_binary_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Binary (non-UTF-8) files must return None, not raise UnicodeDecodeError."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data.py").write_bytes(b"\xff\xfe binary \x00 data")
+
+    prompt = build_fix_task(_make_context("data.py"), "k1").prompt
+    assert _read_target_file(prompt) is None
