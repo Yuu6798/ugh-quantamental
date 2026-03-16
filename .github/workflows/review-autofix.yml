@@ -127,7 +127,7 @@ jobs:
         if: steps.gate.outputs.should_install == 'true'
         continue-on-error: true
         run: |
-          (cd "$GITHUB_WORKSPACE" && npm install -g --ignore-scripts @openai/codex) \
+          (cd "$GITHUB_WORKSPACE" && npm install -g @openai/codex) \
             || echo "::warning::npm install -g @openai/codex failed; executor will be unavailable."
 
       - name: Configure git author
