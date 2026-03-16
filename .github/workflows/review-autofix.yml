@@ -316,7 +316,9 @@ jobs:
 
           # Run the actual executor command with a trivial prompt.
           # CODEX_TASK_FILE is injected exactly as the bot step does it.
-          # stdout/stderr from codex are suppressed to avoid leaking LLM output.
+          # stdout/stderr from codex are captured; on failure the first 50 lines
+          # are echoed so the actual error (auth, billing, model access, etc.)
+          # is visible in the Actions log without needing to download artifacts.
           _probe_file=$(mktemp)
           printf 'Reply with exactly: OK' > "${_probe_file}"
           _probe_exit=0
@@ -329,10 +331,9 @@ jobs:
           echo "codex-cli-auth-probe: exit_code=${_probe_exit} (0=OK, same cwd as executor)"
           if [ "${_probe_exit}" != "0" ]; then
             echo "::warning::Codex CLI probe failed (exit ${_probe_exit}) — ran from pr-head, same cwd as real executor."
-            echo "::warning::curl /v1/models returned 200, so the key is valid at HTTP level."
-            echo "::warning::Remaining causes: (1) Codex CLI auth handling differs from raw HTTP;"
-            echo "::warning::(2) key scope lacks /v1/responses permission; (3) command invocation"
-            echo "::warning::differences between probe and real executor path."
+            echo "--- codex probe output (first 50 lines) ---"
+            head -n 50 /tmp/codex-probe-out.txt || true
+            echo "--- end probe output ---"
           fi
           echo "=== Codex CLI auth probe done ==="
 
