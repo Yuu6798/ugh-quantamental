@@ -197,6 +197,63 @@ def test_api_http_error_returns_failed(
 
 
 # ---------------------------------------------------------------------------
+# F2. Request timeout → CodexExecutionStatus.timeout
+# ---------------------------------------------------------------------------
+
+
+def test_api_timeout_returns_timeout_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A socket/urllib timeout must map to CodexExecutionStatus.timeout, not failed."""
+    import socket
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+
+    task = build_fix_task(_make_context(), "k1")
+    executor = DirectApiCodexExecutor(model="gpt-4o", timeout_seconds=1)
+    handle = executor.submit_fix_task(task)
+
+    with patch(
+        "ugh_quantamental.review_autofix.codex_executor.urllib.request.urlopen",
+        side_effect=socket.timeout("timed out"),
+    ):
+        result = executor.wait_for_result(handle)
+
+    assert result.status == CodexExecutionStatus.timeout
+
+
+# ---------------------------------------------------------------------------
+# F3. Empty choices array → malformed
+# ---------------------------------------------------------------------------
+
+
+def test_empty_choices_returns_malformed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An OpenAI response with an empty choices list must return malformed, not crash."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+
+    task = build_fix_task(_make_context(), "k1")
+    executor = DirectApiCodexExecutor(model="gpt-4o", timeout_seconds=30)
+    handle = executor.submit_fix_task(task)
+
+    empty_choices_resp = MagicMock()
+    empty_choices_resp.read.return_value = json.dumps({"choices": []}).encode()
+    empty_choices_resp.__enter__ = lambda s: s
+    empty_choices_resp.__exit__ = MagicMock(return_value=False)
+
+    with patch(
+        "ugh_quantamental.review_autofix.codex_executor.urllib.request.urlopen",
+        return_value=empty_choices_resp,
+    ):
+        result = executor.wait_for_result(handle)
+
+    assert result.status == CodexExecutionStatus.malformed
+
+
+# ---------------------------------------------------------------------------
 # G. Secret never leaks in logs
 # ---------------------------------------------------------------------------
 

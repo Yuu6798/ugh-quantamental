@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import re
+import socket
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -86,6 +87,9 @@ class DirectApiCodexExecutor:
         except urllib.error.HTTPError as exc:
             logger.warning("api executor: HTTP %s from OpenAI", exc.code)
             return CodexExecutionResult(CodexExecutionStatus.failed, False, f"api-http-{exc.code}")
+        except (TimeoutError, socket.timeout):
+            logger.warning("api executor: request timed out after %s s", self._timeout_seconds)
+            return CodexExecutionResult(CodexExecutionStatus.timeout, False, "api-timeout")
         except Exception as exc:
             logger.warning("api executor: request failed: %s", exc)
             return CodexExecutionResult(CodexExecutionStatus.failed, False, "api-call-failed")
@@ -93,7 +97,7 @@ class DirectApiCodexExecutor:
         try:
             content = response["choices"][0]["message"]["content"]
             changes = json.loads(content).get("changes", [])
-        except (KeyError, json.JSONDecodeError, TypeError) as exc:
+        except (KeyError, IndexError, json.JSONDecodeError, TypeError) as exc:
             logger.warning("api executor: malformed response: %s", exc)
             return CodexExecutionResult(CodexExecutionStatus.malformed, False, "malformed-api-response")
 
