@@ -87,6 +87,14 @@ class DirectApiCodexExecutor:
         except urllib.error.HTTPError as exc:
             logger.warning("api executor: HTTP %s from OpenAI", exc.code)
             return CodexExecutionResult(CodexExecutionStatus.failed, False, f"api-http-{exc.code}")
+        except urllib.error.URLError as exc:
+            # urllib wraps socket.timeout in URLError when the timeout fires
+            # inside the HTTP stack.  Unwrap and classify correctly.
+            if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+                logger.warning("api executor: request timed out after %s s", self._timeout_seconds)
+                return CodexExecutionResult(CodexExecutionStatus.timeout, False, "api-timeout")
+            logger.warning("api executor: URL error: %s", exc.reason)
+            return CodexExecutionResult(CodexExecutionStatus.failed, False, "api-call-failed")
         except (TimeoutError, socket.timeout):
             logger.warning("api executor: request timed out after %s s", self._timeout_seconds)
             return CodexExecutionResult(CodexExecutionStatus.timeout, False, "api-timeout")

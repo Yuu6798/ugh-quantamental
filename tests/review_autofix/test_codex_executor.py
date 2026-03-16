@@ -223,6 +223,30 @@ def test_api_timeout_returns_timeout_status(
     assert result.status == CodexExecutionStatus.timeout
 
 
+def test_urlerror_wrapped_timeout_returns_timeout_status(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A socket.timeout wrapped inside urllib.error.URLError must also map to timeout."""
+    import socket
+    import urllib.error
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+
+    task = build_fix_task(_make_context(), "k1")
+    executor = DirectApiCodexExecutor(model="gpt-4o", timeout_seconds=1)
+    handle = executor.submit_fix_task(task)
+
+    wrapped = urllib.error.URLError(reason=socket.timeout("timed out"))
+    with patch(
+        "ugh_quantamental.review_autofix.codex_executor.urllib.request.urlopen",
+        side_effect=wrapped,
+    ):
+        result = executor.wait_for_result(handle)
+
+    assert result.status == CodexExecutionStatus.timeout
+
+
 # ---------------------------------------------------------------------------
 # F3. Empty choices array → malformed
 # ---------------------------------------------------------------------------
