@@ -176,9 +176,11 @@ def _apply_changes(changes: list[dict]) -> None:
     cwd = Path.cwd().resolve()
     for change in changes:
         raw_path = change.get("path", "")
-        content = change.get("content", "")
+        content = change.get("content")
         if not raw_path or not isinstance(raw_path, str):
             raise ValueError(f"invalid path: {raw_path!r}")
+        if content is None or not isinstance(content, str):
+            raise ValueError(f"missing or non-string content for path {raw_path!r}")
         target = (cwd / raw_path).resolve()
         if not (str(target) + os.sep).startswith(str(cwd) + os.sep):
             raise ValueError(f"path traversal rejected: {raw_path!r}")

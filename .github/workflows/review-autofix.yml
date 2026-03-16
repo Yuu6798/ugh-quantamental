@@ -100,18 +100,33 @@ jobs:
           echo "BOT_MODE        : ${BOT_MODE}"
           echo "DRY_RUN         : ${DRY_RUN}"
           echo "EXECUTOR_MODEL  : ${EXECUTOR_MODEL}"
+          # Determine whether the executor will actually run.
+          # The paid completion probe is skipped in non-executing modes to
+          # avoid consuming model quota and rate-limit budget unnecessarily.
+          _will_execute=false
+          if [ "${BOT_MODE}" = "apply_and_push" ] || [ "${BOT_MODE}" = "apply_push_and_resolve" ]; then
+            _dry=$(printf '%s' "${DRY_RUN}" | tr '[:upper:]' '[:lower:]')
+            if [ "${_dry}" != "true" ] && [ "${_dry}" != "1" ] && [ "${_dry}" != "yes" ] && [ "${_dry}" != "on" ]; then
+              _will_execute=true
+            fi
+          fi
+
           if [ -z "${OPENAI_API_KEY}" ]; then
             echo "::warning::OPENAI_API_KEY is not set — executor will fail with openai-api-key-missing."
           else
             echo "OPENAI_API_KEY  : present"
-            _status=$(curl -s -o /dev/null -w "%{http_code}" \
-              -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-              -H "Content-Type: application/json" \
-              -d "{\"model\":\"${EXECUTOR_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}" \
-              https://api.openai.com/v1/chat/completions) || _status="curl-failed"
-            echo "POST /v1/chat/completions (${EXECUTOR_MODEL}) HTTP status: ${_status}"
-            if [ "${_status}" != "200" ]; then
-              echo "::warning::API key probe failed (status ${_status}) — check OPENAI_API_KEY secret and EXECUTOR_MODEL."
+            if [ "${_will_execute}" = "true" ]; then
+              _status=$(curl -s -o /dev/null -w "%{http_code}" \
+                -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "{\"model\":\"${EXECUTOR_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}" \
+                https://api.openai.com/v1/chat/completions) || _status="curl-failed"
+              echo "POST /v1/chat/completions (${EXECUTOR_MODEL}) HTTP status: ${_status}"
+              if [ "${_status}" != "200" ]; then
+                echo "::warning::API key probe failed (status ${_status}) — check OPENAI_API_KEY secret and EXECUTOR_MODEL."
+              fi
+            else
+              echo "API key probe   : skipped (BOT_MODE=${BOT_MODE} DRY_RUN=${DRY_RUN} — non-executing mode)"
             fi
           fi
           echo "=== preflight OK ==="

@@ -152,7 +152,7 @@ def test_malformed_response_returns_malformed(
 
 
 # ---------------------------------------------------------------------------
-# E. Path traversal rejected
+# E. Path traversal rejected / missing content rejected
 # ---------------------------------------------------------------------------
 
 
@@ -161,6 +161,23 @@ def test_path_traversal_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.chdir(tmp_path)
     with pytest.raises(ValueError, match="path traversal rejected"):
         _apply_changes([{"path": "../../etc/passwd", "content": "pwned"}])
+
+
+def test_missing_content_raises_value_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A change entry without a 'content' key must raise ValueError, not silently truncate."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "real.py").write_text("original", encoding="utf-8")
+    with pytest.raises(ValueError, match="missing or non-string content"):
+        _apply_changes([{"path": "real.py"}])
+    # File must not have been truncated.
+    assert (tmp_path / "real.py").read_text() == "original"
+
+
+def test_non_string_content_raises_value_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A change entry with non-string content (e.g. null) must raise ValueError."""
+    monkeypatch.chdir(tmp_path)
+    with pytest.raises(ValueError, match="missing or non-string content"):
+        _apply_changes([{"path": "real.py", "content": None}])
 
 
 # ---------------------------------------------------------------------------
