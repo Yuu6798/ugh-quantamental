@@ -13,8 +13,9 @@
 - **batch replay** — multi-run replay with per-run isolation and aggregate mismatch reporting
 - **regression suite** — named suite runner over batch replay cases with deterministic pass/fail reporting
 - **baseline / golden snapshot** — persist named suite results; compare future reruns against a pinned baseline
+- **fx_protocol** — FX daily prediction cycle: frozen contracts, calendar helpers, deterministic ID generation, daily forecast/outcome/evaluation workflows, GitHub Actions automation, and read-only weekly report aggregation
 
-Milestones 1–12 are complete. All code is deterministic, synchronous, and connector-free.
+Milestones 1–17 are complete. All code is deterministic, synchronous, and connector-free.
 
 ## Durable working rules
 
