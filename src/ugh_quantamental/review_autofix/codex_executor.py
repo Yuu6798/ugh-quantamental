@@ -104,7 +104,10 @@ class DirectApiCodexExecutor:
 
         try:
             content = response["choices"][0]["message"]["content"]
-            changes = json.loads(content).get("changes", [])
+            parsed = json.loads(content)
+            if not isinstance(parsed, dict):
+                raise TypeError(f"expected JSON object, got {type(parsed).__name__}")
+            changes = parsed.get("changes", [])
         except (KeyError, IndexError, json.JSONDecodeError, TypeError) as exc:
             logger.warning("api executor: malformed response: %s", exc)
             return CodexExecutionResult(CodexExecutionStatus.malformed, False, "malformed-api-response")

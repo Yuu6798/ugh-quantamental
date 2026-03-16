@@ -295,6 +295,43 @@ def test_empty_choices_returns_malformed(
 
 
 # ---------------------------------------------------------------------------
+# F4. Non-object JSON payload → malformed
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("payload", ['[]', '"just a string"', '42', 'null'])
+def test_non_object_json_returns_malformed(
+    payload: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Valid JSON that is not a dict (list, string, number, null) must return malformed.
+
+    json.loads(content).get(...) raises AttributeError on non-dict types; the fix
+    adds an explicit isinstance check that raises TypeError before .get() is called.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key")
+
+    task = build_fix_task(_make_context(), "k1")
+    executor = DirectApiCodexExecutor(model="gpt-4o", timeout_seconds=30)
+    handle = executor.submit_fix_task(task)
+
+    resp = MagicMock()
+    resp.read.return_value = json.dumps({
+        "choices": [{"message": {"content": payload}}]
+    }).encode()
+    resp.__enter__ = lambda s: s
+    resp.__exit__ = MagicMock(return_value=False)
+
+    with patch(
+        "ugh_quantamental.review_autofix.codex_executor.urllib.request.urlopen",
+        return_value=resp,
+    ):
+        result = executor.wait_for_result(handle)
+
+    assert result.status == CodexExecutionStatus.malformed
+
+
+# ---------------------------------------------------------------------------
 # G. Secret never leaks in logs
 # ---------------------------------------------------------------------------
 
