@@ -166,7 +166,8 @@ def _read_target_file(prompt: str) -> str | None:
         if not (str(target) + os.sep).startswith(str(cwd) + os.sep):
             return None
         return target.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    except (OSError, UnicodeDecodeError, RuntimeError):
+        # RuntimeError is raised by Path.resolve() on symlink loops.
         return None
 
 

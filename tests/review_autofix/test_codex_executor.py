@@ -398,3 +398,20 @@ def test_read_target_file_returns_none_for_binary_file(
 
     prompt = build_fix_task(_make_context("data.py"), "k1").prompt
     assert _read_target_file(prompt) is None
+
+
+def test_read_target_file_returns_none_on_symlink_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A symlink loop must return None, not raise RuntimeError.
+
+    Path.resolve() raises RuntimeError when it encounters an infinite symlink
+    cycle.  Without catching RuntimeError the bot would crash rather than
+    return a structured failure.
+    """
+    monkeypatch.chdir(tmp_path)
+    loop = tmp_path / "loop.py"
+    loop.symlink_to(loop)  # self-referencing symlink → loop
+
+    prompt = build_fix_task(_make_context("loop.py"), "k1").prompt
+    assert _read_target_file(prompt) is None
