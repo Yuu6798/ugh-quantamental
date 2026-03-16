@@ -934,3 +934,80 @@ def test_run_weekly_report_false_positive_cases_ordered(db_session: Any) -> None
     assert len(result.false_positive_cases) >= 1
     for case in result.false_positive_cases:
         assert case.strategy_kind == StrategyKind.ugh
+
+
+# ---------------------------------------------------------------------------
+# Regression tests for review fixes
+# ---------------------------------------------------------------------------
+
+
+def test_case_sort_deterministic_on_equal_keys_false_positive() -> None:
+    """Rows with identical conviction/error are broken by forecast_id — output is deterministic."""
+    rows = [
+        _make_weekly_row(direction_hit=False, conviction=0.7, close_error_bp=10.0, forecast_id="z_last"),
+        _make_weekly_row(direction_hit=False, conviction=0.7, close_error_bp=10.0, forecast_id="a_first"),
+    ]
+    cases_a = _select_false_positive_cases(rows, max_examples=2)
+    cases_b = _select_false_positive_cases(list(reversed(rows)), max_examples=2)
+    # Order must be identical regardless of input order: tie broken by forecast_id ascending.
+    assert cases_a[0].forecast_id == cases_b[0].forecast_id == "a_first"
+    assert cases_a[1].forecast_id == cases_b[1].forecast_id == "z_last"
+
+
+def test_case_sort_deterministic_on_equal_keys_successes() -> None:
+    """Representative successes tie-break by forecast_id for deterministic output."""
+    rows = [
+        _make_weekly_row(direction_hit=True, conviction=0.7, close_error_bp=5.0, forecast_id="z_last"),
+        _make_weekly_row(direction_hit=True, conviction=0.7, close_error_bp=5.0, forecast_id="a_first"),
+    ]
+    cases_a = _select_representative_successes(rows, max_examples=2)
+    cases_b = _select_representative_successes(list(reversed(rows)), max_examples=2)
+    assert cases_a[0].forecast_id == cases_b[0].forecast_id == "a_first"
+    assert cases_a[1].forecast_id == cases_b[1].forecast_id == "z_last"
+
+
+def test_case_sort_deterministic_on_equal_keys_failures() -> None:
+    """Representative failures tie-break by forecast_id for deterministic output."""
+    rows = [
+        _make_weekly_row(direction_hit=False, conviction=0.7, close_error_bp=10.0, forecast_id="z_last"),
+        _make_weekly_row(direction_hit=False, conviction=0.7, close_error_bp=10.0, forecast_id="a_first"),
+    ]
+    cases_a = _select_representative_failures(rows, max_examples=2)
+    cases_b = _select_representative_failures(list(reversed(rows)), max_examples=2)
+    assert cases_a[0].forecast_id == cases_b[0].forecast_id == "a_first"
+    assert cases_a[1].forecast_id == cases_b[1].forecast_id == "z_last"
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_included_window_count_uses_eval_records_not_join(db_session: Any) -> None:
+    """Window inclusion is based on FxEvaluationRecord rows, not on the fc/oc join result.
+
+    If an evaluation record exists but its forecast is absent from FxForecastRecord
+    (a dangling eval), the window must still be counted as included so that the fc/oc
+    join filter cannot cause a window to be misclassified as missing.
+    """
+    from ugh_quantamental.fx_protocol.reporting import run_weekly_report
+
+    # Seed one full window so we have eval + forecast + outcome.
+    _seed_window(db_session, _WINDOWS[0][0], _WINDOWS[0][1], 0)
+
+    # Now orphan all forecast records for that window by deleting them.
+    # This simulates the "dangling evaluation record" scenario.
+    from sqlalchemy import delete
+
+    db_session.execute(delete(FxFcORM).where(FxFcORM.forecast_batch_id == "batch_0"))
+    db_session.flush()
+
+    # The window still has evaluation records in the DB even though forecasts are gone.
+    # included_window_count must be 1 (not 0), and run_weekly_report must not raise.
+    request = WeeklyReportRequest(
+        pair=CurrencyPair.USDJPY,
+        report_generated_at_jst=datetime(2026, 3, 16, 10, 0, 0, tzinfo=_JST),
+        business_day_count=5,
+    )
+    result = run_weekly_report(db_session, request)
+    assert result.included_window_count == 1
+    assert result.missing_window_count == 4
+    # No joinable rows → strategy_metrics have forecast_count = 0 (metrics are empty)
+    ugh_m = next(m for m in result.strategy_metrics if m.strategy_kind == StrategyKind.ugh)
+    assert ugh_m.forecast_count == 0

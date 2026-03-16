@@ -162,11 +162,19 @@ def _load_weekly_rows(
     session: "Session",
     pair_value: str,
     naive_utc_windows: tuple[datetime, ...],
-) -> list[_WeeklyRow]:
+) -> tuple[list[_WeeklyRow], frozenset[datetime]]:
     """Load and join evaluation, forecast, and outcome records for the given windows.
 
     All three record types are fetched in batch queries (no N+1).
     Records with missing forecast or outcome counterparts are silently skipped.
+
+    Returns
+    -------
+    tuple[list[_WeeklyRow], frozenset[datetime]]
+        Joined rows and the set of naive-UTC ``window_end_jst`` values that had at
+        least one evaluation record in ``FxEvaluationRecord`` (determined before the
+        forecast/outcome join filter so that window-inclusion counting is not affected
+        by dangling evaluation records).
     """
     from sqlalchemy import select
 
@@ -186,7 +194,7 @@ def _load_weekly_rows(
         ).scalars()
     )
     if not eval_orms:
-        return []
+        return [], frozenset()
 
     # 2. Forecast records (one batch query).
     forecast_ids = {r.forecast_id for r in eval_orms}
@@ -205,6 +213,13 @@ def _load_weekly_rows(
             select(FxOutcomeRecord).where(FxOutcomeRecord.outcome_id.in_(outcome_ids))
         ).scalars()
     }
+
+    # Record which naive-UTC window_end values have at least one evaluation record in the DB
+    # *before* the forecast/outcome join filter.  This is the authoritative signal for
+    # "window has data" — independent of whether the fc/oc join succeeds.
+    eval_windows_naive_utc: frozenset[datetime] = frozenset(
+        r.window_end_jst for r in eval_orms
+    )
 
     rows: list[_WeeklyRow] = []
     for eval_orm in eval_orms:
@@ -237,7 +252,7 @@ def _load_weekly_rows(
                 realized_close_change_bp=oc.realized_close_change_bp,
             )
         )
-    return rows
+    return rows, eval_windows_naive_utc
 
 
 # ---------------------------------------------------------------------------
@@ -408,9 +423,13 @@ def _select_false_positive_cases(
     ugh_rows: list[_WeeklyRow],
     max_examples: int,
 ) -> tuple[WeeklyCaseExample, ...]:
-    """UGH rows where direction_hit == False; sort by desc conviction, desc close_error_bp."""
+    """UGH rows where direction_hit == False; sort by desc conviction, desc close_error_bp.
+
+    ``forecast_id`` is used as a final tie-breaker to guarantee deterministic output
+    regardless of the upstream DB query order.
+    """
     fp = [r for r in ugh_rows if not r.direction_hit]
-    fp.sort(key=lambda r: (-(r.conviction or 0.0), -(r.close_error_bp or 0.0)))
+    fp.sort(key=lambda r: (-(r.conviction or 0.0), -(r.close_error_bp or 0.0), r.forecast_id))
     return tuple(_make_case_example(r) for r in fp[:max_examples])
 
 
@@ -418,9 +437,13 @@ def _select_representative_successes(
     ugh_rows: list[_WeeklyRow],
     max_examples: int,
 ) -> tuple[WeeklyCaseExample, ...]:
-    """UGH rows where direction_hit == True; sort by desc conviction, asc close_error_bp."""
+    """UGH rows where direction_hit == True; sort by desc conviction, asc close_error_bp.
+
+    ``forecast_id`` is used as a final tie-breaker to guarantee deterministic output
+    regardless of the upstream DB query order.
+    """
     hits = [r for r in ugh_rows if r.direction_hit]
-    hits.sort(key=lambda r: (-(r.conviction or 0.0), r.close_error_bp or 0.0))
+    hits.sort(key=lambda r: (-(r.conviction or 0.0), r.close_error_bp or 0.0, r.forecast_id))
     return tuple(_make_case_example(r) for r in hits[:max_examples])
 
 
@@ -428,9 +451,15 @@ def _select_representative_failures(
     ugh_rows: list[_WeeklyRow],
     max_examples: int,
 ) -> tuple[WeeklyCaseExample, ...]:
-    """UGH rows where direction_hit == False; sort by desc abs close_error_bp, desc conviction."""
+    """UGH rows where direction_hit == False; sort by desc abs close_error_bp, desc conviction.
+
+    ``forecast_id`` is used as a final tie-breaker to guarantee deterministic output
+    regardless of the upstream DB query order.
+    """
     fails = [r for r in ugh_rows if not r.direction_hit]
-    fails.sort(key=lambda r: (-(r.close_error_bp or 0.0), -(r.conviction or 0.0)))
+    fails.sort(
+        key=lambda r: (-(r.close_error_bp or 0.0), -(r.conviction or 0.0), r.forecast_id)
+    )
     return tuple(_make_case_example(r) for r in fails[:max_examples])
 
 
@@ -461,13 +490,14 @@ def run_weekly_report(session: "Session", request: WeeklyReportRequest) -> Weekl
     naive_utc_windows = tuple(_jst_to_naive_utc(dt) for dt in window_ends_jst)
 
     # 3. Load all rows for this pair + window set.
-    all_rows = _load_weekly_rows(session, request.pair.value, naive_utc_windows)
+    all_rows, eval_windows_naive_utc = _load_weekly_rows(
+        session, request.pair.value, naive_utc_windows
+    )
 
     # 4. Determine which windows have data.
-    naive_jst_with_data = {_to_jst_naive(r.window_end_jst) for r in all_rows}
-    included_window_count = sum(
-        1 for w in window_ends_jst if _to_jst_naive(w) in naive_jst_with_data
-    )
+    # Use the raw DB evaluation-record window set (before the fc/oc join filter) so that
+    # dangling evaluation records do not misclassify a window as missing.
+    included_window_count = sum(1 for w in naive_utc_windows if w in eval_windows_naive_utc)
     missing_window_count = request.business_day_count - included_window_count
 
     if included_window_count == 0:
