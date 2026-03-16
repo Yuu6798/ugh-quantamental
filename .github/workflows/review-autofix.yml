@@ -108,7 +108,7 @@ jobs:
               -H "Authorization: Bearer ${OPENAI_API_KEY}" \
               -H "Content-Type: application/json" \
               -d "{\"model\":\"${EXECUTOR_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}" \
-              https://api.openai.com/v1/chat/completions)
+              https://api.openai.com/v1/chat/completions) || _status="curl-failed"
             echo "POST /v1/chat/completions (${EXECUTOR_MODEL}) HTTP status: ${_status}"
             if [ "${_status}" != "200" ]; then
               echo "::warning::API key probe failed (status ${_status}) — check OPENAI_API_KEY secret and EXECUTOR_MODEL."
