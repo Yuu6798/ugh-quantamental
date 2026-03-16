@@ -296,6 +296,51 @@ def run_fx_daily_protocol_once(
         # Both workflows are idempotent; any completion here counts as "recorded".
         outcome_recorded = True
 
+    # --- Step 5: CSV exports ---
+    forecast_csv_path: str | None = None
+    outcome_csv_path: str | None = None
+    evaluation_csv_path: str | None = None
+
+    if config.write_csv_exports and forecast_batch_id is not None:
+        from ugh_quantamental.fx_protocol.csv_exports import (
+            export_daily_evaluation_csv,
+            export_daily_forecast_csv,
+            export_daily_outcome_csv,
+        )
+        from ugh_quantamental.persistence.repositories import (
+            FxForecastRepository,
+            FxOutcomeEvaluationRepository,
+        )
+
+        batch = FxForecastRepository.load_fx_forecast_batch(session, forecast_batch_id)
+        if batch is not None and batch.forecasts:
+            forecast_csv_path = export_daily_forecast_csv(
+                batch.forecasts,
+                as_of_jst,
+                config.pair.value,
+                config.csv_output_dir,
+            )
+
+        if outcome_id is not None:
+            outcome_rec = FxOutcomeEvaluationRepository.load_fx_outcome_record(
+                session, outcome_id
+            )
+            outcome_csv_path = export_daily_outcome_csv(
+                outcome_rec,
+                as_of_jst,
+                config.pair.value,
+                config.csv_output_dir,
+            )
+            eval_batch = FxOutcomeEvaluationRepository.load_fx_evaluation_batch(
+                session, outcome_id
+            )
+            evaluation_csv_path = export_daily_evaluation_csv(
+                eval_batch,
+                as_of_jst,
+                config.pair.value,
+                config.csv_output_dir,
+            )
+
     return FxDailyAutomationResult(
         as_of_jst=as_of_jst,
         forecast_batch_id=forecast_batch_id,
@@ -304,4 +349,7 @@ def run_fx_daily_protocol_once(
         outcome_recorded=outcome_recorded,
         evaluation_count=evaluation_count,
         data_commit_created=False,  # set by the script after git operations
+        forecast_csv_path=forecast_csv_path,
+        outcome_csv_path=outcome_csv_path,
+        evaluation_csv_path=evaluation_csv_path,
     )

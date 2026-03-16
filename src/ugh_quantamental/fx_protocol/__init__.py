@@ -34,6 +34,19 @@ from ugh_quantamental.fx_protocol.automation_models import (
     FxDailyAutomationConfig,
     FxDailyAutomationResult,
 )
+from ugh_quantamental.fx_protocol.csv_exports import (
+    EVALUATION_FIELDNAMES,
+    FORECAST_FIELDNAMES,
+    OUTCOME_FIELDNAMES,
+    evaluation_records_to_rows,
+    export_daily_evaluation_csv,
+    export_daily_forecast_csv,
+    export_daily_outcome_csv,
+    forecast_records_to_rows,
+    make_daily_csv_stem,
+    outcome_record_to_rows,
+    write_csv_rows,
+)
 from ugh_quantamental.fx_protocol.data_models import (
     FxCompletedWindow,
     FxProtocolMarketSnapshot,
@@ -78,4 +91,16 @@ __all__ = [
     "WeeklyMismatchSummary",
     "WeeklyReportRequest",
     "WeeklyReportResult",
+    # csv_exports
+    "EVALUATION_FIELDNAMES",
+    "FORECAST_FIELDNAMES",
+    "OUTCOME_FIELDNAMES",
+    "evaluation_records_to_rows",
+    "export_daily_evaluation_csv",
+    "export_daily_forecast_csv",
+    "export_daily_outcome_csv",
+    "forecast_records_to_rows",
+    "make_daily_csv_stem",
+    "outcome_record_to_rows",
+    "write_csv_rows",
 ]
