@@ -13,6 +13,8 @@ Minimal Python 3.11+ library implementing deterministic quantamental engines wit
 - **Batch replay** — multi-run replay in one call: per-run isolation, aggregate mismatch / error / missing counts, optional deduplication
 - **Regression suite** — named suite runner over batch replay cases: deterministic pass/fail per case, zero-run guard prevents false-positive green results
 - **Baseline / golden snapshot** — persist a named suite result; compare future reruns against the pinned baseline; per-`(group, name)` case deltas with exact-match and aggregate-diff reporting
+- **FX daily protocol** — frozen contracts (`ForecastRecord`, `OutcomeRecord`, `EvaluationRecord`), deterministic calendar helpers (`resolve_completed_window_ends`), deterministic ID generation, daily forecast/outcome/evaluation workflows, and GitHub Actions automation
+- **Weekly FX report** — read-only `run_weekly_report` aggregates a configurable number of completed protocol windows into strategy metrics, baseline comparisons, state/GRV/mismatch summaries, and curated case examples; `WeeklyReportRequest` / `WeeklyReportResult` frozen models with JST-canonical timestamp normalization
 - **Frozen schema contracts** — all data models use `ConfigDict(extra="forbid", frozen=True)`; invariants enforced at construction time
 - **Pure engine functions** — same inputs always produce the same output; no globals, no mutation, no I/O
 
@@ -55,18 +57,29 @@ src/ugh_quantamental/
 ├── query/                # read-only inspection layer
 │   ├── models.py          # ProjectionRunQuery, StateRunQuery, *Summary, *Bundle
 │   └── readers.py         # list_*_summaries, get_*_bundle
-└── replay/               # deterministic replay / regression / baseline layer
-    ├── models.py          # *ReplayRequest, *ReplayComparison, *ReplayResult
-    ├── runners.py         # replay_projection_run, replay_state_run
-    ├── batch_models.py    # *BatchReplayRequest/Item/Aggregate/Result, BatchReplayStatus
-    ├── batch.py           # replay_projection_batch, replay_state_batch
-    ├── suite_models.py    # *SuiteCase, RegressionSuiteRequest/Aggregate/Result
-    ├── suites.py          # run_regression_suite
-    ├── baseline_models.py # Create/CompareRequest, RegressionSuiteBaseline, *Comparison, *Delta
-    └── baselines.py       # make_baseline_id, create/get/compare_regression_baseline
+├── replay/               # deterministic replay / regression / baseline layer
+│   ├── models.py          # *ReplayRequest, *ReplayComparison, *ReplayResult
+│   ├── runners.py         # replay_projection_run, replay_state_run
+│   ├── batch_models.py    # *BatchReplayRequest/Item/Aggregate/Result, BatchReplayStatus
+│   ├── batch.py           # replay_projection_batch, replay_state_batch
+│   ├── suite_models.py    # *SuiteCase, RegressionSuiteRequest/Aggregate/Result
+│   ├── suites.py          # run_regression_suite
+│   ├── baseline_models.py # Create/CompareRequest, RegressionSuiteBaseline, *Comparison, *Delta
+│   └── baselines.py       # make_baseline_id, create/get/compare_regression_baseline
+└── fx_protocol/          # FX daily prediction cycle (Phase 2, Milestones 13–17)
+    ├── models.py          # ForecastRecord, OutcomeRecord, EvaluationRecord, CurrencyPair, …
+    ├── ids.py             # deterministic ID generation
+    ├── calendar.py        # resolve_completed_window_ends, business-day helpers
+    ├── forecast_models.py # DailyForecastWorkflowRequest, DailyForecastBatch, …
+    ├── outcome_models.py  # DailyOutcomeWorkflowRequest, PersistedOutcomeEvaluationBatch
+    ├── data_models.py     # FxCompletedWindow, FxProtocolMarketSnapshot
+    ├── automation_models.py  # FxDailyAutomationConfig, FxDailyAutomationResult
+    ├── report_models.py   # WeeklyReportRequest/Result, StrategyWeeklyMetrics, …
+    └── reporting.py       # run_weekly_report (read-only)
 
 alembic/                  # Alembic migration environment
 docs/specs/               # formal v1 specifications
+scripts/                  # run_fx_daily_protocol.py — CLI entry point for automation
 tests/                    # mirrors src layout
 ```
 
@@ -215,6 +228,46 @@ if result is not None:
     print(result.comparison.passed_case_count_diff)  # 0 if no change in passing cases
 ```
 
+### Weekly FX report (read-only aggregation)
+
+```python
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+from ugh_quantamental.fx_protocol.models import CurrencyPair
+from ugh_quantamental.fx_protocol.report_models import WeeklyReportRequest
+from ugh_quantamental.fx_protocol.reporting import run_weekly_report
+
+_JST = ZoneInfo("Asia/Tokyo")
+
+req = WeeklyReportRequest(
+    pair=CurrencyPair.USDJPY,
+    report_generated_at_jst=datetime(2026, 3, 16, 10, 0, 0, tzinfo=_JST),
+    business_day_count=5,   # last 5 completed protocol windows
+    max_examples=3,         # up to 3 curated case examples per category
+)
+result = run_weekly_report(session, req)   # read-only — no writes or flushes
+
+# Strategy-level metrics
+for m in result.strategy_metrics:
+    print(m.strategy_kind, m.direction_accuracy, m.mean_abs_close_error_bp)
+
+# UGH vs baseline comparison
+for c in result.baseline_comparisons:
+    print(c.baseline_strategy_kind, c.direction_accuracy_delta_vs_ugh)
+
+# Per-lifecycle-state breakdown
+for s in result.state_metrics:
+    print(s.dominant_state, s.forecast_count, s.direction_accuracy)
+
+# GRV-lock fire vs non-fire split
+print(result.grv_fire_summary.mean_grv_lock_fire)
+
+# Curated case examples
+for ex in result.false_positive_cases:
+    print(ex.forecast_id, ex.close_error_bp, ex.conviction)
+```
+
 ## Development
 
 ```bash
@@ -240,6 +293,11 @@ Formal v1 specs live in `docs/specs/`:
 | `ugh_batch_replay_v1.md` | Batch replay / experiment runner (Milestone 10) |
 | `ugh_regression_suite_v1.md` | Regression suite runner and pass/fail policy (Milestone 11) |
 | `ugh_baseline_v1.md` | Baseline / golden snapshot management and comparison policy (Milestone 12) |
+| `fx_daily_protocol_v1.md` | FX daily protocol contracts, calendar helpers, and ID generation (Milestone 13) |
+| `fx_daily_forecast_workflow_v1.md` | Daily forecast workflow: UGH + 3 baselines, idempotency (Milestone 14) |
+| `fx_daily_outcome_evaluation_workflow_v1.md` | Daily outcome/evaluation workflow (Milestone 15) |
+| `fx_daily_automation_v1.md` | GitHub Actions automation and durable SQLite data branch (Milestone 16) |
+| `fx_weekly_report_v1.md` | Read-only weekly report: window selection, metrics, baseline comparison, case examples (Milestone 17) |
 
 ## FX Daily Protocol automation (Milestone 16)
 
@@ -301,7 +359,7 @@ the code branch; data commits do not trigger CI.
 
 ### What is still out of scope (v1)
 
-- Weekly and monthly reporting
+- Monthly reporting (next milestone)
 - Multi-pair support beyond USDJPY
 - Intraday or high-frequency data
 - External broker integration
@@ -316,7 +374,7 @@ The following are intentionally not implemented:
 - REST/gRPC service layer
 - Async execution or background jobs
 - Intra-day or high-frequency signal handling
-- Weekly/monthly reporting (next milestone)
+- Monthly reporting (next milestone)
 
 ## PR review auto-fix bot (same PR branch)
 

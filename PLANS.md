@@ -20,14 +20,15 @@
 | 14 | FX Daily Forecast Workflow | `run_daily_forecast_workflow`: generates and persists one UGH + three baseline forecasts per business day; idempotent |
 | 15 | FX Daily Outcome/Evaluation Workflow | `run_daily_outcome_evaluation_workflow`: records the canonical outcome and four per-forecast evaluations; idempotent |
 | 16 | FX Daily Automation | `run_fx_daily_protocol_once`: data-source abstraction, deterministic request builders, GitHub Actions daily schedule, durable SQLite via `fx-daily-data` git branch |
+| 17 | FX Weekly Report | Read-only `run_weekly_report`: aggregates persisted evaluation records into strategy metrics, baseline comparisons, state/GRV/mismatch summaries, and curated case examples; `WeeklyReportRequest` / `WeeklyReportResult` frozen models; JST-canonical `report_generated_at_jst` field |
 
 ## Next up
 
-**Milestone 17 — Weekly FX reporting**
+**Milestone 18 — Monthly FX reporting**
 
-Aggregate per-day evaluation records (direction hit rate, MAE, range hit rate) into
-a weekly summary report for USDJPY.  Requires: a reporting layer function, a formal
-spec in `docs/specs/`, and a scheduled GitHub Actions step that runs on Saturdays.
+Aggregate weekly report outputs into a monthly performance review for USDJPY.
+Requires: a monthly reporting layer, a formal spec in `docs/specs/`, and an
+optional scheduled GitHub Actions step.
 
 ## Validation commands
 
