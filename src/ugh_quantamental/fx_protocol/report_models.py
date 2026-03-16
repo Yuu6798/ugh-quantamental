@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ugh_quantamental.fx_protocol.models import (
     CurrencyPair,
     ForecastDirection,
     StrategyKind,
+    _to_jst,
 )
 from ugh_quantamental.schemas.enums import LifecycleState
 
@@ -28,6 +29,19 @@ class WeeklyReportRequest(BaseModel):
     report_generated_at_jst: datetime
     business_day_count: int = Field(default=5, ge=1)
     max_examples: int = Field(default=3, ge=1)
+
+    @field_validator("report_generated_at_jst")
+    @classmethod
+    def _normalize_report_generated_at_jst(cls, v: datetime) -> datetime:
+        """Canonicalize report_generated_at_jst to a JST-aware datetime on ingestion.
+
+        Without normalization, a UTC-aware or naive input would carry a timezone
+        inconsistent with the ``*_jst`` field name, causing the result's
+        ``report_generated_at_jst`` to represent a different instant in JST than
+        the window-resolution logic computed.  Naive inputs are treated as already
+        in JST, matching the ``ids.py`` / ``models.py`` policy throughout this package.
+        """
+        return _to_jst(v)
 
 
 class StrategyWeeklyMetrics(BaseModel):

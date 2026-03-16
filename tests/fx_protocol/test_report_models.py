@@ -67,6 +67,44 @@ def test_weekly_report_request_invalid_max_examples(max_examples: int) -> None:
         )
 
 
+def test_weekly_report_request_normalizes_utc_to_jst() -> None:
+    """UTC-aware input is normalized to JST-aware so the *_jst field is canonical."""
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+
+    _JST = ZoneInfo("Asia/Tokyo")
+    # 2026-03-16 01:00 UTC == 2026-03-16 10:00 JST
+    utc_input = datetime(2026, 3, 16, 1, 0, 0, tzinfo=timezone.utc)
+    req = WeeklyReportRequest(pair=CurrencyPair.USDJPY, report_generated_at_jst=utc_input)
+    assert req.report_generated_at_jst.tzinfo is not None
+    assert req.report_generated_at_jst == datetime(2026, 3, 16, 10, 0, 0, tzinfo=_JST)
+
+
+def test_weekly_report_request_normalizes_naive_to_jst() -> None:
+    """Naive input is treated as already in JST and given explicit JST tzinfo."""
+    from zoneinfo import ZoneInfo
+
+    _JST = ZoneInfo("Asia/Tokyo")
+    naive = datetime(2026, 3, 16, 10, 0, 0)  # no tzinfo
+    req = WeeklyReportRequest(pair=CurrencyPair.USDJPY, report_generated_at_jst=naive)
+    assert req.report_generated_at_jst.tzinfo is not None
+    assert req.report_generated_at_jst == datetime(2026, 3, 16, 10, 0, 0, tzinfo=_JST)
+
+
+def test_weekly_report_request_result_carries_normalized_timestamp() -> None:
+    """WeeklyReportResult.report_generated_at_jst reflects the normalized JST value."""
+    from datetime import timezone
+    from zoneinfo import ZoneInfo
+
+    _JST = ZoneInfo("Asia/Tokyo")
+    # Same instant, different input forms — both must produce the same normalized field.
+    utc_input = datetime(2026, 3, 16, 1, 0, 0, tzinfo=timezone.utc)
+    jst_input = datetime(2026, 3, 16, 10, 0, 0, tzinfo=_JST)
+    req_utc = WeeklyReportRequest(pair=CurrencyPair.USDJPY, report_generated_at_jst=utc_input)
+    req_jst = WeeklyReportRequest(pair=CurrencyPair.USDJPY, report_generated_at_jst=jst_input)
+    assert req_utc.report_generated_at_jst == req_jst.report_generated_at_jst
+
+
 def test_weekly_report_request_frozen() -> None:
     req = WeeklyReportRequest(pair=CurrencyPair.USDJPY, report_generated_at_jst=_NOW)
     with pytest.raises(Exception):
