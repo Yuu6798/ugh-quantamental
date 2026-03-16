@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
-import shlex
-import subprocess
+import re
+import socket
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -11,6 +14,18 @@ from typing import Protocol
 from .executor_models import CodexApplyResult, CodexExecutionResult, CodexExecutionStatus, CodexFixTask, CodexTaskHandle
 
 logger = logging.getLogger(__name__)
+
+_MAX_FILE_CHARS = 20_000  # cap injected file content to avoid exceeding model context limits
+
+_SYSTEM_PROMPT = """\
+You are an automated code fixer working inside a git checkout.
+Apply the minimal fix described in the review finding.
+You MUST respond with ONLY a JSON object in this exact format:
+{"changes": [{"path": "relative/path/to/file", "content": "...complete new file content..."}]}
+Use the exact file path from the "Target location: file:" line in the task.
+Do not add explanations, markdown fences, or extra keys.
+If no code change is needed, return: {"changes": []}
+"""
 
 
 class CodexExecutor(Protocol):
@@ -26,9 +41,16 @@ class _SubmittedTask:
     task: CodexFixTask
 
 
-class LocalSubprocessCodexExecutor:
-    def __init__(self, command: str | None, timeout_seconds: int) -> None:
-        self._command = (command or "").strip()
+class DirectApiCodexExecutor:
+    """Calls the OpenAI chat completions API directly to generate and apply code fixes.
+
+    Uses ``/v1/chat/completions`` with JSON mode.  The model returns a structured
+    ``{"changes": [...]}`` object; this executor writes the changed files to disk.
+    No external CLI dependency — authentication is read from ``OPENAI_API_KEY``.
+    """
+
+    def __init__(self, model: str, timeout_seconds: int) -> None:
+        self._model = model
         self._timeout_seconds = timeout_seconds
         self._submitted: dict[str, _SubmittedTask] = {}
 
@@ -40,63 +62,167 @@ class LocalSubprocessCodexExecutor:
         submitted = self._submitted.get(handle.task_id)
         if submitted is None:
             return CodexExecutionResult(CodexExecutionStatus.malformed, False, "unknown-task")
-        if not self._command:
-            return CodexExecutionResult(CodexExecutionStatus.failed, False, "codex-command-not-configured")
 
-        prompt_path = Path(".autofix-bot") / f"codex-task-{handle.task_id}.txt"
-        prompt_path.parent.mkdir(parents=True, exist_ok=True)
-        prompt_path.write_text(submitted.task.prompt, encoding="utf-8")
+        api_key = os.environ.get("OPENAI_API_KEY", "")
+        if not api_key:
+            return CodexExecutionResult(CodexExecutionStatus.failed, False, "openai-api-key-missing")
 
-        env = os.environ.copy()
-        # Explicitly preserve OPENAI_API_KEY so the Codex subprocess always
-        # receives it.  os.environ.copy() already includes it when present, but
-        # the explicit assignment makes the dependency visible and ensures it
-        # cannot be accidentally dropped by future refactors.
-        if "OPENAI_API_KEY" in os.environ:
-            env["OPENAI_API_KEY"] = os.environ["OPENAI_API_KEY"]
-        env["CODEX_TASK_FILE"] = str(prompt_path)
+        task = submitted.task
+        user_content = _build_user_content(task)
 
-        # Safe diagnostics — values are never logged.
-        # Use shlex.split for shell-aware tokenization so that quoted values
-        # (e.g. SECRET='top secret' codex …) are handled correctly before we
-        # skip leading KEY=value env-prefix tokens to find the binary name.
-        try:
-            _tokens = shlex.split(self._command) if self._command else []
-        except ValueError:
-            _tokens = []
-        _bin = next(
-            (t for t in _tokens if not ("=" in t and t.split("=", 1)[0].replace("_", "").isalnum())),
-            "(none)",
-        )
         logger.debug(
-            "codex executor launch: binary=%r OPENAI_API_KEY_present=%s CODEX_TASK_FILE=%s",
-            _bin,
-            "OPENAI_API_KEY" in env,
-            env.get("CODEX_TASK_FILE"),
+            "api executor: model=%r task_id=%r OPENAI_API_KEY_present=True",
+            self._model,
+            task.task_id,
         )
 
         try:
-            proc = subprocess.run(
-                self._command,
-                shell=True,
-                check=False,
+            response = _call_openai_chat(
+                api_key=api_key,
+                model=self._model,
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
                 timeout=self._timeout_seconds,
-                env=env,
             )
-        except subprocess.TimeoutExpired:
-            return CodexExecutionResult(CodexExecutionStatus.timeout, False, "codex-timeout")
+        except urllib.error.HTTPError as exc:
+            logger.warning("api executor: HTTP %s from OpenAI", exc.code)
+            return CodexExecutionResult(CodexExecutionStatus.failed, False, f"api-http-{exc.code}")
+        except urllib.error.URLError as exc:
+            # urllib wraps socket.timeout in URLError when the timeout fires
+            # inside the HTTP stack.  Unwrap and classify correctly.
+            if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+                logger.warning("api executor: request timed out after %s s", self._timeout_seconds)
+                return CodexExecutionResult(CodexExecutionStatus.timeout, False, "api-timeout")
+            logger.warning("api executor: URL error: %s", exc.reason)
+            return CodexExecutionResult(CodexExecutionStatus.failed, False, "api-call-failed")
+        except (TimeoutError, socket.timeout):
+            logger.warning("api executor: request timed out after %s s", self._timeout_seconds)
+            return CodexExecutionResult(CodexExecutionStatus.timeout, False, "api-timeout")
+        except Exception as exc:
+            logger.warning("api executor: request failed: %s", exc)
+            return CodexExecutionResult(CodexExecutionStatus.failed, False, "api-call-failed")
 
-        if proc.returncode != 0:
-            return CodexExecutionResult(CodexExecutionStatus.failed, False, f"codex-command-exit-{proc.returncode}")
+        try:
+            content = response["choices"][0]["message"]["content"]
+            parsed = json.loads(content)
+            if not isinstance(parsed, dict):
+                raise TypeError(f"expected JSON object, got {type(parsed).__name__}")
+            changes = parsed.get("changes", [])
+        except (KeyError, IndexError, json.JSONDecodeError, TypeError) as exc:
+            logger.warning("api executor: malformed response: %s", exc)
+            return CodexExecutionResult(CodexExecutionStatus.malformed, False, "malformed-api-response")
 
-        return CodexExecutionResult(CodexExecutionStatus.succeeded, True, "codex-command-succeeded")
+        if not changes:
+            return CodexExecutionResult(CodexExecutionStatus.no_op, False, "no-changes")
 
-    def apply_or_confirm_branch_update(self, handle: CodexTaskHandle, result: CodexExecutionResult) -> CodexApplyResult:
+        try:
+            _apply_changes(changes)
+        except Exception as exc:
+            logger.warning("api executor: apply failed: %s", exc)
+            return CodexExecutionResult(CodexExecutionStatus.failed, False, f"apply-failed: {exc}")
+
+        return CodexExecutionResult(CodexExecutionStatus.succeeded, True, "api-executor-succeeded")
+
+    def apply_or_confirm_branch_update(
+        self, handle: CodexTaskHandle, result: CodexExecutionResult
+    ) -> CodexApplyResult:
         del handle
         if result.status != CodexExecutionStatus.succeeded:
             return CodexApplyResult(changed=False, branch_updated=False, summary=result.summary)
         return CodexApplyResult(changed=True, branch_updated=False, summary=result.summary)
 
 
-def build_executor(command: str | None, timeout_seconds: int) -> CodexExecutor:
-    return LocalSubprocessCodexExecutor(command=command, timeout_seconds=timeout_seconds)
+def _build_user_content(task: CodexFixTask) -> str:
+    """Append current target file content to the task prompt for context.
+
+    File content is capped at ``_MAX_FILE_CHARS`` characters to avoid exceeding
+    model context limits on large files (which would produce HTTP 400 errors).
+    """
+    file_content = _read_target_file(task.prompt)
+    if file_content is None:
+        return task.prompt
+    if len(file_content) > _MAX_FILE_CHARS:
+        total = len(file_content)
+        file_content = file_content[:_MAX_FILE_CHARS]
+        suffix = f"\n[truncated: showing first {_MAX_FILE_CHARS} of {total} chars]"
+    else:
+        suffix = ""
+    return f"{task.prompt}\n\nCurrent file content:\n```\n{file_content}{suffix}\n```"
+
+
+def _read_target_file(prompt: str) -> str | None:
+    """Extract the target file path from the 'Target location:' block only.
+
+    Scanning the whole prompt is unsafe: the review body (user-supplied text) comes
+    after ``Review finding:`` and could contain ``file: /proc/self/environ`` or any
+    other path, causing arbitrary local files to be forwarded to the OpenAI API.
+    Restricting the search to the structured ``Target location:`` block (which is
+    generated by ``task_builder`` from sanitised ``ReviewContext.path``) eliminates
+    that injection vector.
+    """
+    block_match = re.search(
+        r"^Target location:\n(.*?)(?=\n\n|\Z)",
+        prompt,
+        re.MULTILINE | re.DOTALL,
+    )
+    if not block_match:
+        return None
+    block = block_match.group(1)
+    file_match = re.search(r"^file: (.+)$", block, re.MULTILINE)
+    if not file_match:
+        return None
+    file_path = file_match.group(1).strip()
+    try:
+        cwd = Path.cwd().resolve()
+        target = (cwd / file_path).resolve()
+        # Reject symlinks or paths that resolve outside the checkout root.
+        if not (str(target) + os.sep).startswith(str(cwd) + os.sep):
+            return None
+        return target.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError, RuntimeError):
+        # RuntimeError is raised by Path.resolve() on symlink loops.
+        return None
+
+
+def _apply_changes(changes: list[dict]) -> None:
+    """Write file changes to disk; rejects path traversal outside cwd."""
+    cwd = Path.cwd().resolve()
+    for change in changes:
+        raw_path = change.get("path", "")
+        content = change.get("content")
+        if not raw_path or not isinstance(raw_path, str):
+            raise ValueError(f"invalid path: {raw_path!r}")
+        if content is None or not isinstance(content, str):
+            raise ValueError(f"missing or non-string content for path {raw_path!r}")
+        target = (cwd / raw_path).resolve()
+        if not (str(target) + os.sep).startswith(str(cwd) + os.sep):
+            raise ValueError(f"path traversal rejected: {raw_path!r}")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8")
+
+
+def _call_openai_chat(api_key: str, model: str, messages: list, timeout: int) -> dict:
+    """POST to /v1/chat/completions with JSON-mode response format."""
+    data = json.dumps({
+        "model": model,
+        "response_format": {"type": "json_object"},
+        "messages": messages,
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions",
+        data=data,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return json.loads(resp.read())
+
+
+def build_executor(model: str, timeout_seconds: int) -> CodexExecutor:
+    """Return a ``DirectApiCodexExecutor`` for the given model and timeout."""
+    return DirectApiCodexExecutor(model=model, timeout_seconds=timeout_seconds)

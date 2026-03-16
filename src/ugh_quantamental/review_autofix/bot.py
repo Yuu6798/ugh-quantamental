@@ -160,7 +160,7 @@ def _process_classified_context(
     elif config.bot_mode in {"propose_only"} or config.dry_run or classification == Classification.propose_only:
         reason = "proposed-only"
     else:
-        executor = build_executor(command=config.codex_command, timeout_seconds=config.codex_timeout_seconds)
+        executor = build_executor(model=config.executor_model, timeout_seconds=config.executor_timeout_seconds)
         handle = executor.submit_fix_task(task)
         result = executor.wait_for_result(handle)
         apply_result = executor.apply_or_confirm_branch_update(handle, result)
