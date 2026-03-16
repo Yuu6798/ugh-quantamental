@@ -18,6 +18,8 @@ FX_PROTOCOL_VERSION  : protocol version (default: v1)
 FX_SQLITE_PATH       : full path to SQLite file (overrides FX_SQLITE_FILENAME)
 FX_DISABLE_OUTCOME   : set to "1" to skip outcome/evaluation workflow
 FX_DISABLE_FORECAST  : set to "1" to skip forecast workflow
+FX_WRITE_CSV_EXPORTS : set to "0" to disable CSV export (default: enabled)
+FX_CSV_OUTPUT_DIR    : directory for CSV exports (default: ./data/csv)
 """
 
 from __future__ import annotations
@@ -57,6 +59,8 @@ def main() -> None:
 
     run_outcome = _env("FX_DISABLE_OUTCOME") != "1"
     run_forecast = _env("FX_DISABLE_FORECAST") != "1"
+    write_csv_exports = _env("FX_WRITE_CSV_EXPORTS", "1") != "0"
+    csv_output_dir = _env("FX_CSV_OUTPUT_DIR", "./data/csv") or "./data/csv"
 
     provider_name = f"custom ({fx_data_url})" if fx_data_url else "yahoo_finance (public)"
     print(f"[INFO] provider        = {provider_name}")
@@ -136,6 +140,8 @@ def main() -> None:
         sqlite_path=sqlite_path,
         run_outcome_evaluation=run_outcome,
         run_forecast_generation=run_forecast,
+        write_csv_exports=write_csv_exports,
+        csv_output_dir=csv_output_dir,
     )
 
     session_factory = create_session_factory(engine)
@@ -156,6 +162,12 @@ def main() -> None:
     print(f"  outcome_id         : {automation_result.outcome_id}")
     print(f"  outcome_recorded   : {automation_result.outcome_recorded}")
     print(f"  evaluation_count   : {automation_result.evaluation_count}")
+    if automation_result.forecast_csv_path:
+        print(f"  forecast_csv       : {automation_result.forecast_csv_path}")
+    if automation_result.outcome_csv_path:
+        print(f"  outcome_csv        : {automation_result.outcome_csv_path}")
+    if automation_result.evaluation_csv_path:
+        print(f"  evaluation_csv     : {automation_result.evaluation_csv_path}")
     print("=================================\n")
 
 

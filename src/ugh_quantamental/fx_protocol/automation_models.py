@@ -27,6 +27,8 @@ class FxDailyAutomationConfig(BaseModel):
     run_outcome_evaluation: bool = True
     run_forecast_generation: bool = True
     input_snapshot_ref: str = Field(default="auto", min_length=1)
+    write_csv_exports: bool = True
+    csv_output_dir: str = Field(default="./data/csv", min_length=1)
 
 
 class FxDailyAutomationResult(BaseModel):
@@ -41,3 +43,6 @@ class FxDailyAutomationResult(BaseModel):
     outcome_recorded: bool = False
     evaluation_count: int = 0
     data_commit_created: bool = False
+    forecast_csv_path: str | None = None
+    outcome_csv_path: str | None = None
+    evaluation_csv_path: str | None = None
