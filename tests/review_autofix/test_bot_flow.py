@@ -119,7 +119,7 @@ def test_codex_reviewer_comment_builds_task(tmp_path: Path, monkeypatch) -> None
         CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
         CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
     )
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
@@ -154,7 +154,7 @@ def test_duplicate_review_skips(tmp_path: Path, monkeypatch) -> None:
         CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
         CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
     )
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
@@ -175,7 +175,7 @@ def test_noop_from_executor_does_not_push(tmp_path: Path, monkeypatch) -> None:
         CodexExecutionResult(CodexExecutionStatus.no_op, False, "noop"),
         CodexApplyResult(changed=False, branch_updated=False, summary="noop"),
     )
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: (_ for _ in ()).throw(AssertionError("should not push")))
 
     result = bot.run()
@@ -193,7 +193,7 @@ def test_validation_failure_does_not_push(tmp_path: Path, monkeypatch) -> None:
         CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
         CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
     )
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: (_ for _ in ()).throw(AssertionError("should not commit")))
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: (_ for _ in ()).throw(AssertionError("should not push")))
@@ -212,7 +212,7 @@ def test_success_pushes_same_branch(tmp_path: Path, monkeypatch) -> None:
         CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
         CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
     )
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: pushed.append(branch))
@@ -231,7 +231,7 @@ def test_review_body_event_is_supported(tmp_path: Path, monkeypatch) -> None:
         CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
         CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
     )
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
@@ -247,8 +247,8 @@ def test_fork_safety_keeps_propose_only(tmp_path: Path, monkeypatch) -> None:
 
     called = {"executor": False}
 
-    def _builder(command, timeout_seconds):
-        del command, timeout_seconds
+    def _builder(model, timeout_seconds):
+        del model, timeout_seconds
         called["executor"] = True
         raise AssertionError("executor should not run for fork propose-only")
 
@@ -271,7 +271,7 @@ def test_durable_duplicate_detection_with_github_marker(tmp_path: Path, monkeypa
         CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
         CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
     )
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
@@ -306,7 +306,7 @@ def test_noop_artifact_only_does_not_push(tmp_path: Path, monkeypatch) -> None:
             del handle, result
             return CodexApplyResult(changed=True, branch_updated=False, summary="ok")
 
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: _ArtifactOnlyExecutor())
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: _ArtifactOnlyExecutor())
     monkeypatch.setattr(bot, "commit_changes", lambda msg: (_ for _ in ()).throw(AssertionError("should not commit")))
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: (_ for _ in ()).throw(AssertionError("should not push")))
 
@@ -355,7 +355,7 @@ def test_codex_review_without_legacy_keywords_reaches_executor(tmp_path: Path, m
         def apply_or_confirm_branch_update(self, handle, result):
             return CodexApplyResult(changed=True, branch_updated=False, summary="ok")
 
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: _Stub())
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: _Stub())
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
@@ -446,7 +446,7 @@ def test_review_body_no_path_with_inline_comment_expands_and_processes(
         CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
         CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
     )
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
@@ -474,8 +474,8 @@ def test_review_body_no_path_without_inline_comments_skips_with_descriptive_reas
 
     called = {"executor": False}
 
-    def _builder(command, timeout_seconds):
-        del command, timeout_seconds
+    def _builder(model, timeout_seconds):
+        del model, timeout_seconds
         called["executor"] = True
         raise AssertionError("executor should not run when no inline comments exist")
 
@@ -505,7 +505,7 @@ def test_review_body_fallback_deduplicates_on_second_run(tmp_path: Path, monkeyp
         CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
         CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
     )
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
@@ -531,7 +531,7 @@ def test_review_body_fallback_does_not_affect_diff_comment_events(
         CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
         CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
     )
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
@@ -552,8 +552,8 @@ def test_invalid_review_body_path_hint_skips_without_executor(tmp_path: Path, mo
 
     called = {"executor": False}
 
-    def _builder(command, timeout_seconds):
-        del command, timeout_seconds
+    def _builder(model, timeout_seconds):
+        del model, timeout_seconds
         called["executor"] = True
         raise AssertionError("executor should not run")
 
@@ -626,7 +626,7 @@ def test_shadow_audit_pre_and_post_in_apply_and_push(tmp_path: Path, monkeypatch
         CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
         CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
     )
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
@@ -659,7 +659,7 @@ def test_shadow_audit_failure_is_swallowed(tmp_path: Path, monkeypatch) -> None:
         CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
         CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
     )
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
@@ -691,7 +691,7 @@ def test_shadow_audit_runs_on_review_body_inline_fallback(tmp_path: Path, monkey
         CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
         CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
     )
-    monkeypatch.setattr(bot, "build_executor", lambda command, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
     monkeypatch.setattr(bot, "has_changes", lambda: True)
     monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
     monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)

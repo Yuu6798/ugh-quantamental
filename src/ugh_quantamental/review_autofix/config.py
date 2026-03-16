@@ -20,8 +20,8 @@ class BotConfig:
     reply_on_failure: bool
     auto_resolve: bool
     log_level: str
-    codex_command: str
-    codex_timeout_seconds: int
+    executor_model: str
+    executor_timeout_seconds: int
 
     @property
     def all_validation_commands(self) -> tuple[str, ...]:
@@ -76,6 +76,6 @@ def load_config() -> BotConfig:
         reply_on_failure=_parse_bool("REPLY_ON_FAILURE", True),
         auto_resolve=_parse_bool("AUTO_RESOLVE", False),
         log_level=os.getenv("LOG_LEVEL", "INFO"),
-        codex_command=os.getenv("CODEX_EXECUTOR_COMMAND", ""),
-        codex_timeout_seconds=int(os.getenv("CODEX_EXECUTOR_TIMEOUT_SECONDS", "900")),
+        executor_model=os.getenv("EXECUTOR_MODEL", "gpt-4o").strip() or "gpt-4o",
+        executor_timeout_seconds=int(os.getenv("EXECUTOR_TIMEOUT_SECONDS", "900")),
     )

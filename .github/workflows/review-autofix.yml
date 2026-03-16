@@ -42,9 +42,8 @@ jobs:
           ref: ${{ github.event.pull_request.base.sha || github.sha }}
           fetch-depth: 0
           path: trusted-bot
-          # Do not persist credentials in .git/config.  Credentials are
-          # injected explicitly after npm install completes so that no
-          # postinstall hook can read write-capable tokens from the filesystem.
+          # Do not persist credentials in .git/config.  The remote URL is set
+          # with GITHUB_TOKEN in the "Configure git author" step instead.
           persist-credentials: false
 
       - name: Check out PR head branch as data workspace
@@ -55,8 +54,7 @@ jobs:
           fetch-depth: 0
           path: pr-head
           # Do not persist credentials in .git/config — same rationale as above.
-          # The remote URL is set with GITHUB_TOKEN in the "Configure git author"
-          # step, which runs after npm install, so bot.py retains push capability.
+          # The remote URL is set with GITHUB_TOKEN in the "Configure git author" step.
           persist-credentials: false
 
       - name: Set up Python
@@ -73,63 +71,6 @@ jobs:
           python -m pip install -e .
           python -m pip install pytest ruff
 
-      # Compute executor gate — three independent conditions must all be true
-      # before Node.js / npm install are needed:
-      #   1. BOT_MODE is an executing mode (not detect_only / propose_only)
-      #   2. DRY_RUN is falsy — normalised case-insensitively to match
-      #      config.py _parse_bool ({1,true,yes,on} → dry)
-      #   3. CODEX_EXECUTOR_COMMAND is non-empty — when empty, bot.py returns
-      #      early with "codex-command-not-configured" and never calls the CLI
-      #
-      # All three checks are done in shell to avoid GitHub Actions `if:`
-      # expression case-sensitivity issues.
-      - name: Compute executor gate
-        id: gate
-        env:
-          BOT_MODE: ${{ vars.BOT_MODE || 'detect_only' }}
-          DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
-          CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
-        run: |
-          _mode=$(printf '%s' "${BOT_MODE}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
-          _dry=$(printf '%s'  "${DRY_RUN}"  | tr '[:upper:]' '[:lower:]' | tr -d ' ')
-          _install=false
-          if [ "${_mode}" != '' ] && \
-             [ "${_mode}" != 'detect_only' ] && \
-             [ "${_mode}" != 'propose_only' ] && \
-             [ -n "${CODEX_EXECUTOR_COMMAND}" ]; then
-            case "${_dry}" in
-              1|true|yes|on) ;;
-              *) _install=true ;;
-            esac
-          fi
-          echo "should_install=${_install}" >> "$GITHUB_OUTPUT"
-
-      # Install Node.js only when the executor gate says execution is likely.
-      # detect_only, propose_only, and any DRY_RUN truthy value (case-insensitive)
-      # skip this step.
-      - name: Set up Node.js
-        if: steps.gate.outputs.should_install == 'true'
-        # continue-on-error so a transient GitHub CDN failure does not abort
-        # the job before bot.py can post its outcome.
-        continue-on-error: true
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      # Install the Codex CLI in a dedicated step that carries NO secrets.
-      # Separating installation from execution means any postinstall hooks in
-      # @openai/codex (or its dependency tree) cannot access GITHUB_TOKEN or
-      # OPENAI_API_KEY.  The install is skipped in non-executing modes
-      # (detect_only, propose_only, DRY_RUN truthy) via the gate output.
-      # continue-on-error so a transient npm registry failure does not abort
-      # the job before bot.py can post its outcome.
-      - name: Install Codex CLI
-        if: steps.gate.outputs.should_install == 'true'
-        continue-on-error: true
-        run: |
-          (cd "$GITHUB_WORKSPACE" && npm install -g @openai/codex) \
-            || echo "::warning::npm install -g @openai/codex failed; executor will be unavailable."
-
       - name: Configure git author
         working-directory: pr-head
         env:
@@ -143,235 +84,43 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Re-inject push credentials explicitly now that npm install has run.
-          # persist-credentials: false on checkout prevents .git/config from
-          # holding write-capable tokens during the npm install step; we restore
-          # them here (pointing at the head repo, not the base repo) so that
-          # bot.py pushes to the correct fork when ALLOW_PUSH_ON_FORK=true.
           git remote set-url origin \
             "https://x-access-token:${GITHUB_TOKEN}@github.com/${HEAD_REPO}.git"
 
-      # Preflight: emit key runtime settings and surface a ::warning:: if the
-      # executor binary is not resolvable.  This step is intentionally
-      # advisory-only and never exits with a non-zero code.
-      #
-      # Rationale: bot.py has multiple runtime branches (fork PR downgrade,
-      # non-actionable classification, …) where the executor is never called
-      # even in apply_* modes.  A hard-fail here would abort the job before the
-      # bot can post its outcome.  The ::warning:: annotation is still visible
-      # in the GitHub Actions summary, replacing the previous cryptic exit-127
-      # buried in bot log output, while letting the bot decide for itself
-      # whether execution is appropriate.
+      # Preflight: emit key runtime settings.  Advisory-only — never exits non-zero
+      # so that bot.py can always post its outcome regardless of mode.
       - name: Preflight — verify executor environment
         env:
           BOT_MODE: ${{ vars.BOT_MODE || 'detect_only' }}
           DRY_RUN: ${{ vars.DRY_RUN || 'true' }}
-          CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
+          EXECUTOR_MODEL: ${{ vars.EXECUTOR_MODEL || 'gpt-4o' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         run: |
           echo "=== review-autofix preflight ==="
-          echo "BOT_MODE              : ${BOT_MODE}"
-          echo "DRY_RUN               : ${DRY_RUN}"
-
-          # Normalise DRY_RUN using the same truthy set as config.py _parse_bool:
-          # {1, true, yes, on}.  Used only for the informational "executor will
-          # run" line; does not gate any exit.
-          _dry_run_norm=$(printf '%s' "${DRY_RUN}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')
-          case "${_dry_run_norm}" in
-            1|true|yes|on) _dry_run_bool=true ;;
-            *)              _dry_run_bool=false ;;
-          esac
-
-          _likely_execute=false
-          if [ "${BOT_MODE}" != "detect_only" ] && \
-             [ "${BOT_MODE}" != "propose_only" ] && \
-             [ "${_dry_run_bool}" != "true" ]; then
-            _likely_execute=true
-          fi
-          echo "executor likely runs  : ${_likely_execute} (runtime branches may still skip)"
-
-          if [ -z "${CODEX_EXECUTOR_COMMAND}" ]; then
-            echo "CODEX_EXECUTOR_COMMAND: (empty — executor will skip with 'codex-command-not-configured')"
+          echo "BOT_MODE        : ${BOT_MODE}"
+          echo "DRY_RUN         : ${DRY_RUN}"
+          echo "EXECUTOR_MODEL  : ${EXECUTOR_MODEL}"
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "::warning::OPENAI_API_KEY is not set — executor will fail with openai-api-key-missing."
           else
-            echo "CODEX_EXECUTOR_COMMAND: (set)"
-            # Extract the first executable token from the command string.
-            # Leading KEY=value assignments (e.g. OPENAI_API_KEY=... codex exec ...)
-            # are valid shell syntax and must be skipped before checking PATH,
-            # because the executor runs the full command with shell=True and handles
-            # them natively.  Only tokens that do NOT match the KEY=value pattern
-            # are considered as the binary name.
-            _cmd_token=$(printf '%s' "${CODEX_EXECUTOR_COMMAND}" | \
-              awk '{for(i=1;i<=NF;i++){if($i !~ /^[A-Za-z_][A-Za-z0-9_]*=/){print $i; exit}}}')
-            if [ -z "${_cmd_token}" ]; then
-              echo "executor binary       : (could not determine — skipping PATH check)"
-            elif ! command -v "${_cmd_token}" >/dev/null 2>&1; then
-              # Only emit a warning when execution is actually expected at runtime.
-              # In detect_only / propose_only / DRY_RUN modes the executor is never
-              # called, so a missing binary is normal and should not clutter the
-              # Actions summary with misleading warnings.
-              if [ "${_likely_execute}" = "true" ]; then
-                echo "::warning::Executor binary '${_cmd_token}' not found on PATH."
-                echo "::warning::If execution is expected, ensure @openai/codex installed correctly"
-                echo "::warning::or update CODEX_EXECUTOR_COMMAND to use npx @openai/codex exec \"\$(cat \"\$CODEX_TASK_FILE\")\"."
-              else
-                echo "executor binary       : '${_cmd_token}' not found on PATH (non-executing mode — advisory only)"
-              fi
-            else
-              # Report the resolved path only — do not invoke the binary.
-              # Running with --version has no timeout guard and could hang or
-              # trigger side effects for executors that don't support that flag.
-              echo "executor binary       : $(command -v "${_cmd_token}")"
+            echo "OPENAI_API_KEY  : present"
+            _status=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "{\"model\":\"${EXECUTOR_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1}" \
+              https://api.openai.com/v1/chat/completions)
+            echo "POST /v1/chat/completions (${EXECUTOR_MODEL}) HTTP status: ${_status}"
+            if [ "${_status}" != "200" ]; then
+              echo "::warning::API key probe failed (status ${_status}) — check OPENAI_API_KEY secret and EXECUTOR_MODEL."
             fi
           fi
           echo "=== preflight OK ==="
-
-      # TEMPORARY DIAGNOSTIC STEPS — remove once 401 root-cause is confirmed.
-      # Step A: curl-level probe — confirms OPENAI_API_KEY is valid.
-      # Step B: Codex CLI probe — confirms the CLI itself receives and uses the key.
-      # Both steps never fail the job (continue-on-error: true).
-      - name: Diagnose — OpenAI auth and executor command
-        continue-on-error: true
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
-        run: |
-          echo "=== OpenAI auth probe ==="
-          if [ -z "${OPENAI_API_KEY}" ]; then
-            echo "::warning::OPENAI_API_KEY is empty — secret may not be set in this repository."
-          else
-            _status_models=$(curl -s -o /dev/null -w "%{http_code}" \
-              -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-              https://api.openai.com/v1/models)
-            echo "GET /v1/models HTTP status: ${_status_models}"
-
-            # Test /v1/responses — this is the endpoint Codex CLI actually uses.
-            # A minimal gpt-4o-mini request confirms both key validity and
-            # endpoint access in a single call.
-            _resp_body=$(curl -s -o /tmp/responses-probe.json -w "%{http_code}" \
-              -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-              -H "Content-Type: application/json" \
-              -d '{"model":"gpt-4o-mini","input":"ping"}' \
-              https://api.openai.com/v1/responses)
-            echo "POST /v1/responses HTTP status: ${_resp_body}"
-            if [ "${_resp_body}" = "200" ]; then
-              echo "auth probe /v1/responses: OK"
-            else
-              echo "::warning::auth probe /v1/responses: FAILED (status ${_resp_body})"
-              echo "::warning::Codex CLI uses /v1/responses — if this fails, the GitHub Secret"
-              echo "::warning::OPENAI_API_KEY differs from the key tested locally, or lacks"
-              echo "::warning::access to the Responses API. Update the secret with a key that"
-              echo "::warning::returns 200 from: curl -H 'Authorization: Bearer \$KEY' https://api.openai.com/v1/responses -d '{\"model\":\"gpt-4o-mini\",\"input\":\"hi\"}'"
-              # First line of error body (no secrets — body contains no key material).
-              head -c 200 /tmp/responses-probe.json 2>/dev/null || true
-              echo ""
-            fi
-
-            if [ "${_status_models}" = "200" ] && [ "${_resp_body}" = "200" ]; then
-              echo "auth probe: full OK (key authenticates for both /v1/models and /v1/responses)"
-            elif [ "${_status_models}" = "200" ] && [ "${_resp_body}" != "200" ]; then
-              echo "::warning::auth probe: PARTIAL — key authenticates for /v1/models but NOT /v1/responses."
-              echo "::warning::Codex CLI will fail with 401. Fix: update the OPENAI_API_KEY secret."
-            else
-              echo "::warning::auth probe: FAILED (models=${_status_models} responses=${_resp_body}) — key may be invalid or expired."
-            fi
-          fi
-
-          echo "=== CODEX_EXECUTOR_COMMAND ==="
-          if [ -z "${CODEX_EXECUTOR_COMMAND}" ]; then
-            echo "CODEX_EXECUTOR_COMMAND: (empty)"
-          else
-            # Never print the full command — credentials can appear in formats
-            # that are hard to mask completely (e.g. --api-key TOKEN, positional
-            # arguments, env-prefixed values).  Instead, emit only the binary
-            # name (the first non-KEY=value token, safe to log) and a token
-            # count so the structure is visible without leaking any values.
-            _cmd_token=$(printf '%s' "${CODEX_EXECUTOR_COMMAND}" | \
-              awk '{for(i=1;i<=NF;i++){if($i !~ /^[A-Za-z_][A-Za-z0-9_]*=/){print $i; exit}}}')
-            _word_count=$(printf '%s' "${CODEX_EXECUTOR_COMMAND}" | wc -w | tr -d ' ')
-            echo "CODEX_EXECUTOR_COMMAND: set (${_word_count} token(s); binary='${_cmd_token}')"
-          fi
-          echo "=== diagnostic done ==="
-
-      # TEMPORARY — Codex CLI auth probe.
-      # Runs only when execution is expected (gate=true).  Installs codex
-      # (same path as the bot step), then exercises the real CLI with a
-      # trivial prompt so we can observe whether it authenticates or exits 1.
-      # Output of the codex subprocess is suppressed; only the exit code is
-      # printed to avoid leaking any LLM response content to the log.
-      - name: Diagnose — Codex CLI auth probe
-        if: steps.gate.outputs.should_install == 'true'
-        continue-on-error: true
-        working-directory: pr-head
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
-          CODEX_EXECUTOR_TIMEOUT_SECONDS: ${{ vars.CODEX_EXECUTOR_TIMEOUT_SECONDS || '900' }}
-          _CODEX_INSTALL_NEEDED: ${{ steps.gate.outputs.should_install }}
-        run: |
-          echo "=== Codex CLI auth probe ==="
-
-          # Codex was installed in the dedicated "Install Codex CLI" step where
-          # no secrets are present.  Here we only need to add the npm global
-          # bin directory to PATH so the binary is resolvable.
-          if [ "${_CODEX_INSTALL_NEEDED}" = "true" ]; then
-            if command -v npm >/dev/null 2>&1; then
-              export PATH="$(npm prefix -g)/bin:$PATH"
-            else
-              echo "::warning::npm not found — codex binary may not be on PATH."
-            fi
-          fi
-
-          # Guard: OPENAI_API_KEY must be present (never print value).
-          if [ -z "${OPENAI_API_KEY}" ]; then
-            echo "::warning::OPENAI_API_KEY is empty in this step — Codex will fail with 401."
-            exit 0
-          fi
-          echo "OPENAI_API_KEY : present"
-
-          # Guard: codex binary must be resolvable after install.
-          if ! command -v codex >/dev/null 2>&1; then
-            echo "::warning::codex binary not found after install attempt — probe cannot run."
-            exit 0
-          fi
-          echo "codex binary   : $(command -v codex)"
-
-          # Guard: executor command must be configured.
-          if [ -z "${CODEX_EXECUTOR_COMMAND}" ]; then
-            echo "CODEX_EXECUTOR_COMMAND: (empty) — probe skipped."
-            exit 0
-          fi
-
-          # Run the actual executor command with a trivial prompt.
-          # CODEX_TASK_FILE is injected exactly as the bot step does it.
-          # stdout/stderr from codex are captured; on failure the first 50 lines
-          # are echoed so the actual error (auth, billing, model access, etc.)
-          # is visible in the Actions log without needing to download artifacts.
-          _probe_file=$(mktemp)
-          printf 'Reply with exactly: OK' > "${_probe_file}"
-          _probe_exit=0
-          CODEX_TASK_FILE="${_probe_file}" \
-            timeout "${CODEX_EXECUTOR_TIMEOUT_SECONDS:-30}" \
-            sh -c "${CODEX_EXECUTOR_COMMAND}" > /tmp/codex-probe-out.txt 2>&1 \
-            || _probe_exit=$?
-          rm -f "${_probe_file}"
-
-          echo "codex-cli-auth-probe: exit_code=${_probe_exit} (0=OK, same cwd as executor)"
-          if [ "${_probe_exit}" != "0" ]; then
-            echo "::warning::Codex CLI probe failed (exit ${_probe_exit}) — ran from pr-head, same cwd as real executor."
-            echo "--- codex probe output (first 50 lines) ---"
-            head -n 50 /tmp/codex-probe-out.txt || true
-            echo "--- end probe output ---"
-          fi
-          echo "=== Codex CLI auth probe done ==="
 
       - name: Run review autofix bot
         working-directory: pr-head
         env:
           TRUSTED_SRC: ${{ github.workspace }}/trusted-bot/src
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Required by the Codex CLI to authenticate with the OpenAI API.
-          # Store the key as a repository secret named OPENAI_API_KEY.
-          # Without this the executor returns HTTP 401 ("Missing bearer or
-          # basic authentication in header") even when the binary is installed.
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           BOT_MODE: ${{ vars.BOT_MODE || 'detect_only' }}
           TARGET_REVIEWERS: ${{ vars.TARGET_REVIEWERS || '' }}
@@ -387,28 +136,9 @@ jobs:
           REPLY_ON_FAILURE: ${{ vars.REPLY_ON_FAILURE || 'true' }}
           AUTO_RESOLVE: ${{ vars.AUTO_RESOLVE || 'false' }}
           LOG_LEVEL: ${{ vars.LOG_LEVEL || 'INFO' }}
-          CODEX_EXECUTOR_COMMAND: ${{ vars.CODEX_EXECUTOR_COMMAND || '' }}
-          CODEX_EXECUTOR_TIMEOUT_SECONDS: ${{ vars.CODEX_EXECUTOR_TIMEOUT_SECONDS || '900' }}
-          # Passed from the gate step so the just-in-time install below can
-          # skip itself in detect_only / propose_only / dry-run modes.
-          _CODEX_INSTALL_NEEDED: ${{ steps.gate.outputs.should_install }}
+          EXECUTOR_MODEL: ${{ vars.EXECUTOR_MODEL || 'gpt-4o' }}
+          EXECUTOR_TIMEOUT_SECONDS: ${{ vars.EXECUTOR_TIMEOUT_SECONDS || '900' }}
         run: |
-          # Codex was installed in the dedicated "Install Codex CLI" step where
-          # no secrets are present (P1 security fix: installation must not run
-          # in an environment that holds GITHUB_TOKEN or OPENAI_API_KEY).
-          # Here we only add the npm global bin directory to PATH so the binary
-          # is resolvable.  The guard prevents a hard-fail when npm itself is
-          # unavailable (P2 fix: unconditional `npm prefix -g` could abort this
-          # step before bot.py runs even when the install step had already
-          # soft-failed with continue-on-error).
-          if [ "${_CODEX_INSTALL_NEEDED}" = "true" ]; then
-            if command -v npm >/dev/null 2>&1; then
-              export PATH="$(npm prefix -g)/bin:$PATH"
-            else
-              echo "::warning::npm not found — codex binary may not be on PATH; executor may fail."
-            fi
-          fi
-
           python - <<'PY'
           import os
           import runpy
