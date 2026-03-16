@@ -11,7 +11,9 @@ import pytest
 
 from ugh_quantamental.review_autofix.codex_executor import (
     DirectApiCodexExecutor,
+    _MAX_FILE_CHARS,
     _apply_changes,
+    _build_user_content,
     _read_target_file,
 )
 from ugh_quantamental.review_autofix.executor_models import CodexExecutionStatus
@@ -469,3 +471,42 @@ def test_read_target_file_returns_none_on_symlink_loop(
 
     prompt = build_fix_task(_make_context("loop.py"), "k1").prompt
     assert _read_target_file(prompt) is None
+
+
+# I. _build_user_content truncation
+
+
+def test_build_user_content_truncates_large_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """File content exceeding _MAX_FILE_CHARS is truncated before being appended to the prompt.
+
+    This prevents HTTP 400 errors from the OpenAI API when reviewing very large files
+    whose full text would exceed the model's context limit.
+    """
+    monkeypatch.chdir(tmp_path)
+    large_content = "x" * (_MAX_FILE_CHARS + 1000)
+    (tmp_path / "big.py").write_text(large_content, encoding="utf-8")
+
+    task = build_fix_task(_make_context("big.py"), "k-trunc")
+    result = _build_user_content(task)
+
+    assert f"[truncated: showing first {_MAX_FILE_CHARS} of {_MAX_FILE_CHARS + 1000} chars]" in result
+    assert "x" * _MAX_FILE_CHARS in result
+    # The full content must NOT be present (one extra char would exceed the cap)
+    assert large_content not in result
+
+
+def test_build_user_content_no_truncation_for_small_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """File content within _MAX_FILE_CHARS is included verbatim without a truncation note."""
+    monkeypatch.chdir(tmp_path)
+    small_content = "print('hello')\n"
+    (tmp_path / "small.py").write_text(small_content, encoding="utf-8")
+
+    task = build_fix_task(_make_context("small.py"), "k-small")
+    result = _build_user_content(task)
+
+    assert small_content.strip() in result
+    assert "truncated" not in result

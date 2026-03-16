@@ -15,6 +15,8 @@ from .executor_models import CodexApplyResult, CodexExecutionResult, CodexExecut
 
 logger = logging.getLogger(__name__)
 
+_MAX_FILE_CHARS = 20_000  # cap injected file content to avoid exceeding model context limits
+
 _SYSTEM_PROMPT = """\
 You are an automated code fixer working inside a git checkout.
 Apply the minimal fix described in the review finding.
@@ -133,11 +135,21 @@ class DirectApiCodexExecutor:
 
 
 def _build_user_content(task: CodexFixTask) -> str:
-    """Append current target file content to the task prompt for context."""
+    """Append current target file content to the task prompt for context.
+
+    File content is capped at ``_MAX_FILE_CHARS`` characters to avoid exceeding
+    model context limits on large files (which would produce HTTP 400 errors).
+    """
     file_content = _read_target_file(task.prompt)
     if file_content is None:
         return task.prompt
-    return f"{task.prompt}\n\nCurrent file content:\n```\n{file_content}\n```"
+    if len(file_content) > _MAX_FILE_CHARS:
+        total = len(file_content)
+        file_content = file_content[:_MAX_FILE_CHARS]
+        suffix = f"\n[truncated: showing first {_MAX_FILE_CHARS} of {total} chars]"
+    else:
+        suffix = ""
+    return f"{task.prompt}\n\nCurrent file content:\n```\n{file_content}{suffix}\n```"
 
 
 def _read_target_file(prompt: str) -> str | None:
