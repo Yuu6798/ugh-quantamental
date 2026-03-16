@@ -25,3 +25,8 @@ target-version = "py311"
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

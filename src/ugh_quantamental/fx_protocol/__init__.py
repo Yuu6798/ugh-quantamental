@@ -38,6 +38,16 @@ from ugh_quantamental.fx_protocol.data_models import (
     FxCompletedWindow,
     FxProtocolMarketSnapshot,
 )
+from ugh_quantamental.fx_protocol.report_models import (
+    BaselineWeeklyComparison,
+    StateWeeklyMetrics,
+    StrategyWeeklyMetrics,
+    WeeklyCaseExample,
+    WeeklyGrvFireSummary,
+    WeeklyMismatchSummary,
+    WeeklyReportRequest,
+    WeeklyReportResult,
+)
 
 __all__ = [
     "BaselineContext",
@@ -60,4 +70,12 @@ __all__ = [
     "FxDailyAutomationResult",
     "FxCompletedWindow",
     "FxProtocolMarketSnapshot",
+    "BaselineWeeklyComparison",
+    "StateWeeklyMetrics",
+    "StrategyWeeklyMetrics",
+    "WeeklyCaseExample",
+    "WeeklyGrvFireSummary",
+    "WeeklyMismatchSummary",
+    "WeeklyReportRequest",
+    "WeeklyReportResult",
 ]
