@@ -8,7 +8,7 @@ from .classifier import classify_codex_review
 from .codex_executor import build_executor
 from .config import BotConfig, load_config
 from .executor_models import CodexExecutionStatus
-from .git_ops import commit_changes, get_diff_stats, has_changes, push_head_branch
+from .git_ops import commit_changes, get_diff_stats, has_changes, push_head_branch, revert_working_tree_changes
 from .github_client import (
     GithubClient,
     build_context_from_inline_comment,
@@ -184,6 +184,10 @@ def _process_classified_context(
             validation_ok = validation.ok
             if not validation_ok:
                 reason = "validation-failed"
+                _state_path = str(getattr(state, "_path", ""))
+                revert_working_tree_changes(
+                    preserve_paths=(_state_path,) if _state_path else ()
+                )
             else:
                 if has_changes():
                     commit_changes(f"AUTO: apply codex fix task for PR #{context.pr_number} ({key})")

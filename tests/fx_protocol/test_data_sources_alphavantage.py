@@ -360,3 +360,27 @@ class TestAlphaVantageXMarketDataProvider:
         ):
             with pytest.raises(FxDataFetchError, match="Network error"):
                 provider.fetch_snapshot(self._AS_OF)
+
+    def test_invalid_json_logs_debug(self, caplog) -> None:
+        """Regression: json.JSONDecodeError at data_sources.py:553-555 must emit logger.debug.
+
+        When the Alpha Vantage response body is not valid JSON, the provider raises
+        ``FxDataFetchError`` AND emits a ``logger.debug`` message.  This test verifies
+        both behaviours to guard against a recurrence of the bot-applied syntax failure
+        at those lines.
+        """
+        import logging
+
+        provider = self._make_provider()
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_resp.status = 200
+        mock_resp.read.return_value = b"<html>not json</html>"
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            with caplog.at_level(logging.DEBUG, logger="ugh_quantamental.fx_protocol.data_sources"):
+                with pytest.raises(FxDataFetchError, match="Invalid JSON"):
+                    provider.fetch_snapshot(self._AS_OF)
+
+        assert any("non-JSON" in record.message for record in caplog.records)

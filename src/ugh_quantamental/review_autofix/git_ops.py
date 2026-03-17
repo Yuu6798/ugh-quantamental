@@ -47,6 +47,59 @@ def push_head_branch(branch: str) -> None:
     subprocess.run(["git", "push", "origin", f"HEAD:{branch}"], check=True)
 
 
+def revert_working_tree_changes(preserve_paths: tuple[str, ...] = ()) -> None:
+    """Restore all tracked files to HEAD state and remove untracked files created by the bot.
+
+    Called when validation fails after the executor writes new file content to disk, so that
+    subsequent bot runs start from a clean working tree rather than a partially-broken state.
+    Untracked files (new files created by the executor) are removed; tracked files are
+    restored to their HEAD versions.  Best-effort — any error is silently ignored so that
+    a revert failure never blocks the bot from completing its run.
+
+    Files under ``.autofix-bot/`` are always preserved, and any additional paths supplied
+    via *preserve_paths* (e.g. a custom ``STATE_STORE_PATH``) are also skipped so that
+    ``state.mark(key)`` can still complete after a validation failure regardless of where
+    the state file lives.
+
+    *preserve_paths* values are resolved to absolute paths before comparison so that
+    both absolute paths (e.g. ``/repo/state.json``) and repo-relative paths (e.g.
+    ``state.json``) work correctly against the repo-relative output of ``git ls-files``.
+    """
+    import os
+    from pathlib import Path
+
+    cwd = Path.cwd()
+    resolved_preserve: tuple[Path, ...] = ()
+    try:
+        resolved_preserve = tuple(Path(p).resolve() for p in preserve_paths if p)
+    except Exception:
+        pass
+
+    try:
+        subprocess.run(["git", "checkout", "HEAD", "--", "."], check=False)
+    except Exception:
+        pass
+    try:
+        for path in list_untracked_files():
+            if ".autofix-bot/" in path:
+                continue
+            try:
+                abs_path = (cwd / path).resolve()
+                if any(
+                    abs_path == rp or str(abs_path).startswith(str(rp) + os.sep)
+                    for rp in resolved_preserve
+                ):
+                    continue
+            except Exception:
+                pass
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
 def list_untracked_files() -> list[str]:
     """Return a list of untracked file paths in the working directory.
 
