@@ -194,13 +194,33 @@ class TestParseAvSnapshot:
         snap = _parse_av_snapshot(payload, self._AS_OF)
         assert snap.market_data_provenance.vendor == "alpha_vantage"
 
-    def test_current_spot_from_latest_close(self) -> None:
+    def test_current_spot_from_newest_completed_window_close(self) -> None:
+        """current_spot must equal the close of the newest *completed* window."""
         payload = _build_av_payload(22, self._AS_OF)
-        # Override the latest date's close to a distinct value.
+        # Override the newest completed date's close to a distinct value within [low, high]
+        # so the clamping in _av_date_to_window does not alter it.
+        # _build_av_payload uses low=148.5, high=151.5; choose a value in that range.
         latest_date = max(payload["Time Series FX (Daily)"].keys())
-        payload["Time Series FX (Daily)"][latest_date]["4. close"] = "155.1234"
+        payload["Time Series FX (Daily)"][latest_date]["4. close"] = "149.9876"
         snap = _parse_av_snapshot(payload, self._AS_OF)
-        assert snap.current_spot == pytest.approx(155.1234)
+        assert snap.current_spot == pytest.approx(149.9876)
+
+    def test_current_spot_not_contaminated_by_future_bars(self) -> None:
+        """Bars beyond as_of_jst must not influence current_spot (no look-ahead)."""
+        payload = _build_av_payload(22, self._AS_OF)
+        # Newest completed bar has close 150.5.  Inject a future bar with a very
+        # different close; current_spot must still reflect the completed data only.
+        payload["Time Series FX (Daily)"]["2099-12-31"] = {
+            "1. open": "999.0",
+            "2. high": "999.5",
+            "3. low": "998.5",
+            "4. close": "999.0",
+        }
+        snap = _parse_av_snapshot(payload, self._AS_OF)
+        assert snap.current_spot == pytest.approx(150.5)
+        # And the future window must not appear in completed_windows.
+        for win in snap.completed_windows:
+            assert win.window_end_jst <= self._AS_OF
 
 
 # ---------------------------------------------------------------------------

@@ -421,17 +421,6 @@ def _parse_av_snapshot(payload: dict, as_of_jst: datetime) -> FxProtocolMarketSn
             f"API message: {note!r}"
         )
 
-    # current_spot: close price from the most recent entry in the time series.
-    latest_date_str = max(time_series.keys())
-    try:
-        current_spot = float(time_series[latest_date_str].get("4. close") or 0)
-    except (TypeError, ValueError) as exc:
-        raise FxDataFetchError(
-            f"Cannot parse current_spot from latest close: {exc}"
-        ) from exc
-    if current_spot <= 0:
-        raise FxDataFetchError(f"current_spot must be positive; got {current_spot}")
-
     windows: list[FxCompletedWindow] = []
     for date_str, entry in time_series.items():
         try:
@@ -458,6 +447,11 @@ def _parse_av_snapshot(payload: dict, as_of_jst: datetime) -> FxProtocolMarketSn
             f"(as_of_jst={as_of_jst.isoformat()}). "
             "The fetch range may need to be increased or the data source is lagging."
         )
+
+    # current_spot: close of the newest *completed* window.
+    # Using max(time_series.keys()) would introduce look-ahead contamination during
+    # backdated runs when newer bars exist beyond as_of_jst.
+    current_spot = windows[-1].close_price
 
     provenance = MarketDataProvenance(
         vendor="alpha_vantage",
