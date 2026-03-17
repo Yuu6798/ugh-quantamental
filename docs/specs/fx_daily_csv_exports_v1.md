@@ -32,19 +32,45 @@ of engine values.
 
 ## 3. File Layout
 
-CSV files are written under `csv_output_dir` (default `./data/csv`):
+CSV files are written under `csv_output_dir`.  In GitHub Actions, this is set to
+`{github.workspace}/data/csv` (absolute path) so that all files land inside the
+`fx-daily-data` branch checkout and are committed on every run.
 
 ```
 {csv_output_dir}/
-├── forecasts/{pair}_{YYYYMMDD}_forecast.csv
+├── latest/                                   ← fixed paths; external tools read here
+│   ├── manifest.json                         ← machine-readable run metadata (always)
+│   ├── forecast.csv                          ← latest forecast (always)
+│   ├── outcome.csv                           ← latest outcome (only when generated)
+│   └── evaluation.csv                        ← latest evaluation (only when generated)
+├── history/
+│   └── {YYYYMMDD}/
+│       └── {forecast_batch_id}/              ← one dir per run (deterministic batch ID)
+│           ├── forecast.csv
+│           ├── outcome.csv                   ← only when generated
+│           └── evaluation.csv               ← only when generated
+├── forecasts/{pair}_{YYYYMMDD}_forecast.csv  ← legacy staging path (backward-compat)
 ├── outcomes/{pair}_{YYYYMMDD}_outcome.csv
 └── evaluations/{pair}_{YYYYMMDD}_evaluation.csv
 ```
 
 `YYYYMMDD` is the date of `as_of_jst` in JST.
 
-**Idempotency:** Re-running the protocol for the same day overwrites the same file paths
-deterministically. No suffix or timestamp is appended.
+### latest/ policy
+
+- `latest/` contains the most recent run's outputs under fixed filenames.
+- `outcome.csv` and `evaluation.csv` are **deleted** from `latest/` when not generated
+  in the current run, so stale files from a previous run are never served.
+- `manifest.json` is always written (or overwritten) whenever `forecast.csv` is written.
+- **Idempotency:** Re-running the protocol for the same day overwrites the same paths.
+
+### history/ policy
+
+- `history/{YYYYMMDD}/{forecast_batch_id}/` is written once per batch.
+- Because `forecast_batch_id` is deterministic for a given `(pair, as_of_jst,
+  protocol_version)` triple, a same-day rerun lands in the same directory and
+  overwrites it — this is the intended behaviour.
+- `outcome.csv` and `evaluation.csv` appear only when generated.
 
 ---
 
@@ -213,7 +239,50 @@ CSV paths are returned in `FxDailyAutomationResult.forecast_csv_path`,
 
 | File | Purpose |
 |---|---|
-| `src/ugh_quantamental/fx_protocol/csv_exports.py` | Deterministic flattening and CSV write helpers |
-| Updated `automation_models.py` | Config/result field additions |
-| Updated `automation.py` | Post-run CSV export integration |
-| Updated `scripts/run_fx_daily_protocol.py` | Env var wiring and summary printing |
+| `src/ugh_quantamental/fx_protocol/csv_exports.py` | Deterministic flattening, CSV write, layout publication, and manifest helpers |
+| Updated `automation_models.py` | Config/result field additions (`write_csv_exports`, `csv_output_dir`, `manifest_path`) |
+| Updated `automation.py` | Post-run CSV export, layout publication, and manifest generation |
+| Updated `scripts/run_fx_daily_protocol.py` | Env var wiring, fail-fast path guard, and summary printing |
+
+---
+
+## 12. manifest.json specification
+
+**Path:** `{csv_output_dir}/latest/manifest.json`
+
+Written (overwritten) on every run that produces a forecast CSV.  Path values are
+**relative to `csv_output_dir`** for portability.
+
+| Field | Type | Description |
+|---|---|---|
+| `as_of_jst` | `string` | ISO-8601 datetime of the forecast window (`as_of_jst.isoformat()`) |
+| `generated_at_utc` | `string` | UTC timestamp of manifest generation (`YYYY-MM-DDTHH:MM:SSZ`) |
+| `forecast_batch_id` | `string` | Forecast batch identifier |
+| `outcome_id` | `string \| null` | Outcome record ID, or `null` if not generated |
+| `evaluation_count` | `integer` | Number of evaluation records (0 when not generated) |
+| `forecast_csv_path` | `string` | Relative path — always `"latest/forecast.csv"` |
+| `outcome_csv_path` | `string \| null` | Relative path, or `null` when outcome not generated |
+| `evaluation_csv_path` | `string \| null` | Relative path, or `null` when evaluation not generated |
+| `protocol_version` | `string` | Protocol version string |
+| `theory_version` | `string` | Theory version string |
+| `engine_version` | `string` | Engine version string |
+| `schema_version` | `string` | Schema version string |
+
+**External tool access pattern:**
+
+1. Fetch `latest/manifest.json` from the data branch.
+2. Read `forecast_csv_path` (always non-null) to get the forecast CSV.
+3. Check `outcome_csv_path` / `evaluation_csv_path` — if non-null, fetch those CSVs too.
+4. Use `as_of_jst` and `forecast_batch_id` to cross-reference history if needed.
+
+---
+
+## 13. Fail-fast path guard
+
+`scripts/run_fx_daily_protocol.py` validates at startup (when `write_csv_exports=True`)
+that `FX_CSV_OUTPUT_DIR` is a path **inside** `FX_DATA_DIR`.  If it is not, the script
+prints `[ERROR]` and exits non-zero before any DB work.
+
+This prevents the silent failure mode where CSVs are written to `code/data/csv` (inside
+the code checkout) instead of `data/csv` (inside the data-branch checkout), which would
+cause them to be lost after the Actions runner terminates.

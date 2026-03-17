@@ -69,6 +69,7 @@ class TestAutomationResultCsvFields:
         assert r.forecast_csv_path is None
         assert r.outcome_csv_path is None
         assert r.evaluation_csv_path is None
+        assert r.manifest_path is None
 
     def test_with_csv_paths(self) -> None:
         r = FxDailyAutomationResult(
@@ -350,3 +351,128 @@ class TestAutomationCsvIntegration:
 
             assert result.forecast_csv_path is None
         session.close()
+
+
+# ---------------------------------------------------------------------------
+# Manifest integration
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="SQLAlchemy not installed")
+class TestAutomationManifestIntegration:
+    def _make_session(self):
+        from ugh_quantamental.persistence.db import (
+            create_all_tables,
+            create_db_engine,
+            create_session_factory,
+        )
+
+        engine = create_db_engine("sqlite+pysqlite:///:memory:")
+        create_all_tables(engine)
+        return create_session_factory(engine)()
+
+    def _run_forecast_only(self, tmpdir: str):
+        from unittest.mock import MagicMock
+
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+        from ugh_quantamental.fx_protocol.data_sources import FxMarketDataProvider
+
+        snap = _make_snapshot()
+        provider = MagicMock(spec=FxMarketDataProvider)
+        provider.fetch_snapshot.return_value = snap
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig(
+            run_outcome_evaluation=False,
+            run_forecast_generation=True,
+            write_csv_exports=True,
+            csv_output_dir=tmpdir,
+        )
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=snap.as_of_jst,
+        ), patch(
+            "ugh_quantamental.fx_protocol.automation.is_protocol_business_day",
+            return_value=True,
+        ):
+            result = run_fx_daily_protocol_once(cfg, provider, session)
+        session.close()
+        return result
+
+    def test_manifest_path_returned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self._run_forecast_only(tmpdir)
+            assert result.manifest_path is not None
+            assert os.path.isfile(result.manifest_path)
+
+    def test_manifest_json_in_latest_dir(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self._run_forecast_only(tmpdir)
+            assert result.manifest_path == os.path.join(
+                os.path.abspath(tmpdir), "latest", "manifest.json"
+            )
+
+    def test_manifest_has_required_keys(self) -> None:
+        import json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self._run_forecast_only(tmpdir)
+            assert result.manifest_path is not None
+            with open(result.manifest_path, encoding="utf-8") as fh:
+                manifest = json.load(fh)
+            for key in (
+                "as_of_jst", "generated_at_utc", "forecast_batch_id",
+                "outcome_id", "evaluation_count", "forecast_csv_path",
+                "outcome_csv_path", "evaluation_csv_path",
+                "protocol_version", "theory_version", "engine_version", "schema_version",
+            ):
+                assert key in manifest, f"manifest missing key: {key}"
+
+    def test_manifest_outcome_null_when_absent(self) -> None:
+        import json
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            result = self._run_forecast_only(tmpdir)
+            assert result.manifest_path is not None
+            with open(result.manifest_path, encoding="utf-8") as fh:
+                manifest = json.load(fh)
+            assert manifest["outcome_csv_path"] is None
+            assert manifest["evaluation_csv_path"] is None
+
+    def test_manifest_path_none_when_csv_disabled(self) -> None:
+        from unittest.mock import MagicMock
+
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+        from ugh_quantamental.fx_protocol.data_sources import FxMarketDataProvider
+
+        snap = _make_snapshot()
+        provider = MagicMock(spec=FxMarketDataProvider)
+        provider.fetch_snapshot.return_value = snap
+        session = self._make_session()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = FxDailyAutomationConfig(
+                run_outcome_evaluation=False,
+                run_forecast_generation=True,
+                write_csv_exports=False,
+                csv_output_dir=tmpdir,
+            )
+            with patch(
+                "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+                return_value=snap.as_of_jst,
+            ), patch(
+                "ugh_quantamental.fx_protocol.automation.is_protocol_business_day",
+                return_value=True,
+            ):
+                result = run_fx_daily_protocol_once(cfg, provider, session)
+            assert result.manifest_path is None
+        session.close()
+
+    def test_latest_forecast_csv_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._run_forecast_only(tmpdir)
+            assert os.path.isfile(os.path.join(tmpdir, "latest", "forecast.csv"))
+
+    def test_latest_outcome_absent_no_stale_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._run_forecast_only(tmpdir)
+            assert not os.path.exists(os.path.join(tmpdir, "latest", "outcome.csv"))

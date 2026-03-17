@@ -574,3 +574,188 @@ class TestExportDailyEvaluationCsv:
                 reader = csv.reader(fh)
                 header = next(reader)
             assert header == list(EVALUATION_FIELDNAMES)
+
+
+# ---------------------------------------------------------------------------
+# TestPublishCsvToLayout
+# ---------------------------------------------------------------------------
+
+
+class TestPublishCsvToLayout:
+    """Tests for publish_csv_to_layout()."""
+
+    from ugh_quantamental.fx_protocol.csv_exports import publish_csv_to_layout  # noqa: F401
+
+    def _make_forecast_csv(self, tmpdir: str) -> str:
+        as_of = datetime(2026, 3, 17, 8, 0, 0, tzinfo=_JST)
+        return export_daily_forecast_csv(_four_forecasts(), as_of, "USDJPY", tmpdir)
+
+    def _make_outcome_csv(self, tmpdir: str) -> str:
+        path = export_daily_outcome_csv(_outcome_up(), datetime(2026, 3, 17, 8, 0, 0, tzinfo=_JST), "USDJPY", tmpdir)
+        assert path is not None
+        return path
+
+    def test_forecast_only_creates_latest_and_history(self) -> None:
+        from ugh_quantamental.fx_protocol.csv_exports import publish_csv_to_layout
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fc = self._make_forecast_csv(tmpdir)
+            publish_csv_to_layout(tmpdir, "20260317", "fb_test_batch", fc, None, None)
+            assert os.path.exists(os.path.join(tmpdir, "latest", "forecast.csv"))
+            assert os.path.exists(
+                os.path.join(tmpdir, "history", "20260317", "fb_test_batch", "forecast.csv")
+            )
+
+    def test_history_uses_batch_id_subdir(self) -> None:
+        from ugh_quantamental.fx_protocol.csv_exports import publish_csv_to_layout
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fc = self._make_forecast_csv(tmpdir)
+            publish_csv_to_layout(tmpdir, "20260317", "fb_mybatch", fc, None, None)
+            assert os.path.exists(
+                os.path.join(tmpdir, "history", "20260317", "fb_mybatch", "forecast.csv")
+            )
+
+    def test_outcome_present_creates_latest_outcome(self) -> None:
+        from ugh_quantamental.fx_protocol.csv_exports import publish_csv_to_layout
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fc = self._make_forecast_csv(tmpdir)
+            oc = self._make_outcome_csv(tmpdir)
+            publish_csv_to_layout(tmpdir, "20260317", "fb_test_batch", fc, oc, None)
+            assert os.path.exists(os.path.join(tmpdir, "latest", "outcome.csv"))
+            assert os.path.exists(
+                os.path.join(tmpdir, "history", "20260317", "fb_test_batch", "outcome.csv")
+            )
+
+    def test_outcome_absent_deletes_stale_latest_outcome(self) -> None:
+        from ugh_quantamental.fx_protocol.csv_exports import publish_csv_to_layout
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fc = self._make_forecast_csv(tmpdir)
+            oc = self._make_outcome_csv(tmpdir)
+            # First run: outcome present
+            publish_csv_to_layout(tmpdir, "20260317", "fb_test_batch", fc, oc, None)
+            assert os.path.exists(os.path.join(tmpdir, "latest", "outcome.csv"))
+            # Second run: outcome absent — stale file must be removed
+            publish_csv_to_layout(tmpdir, "20260317", "fb_test_batch", fc, None, None)
+            assert not os.path.exists(os.path.join(tmpdir, "latest", "outcome.csv"))
+
+    def test_evaluation_absent_deletes_stale_latest_evaluation(self) -> None:
+        from ugh_quantamental.fx_protocol.csv_exports import publish_csv_to_layout
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fc = self._make_forecast_csv(tmpdir)
+            as_of = datetime(2026, 3, 17, 8, 0, 0, tzinfo=_JST)
+            ec = export_daily_evaluation_csv(_four_evaluations(), as_of, "USDJPY", tmpdir)
+            assert ec is not None
+            publish_csv_to_layout(tmpdir, "20260317", "fb_test_batch", fc, None, ec)
+            assert os.path.exists(os.path.join(tmpdir, "latest", "evaluation.csv"))
+            # Now absent
+            publish_csv_to_layout(tmpdir, "20260317", "fb_test_batch", fc, None, None)
+            assert not os.path.exists(os.path.join(tmpdir, "latest", "evaluation.csv"))
+
+    def test_return_dict_keys_forecast_only(self) -> None:
+        from ugh_quantamental.fx_protocol.csv_exports import publish_csv_to_layout
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fc = self._make_forecast_csv(tmpdir)
+            layout = publish_csv_to_layout(tmpdir, "20260317", "fb_test_batch", fc, None, None)
+            assert layout["latest_forecast"] == "latest/forecast.csv"
+            assert layout["latest_outcome"] is None
+            assert layout["latest_evaluation"] is None
+            assert layout["history_forecast"] == "history/20260317/fb_test_batch/forecast.csv"
+
+    def test_return_dict_keys_all_present(self) -> None:
+        from ugh_quantamental.fx_protocol.csv_exports import publish_csv_to_layout
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            as_of = datetime(2026, 3, 17, 8, 0, 0, tzinfo=_JST)
+            fc = self._make_forecast_csv(tmpdir)
+            oc = self._make_outcome_csv(tmpdir)
+            ec = export_daily_evaluation_csv(_four_evaluations(), as_of, "USDJPY", tmpdir)
+            assert ec is not None
+            layout = publish_csv_to_layout(tmpdir, "20260317", "fb_test_batch", fc, oc, ec)
+            assert layout["latest_outcome"] == "latest/outcome.csv"
+            assert layout["latest_evaluation"] == "latest/evaluation.csv"
+            assert layout["history_outcome"] == "history/20260317/fb_test_batch/outcome.csv"
+            assert layout["history_evaluation"] == "history/20260317/fb_test_batch/evaluation.csv"
+
+    def test_same_day_rerun_overwrites_history(self) -> None:
+        from ugh_quantamental.fx_protocol.csv_exports import publish_csv_to_layout
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fc = self._make_forecast_csv(tmpdir)
+            publish_csv_to_layout(tmpdir, "20260317", "fb_test_batch", fc, None, None)
+            publish_csv_to_layout(tmpdir, "20260317", "fb_test_batch", fc, None, None)
+            assert os.path.exists(
+                os.path.join(tmpdir, "history", "20260317", "fb_test_batch", "forecast.csv")
+            )
+
+
+# ---------------------------------------------------------------------------
+# TestWriteLatestManifest
+# ---------------------------------------------------------------------------
+
+
+class TestWriteLatestManifest:
+    """Tests for write_latest_manifest()."""
+
+    def test_writes_manifest_json(self) -> None:
+        from ugh_quantamental.fx_protocol.csv_exports import write_latest_manifest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data = {"as_of_jst": "2026-03-17T08:00:00", "forecast_batch_id": "fb_abc"}
+            path = write_latest_manifest(tmpdir, data)
+            assert os.path.exists(path)
+            assert path == os.path.join(os.path.abspath(tmpdir), "latest", "manifest.json")
+
+    def test_content_matches_input(self) -> None:
+        import json as _json
+
+        from ugh_quantamental.fx_protocol.csv_exports import write_latest_manifest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data: dict[str, object] = {
+                "as_of_jst": "2026-03-17T08:00:00",
+                "forecast_batch_id": "fb_abc",
+                "outcome_id": None,
+                "evaluation_count": 4,
+            }
+            path = write_latest_manifest(tmpdir, data)
+            with open(path, encoding="utf-8") as fh:
+                loaded = _json.load(fh)
+            assert loaded == data
+
+    def test_null_fields_serialize_as_null(self) -> None:
+        import json as _json
+
+        from ugh_quantamental.fx_protocol.csv_exports import write_latest_manifest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data: dict[str, object] = {"outcome_csv_path": None, "evaluation_csv_path": None}
+            path = write_latest_manifest(tmpdir, data)
+            with open(path, encoding="utf-8") as fh:
+                loaded = _json.load(fh)
+            assert loaded["outcome_csv_path"] is None
+            assert loaded["evaluation_csv_path"] is None
+
+    def test_idempotent_overwrite(self) -> None:
+        import json as _json
+
+        from ugh_quantamental.fx_protocol.csv_exports import write_latest_manifest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            write_latest_manifest(tmpdir, {"v": 1})
+            path = write_latest_manifest(tmpdir, {"v": 2})
+            with open(path, encoding="utf-8") as fh:
+                loaded = _json.load(fh)
+            assert loaded["v"] == 2
+
+    def test_creates_parent_dir(self) -> None:
+        from ugh_quantamental.fx_protocol.csv_exports import write_latest_manifest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            new_base = os.path.join(tmpdir, "deep", "subdir")
+            path = write_latest_manifest(new_base, {"k": "v"})
+            assert os.path.exists(path)

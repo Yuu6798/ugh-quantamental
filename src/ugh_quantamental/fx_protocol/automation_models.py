@@ -46,3 +46,4 @@ class FxDailyAutomationResult(BaseModel):
     forecast_csv_path: str | None = None
     outcome_csv_path: str | None = None
     evaluation_csv_path: str | None = None
+    manifest_path: str | None = None

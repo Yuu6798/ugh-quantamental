@@ -371,6 +371,40 @@ def run_fx_daily_protocol_once(
                 config.csv_output_dir,
             )
 
+    # --- Step 6: publish to latest/ + history/ layout and write manifest ---
+    manifest_path: str | None = None
+
+    if config.write_csv_exports and forecast_csv_path is not None:
+        from ugh_quantamental.fx_protocol.csv_exports import (
+            publish_csv_to_layout,
+            write_latest_manifest,
+        )
+
+        date_str = as_of_jst.strftime("%Y%m%d")
+        layout = publish_csv_to_layout(
+            config.csv_output_dir,
+            date_str,
+            forecast_batch_id,  # type: ignore[arg-type]  # not None when forecast_csv_path set
+            forecast_csv_path,
+            outcome_csv_path,
+            evaluation_csv_path,
+        )
+        manifest_data: dict[str, object] = {
+            "as_of_jst": as_of_jst.isoformat(),
+            "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "forecast_batch_id": forecast_batch_id,
+            "outcome_id": outcome_id,
+            "evaluation_count": evaluation_count,
+            "forecast_csv_path": layout["latest_forecast"],
+            "outcome_csv_path": layout["latest_outcome"],
+            "evaluation_csv_path": layout["latest_evaluation"],
+            "protocol_version": config.protocol_version,
+            "theory_version": config.theory_version,
+            "engine_version": config.engine_version,
+            "schema_version": config.schema_version,
+        }
+        manifest_path = write_latest_manifest(config.csv_output_dir, manifest_data)
+
     return FxDailyAutomationResult(
         as_of_jst=as_of_jst,
         forecast_batch_id=forecast_batch_id,
@@ -382,4 +416,5 @@ def run_fx_daily_protocol_once(
         forecast_csv_path=forecast_csv_path,
         outcome_csv_path=outcome_csv_path,
         evaluation_csv_path=evaluation_csv_path,
+        manifest_path=manifest_path,
     )

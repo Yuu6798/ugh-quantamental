@@ -33,7 +33,9 @@ jobs:
       FX_SCHEMA_VERSION: ${{ vars.FX_SCHEMA_VERSION || 'v1' }}
       FX_PROTOCOL_VERSION: ${{ vars.FX_PROTOCOL_VERSION || 'v1' }}
       FX_WRITE_CSV_EXPORTS: ${{ vars.FX_WRITE_CSV_EXPORTS || '1' }}
-      FX_CSV_OUTPUT_DIR: ${{ vars.FX_CSV_OUTPUT_DIR || './data/csv' }}
+      # Absolute path: {workspace}/data/csv lands inside the data-branch checkout.
+      # A relative path here would resolve to code/ and never be pushed.
+      FX_CSV_OUTPUT_DIR: ${{ vars.FX_CSV_OUTPUT_DIR || format('{0}/data/csv', github.workspace) }}
       FX_DATA_DIR: ${{ github.workspace }}/data
 
     steps:
