@@ -76,16 +76,13 @@ Uses the [Alpha Vantage](https://www.alphavantage.co) `FX_DAILY` endpoint (free 
 
 Endpoint:
 ```
-https://www.alphavantage.co/query?function=FX_DAILY&from_symbol=USD&to_symbol=JPY&outputsize=full&apikey=<key>
+https://www.alphavantage.co/query?function=FX_DAILY&from_symbol=USD&to_symbol=JPY&outputsize=compact&apikey=<key>
 ```
 
 - Requires `ALPHAVANTAGE_API_KEY` set as a GitHub Actions repository secret.
 - Uses only stdlib `urllib.request`; no third-party SDK dependency.
-- `outputsize=full` returns full daily history; completed windows are filtered to those
-  with `window_end_jst ≤ as_of_jst`.
-- **Freshness guard:** the provider allows up to **1 business-day provider lag** before
-  raising a `ValueError`.  This tolerates the ~24-hour data publication delay that is
-  common with free-tier Alpha Vantage keys.
+- `outputsize=compact` returns the last ~100 data points, which is sufficient to cover
+  the required 20+ completed windows.
 - **`current_spot`** is set to the `close_price` of the newest completed window (not a
   separate live quote field), which avoids look-ahead contamination.
 
@@ -203,11 +200,12 @@ Orchestration function in `automation.py`:
 
 1. Determine canonical `as_of_jst` (08:00 JST today or previous business day)
 2. Fetch one USDJPY snapshot via `provider.fetch_snapshot(as_of_jst)`
-3. Build `DailyForecastWorkflowRequest` using request builders
-4. If `config.run_forecast_generation`: call `run_daily_forecast_workflow`; idempotent
-5. If `config.run_outcome_evaluation` and prior window data is available in snapshot: call `run_daily_outcome_evaluation_workflow`; idempotent
-6. If `config.write_csv_exports`: write forecast / outcome / evaluation CSVs under `config.csv_output_dir`; skipped gracefully when the relevant batch or outcome ID is `None`
-7. Return `FxDailyAutomationResult`
+3. **Freshness guard** (orchestration layer): validate that the newest completed window in the snapshot is at most **1 business-day behind** `as_of_jst`; raises `ValueError` if the data is staler than that.  This check lives in `run_fx_daily_protocol_once`, not in the provider itself — direct callers of `fetch_snapshot` bypass this guard.
+4. Build `DailyForecastWorkflowRequest` using request builders
+5. If `config.run_forecast_generation`: call `run_daily_forecast_workflow`; idempotent
+6. If `config.run_outcome_evaluation` and prior window data is available in snapshot: call `run_daily_outcome_evaluation_workflow`; idempotent
+7. If `config.write_csv_exports`: write forecast / outcome / evaluation CSVs under `config.csv_output_dir`; skipped gracefully when the relevant batch or outcome ID is `None`
+8. Return `FxDailyAutomationResult`
 
 Idempotency: rerunning the same `as_of_jst` must not duplicate records. Both workflows are already idempotent per Milestones 14 and 15. CSV exports overwrite the same deterministic paths on each rerun.
 
