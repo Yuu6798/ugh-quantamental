@@ -184,7 +184,10 @@ def _process_classified_context(
             validation_ok = validation.ok
             if not validation_ok:
                 reason = "validation-failed"
-                revert_working_tree_changes()
+                _state_path = str(getattr(state, "_path", ""))
+                revert_working_tree_changes(
+                    preserve_paths=(_state_path,) if _state_path else ()
+                )
             else:
                 if has_changes():
                     commit_changes(f"AUTO: apply codex fix task for PR #{context.pr_number} ({key})")

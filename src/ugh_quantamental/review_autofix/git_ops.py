@@ -47,7 +47,7 @@ def push_head_branch(branch: str) -> None:
     subprocess.run(["git", "push", "origin", f"HEAD:{branch}"], check=True)
 
 
-def revert_working_tree_changes() -> None:
+def revert_working_tree_changes(preserve_paths: tuple[str, ...] = ()) -> None:
     """Restore all tracked files to HEAD state and remove untracked files created by the bot.
 
     Called when validation fails after the executor writes new file content to disk, so that
@@ -56,8 +56,10 @@ def revert_working_tree_changes() -> None:
     restored to their HEAD versions.  Best-effort — any error is silently ignored so that
     a revert failure never blocks the bot from completing its run.
 
-    ``.autofix-bot/`` files (state.json, shadow-audit.db, …) are intentionally excluded
-    from removal so that ``state.mark(key)`` can still complete after a validation failure.
+    Files under ``.autofix-bot/`` are always preserved, and any additional paths supplied
+    via *preserve_paths* (e.g. a custom ``STATE_STORE_PATH``) are also skipped so that
+    ``state.mark(key)`` can still complete after a validation failure regardless of where
+    the state file lives.
     """
     import os
 
@@ -68,6 +70,8 @@ def revert_working_tree_changes() -> None:
     try:
         for path in list_untracked_files():
             if ".autofix-bot/" in path:
+                continue
+            if any(path == p or path.startswith(p.rstrip("/") + "/") for p in preserve_paths):
                 continue
             try:
                 os.remove(path)
