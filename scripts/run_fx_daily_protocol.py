@@ -58,10 +58,12 @@ def main() -> None:
     data_branch = _env("FX_DATA_BRANCH", "fx-daily-data")
 
     # SQLite path: full path wins, else build from filename.
+    # data_dir is always resolved so the CSV path guard below can reference it
+    # regardless of which branch is taken.
+    data_dir = _env("FX_DATA_DIR", "./data")
     sqlite_path = _env("FX_SQLITE_PATH")
     if not sqlite_path:
         sqlite_filename = _env("FX_SQLITE_FILENAME", "fx_protocol.db")
-        data_dir = _env("FX_DATA_DIR", "./data")
         sqlite_path = os.path.join(data_dir, sqlite_filename)
 
     run_outcome = _env("FX_DISABLE_OUTCOME") != "1"
