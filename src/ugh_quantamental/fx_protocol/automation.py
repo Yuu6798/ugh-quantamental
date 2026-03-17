@@ -15,7 +15,11 @@ from ugh_quantamental.fx_protocol.automation_models import (
     FxDailyAutomationConfig,
     FxDailyAutomationResult,
 )
-from ugh_quantamental.fx_protocol.calendar import current_as_of_jst, is_protocol_business_day
+from ugh_quantamental.fx_protocol.calendar import (
+    current_as_of_jst,
+    is_protocol_business_day,
+    prev_as_of_jst,
+)
 from ugh_quantamental.fx_protocol.data_sources import FxMarketDataProvider
 from ugh_quantamental.fx_protocol.ids import make_forecast_batch_id
 from ugh_quantamental.fx_protocol.request_builders import (
@@ -221,15 +225,41 @@ def run_fx_daily_protocol_once(
     # causing today's forecast batch to be built from stale history.  Once
     # persisted it would be treated as idempotent-complete by later reruns,
     # permanently blocking regeneration with correct data.
+    #
+    # Exception: Yahoo Finance FX daily bars are typically published on the next
+    # calendar day, so a lag of exactly 1 protocol business day is acceptable.
+    # When this occurs, as_of_jst is adjusted to newest_end and the snapshot is
+    # re-fetched so that snapshot.as_of_jst and all derived batch IDs are
+    # consistent with the actual data available.
     if not snapshot.completed_windows:
         raise ValueError("Provider returned a snapshot with no completed windows.")
     newest_end = snapshot.completed_windows[-1].window_end_jst
     if newest_end != as_of_jst:
-        raise ValueError(
-            f"Stale snapshot: newest completed window ends at {newest_end.isoformat()} "
-            f"but as_of_jst is {as_of_jst.isoformat()}. "
-            "Provider data may be lagging or cached."
-        )
+        if newest_end == prev_as_of_jst(as_of_jst):
+            print(
+                f"[WARN] Provider data is 1 business day behind "
+                f"(newest window ends {newest_end.isoformat()}); "
+                f"adjusting as_of_jst from {as_of_jst.isoformat()} "
+                f"to {newest_end.isoformat()}.",
+                flush=True,
+            )
+            as_of_jst = newest_end
+            snapshot = provider.fetch_snapshot(as_of_jst)
+            if not snapshot.completed_windows:
+                raise ValueError("Provider returned a snapshot with no completed windows.")
+            newest_end = snapshot.completed_windows[-1].window_end_jst
+            if newest_end != as_of_jst:
+                raise ValueError(
+                    f"Stale snapshot after 1-day fallback: newest completed window ends at "
+                    f"{newest_end.isoformat()} but as_of_jst is {as_of_jst.isoformat()}. "
+                    "Provider data may be lagging or cached."
+                )
+        else:
+            raise ValueError(
+                f"Stale snapshot: newest completed window ends at {newest_end.isoformat()} "
+                f"but as_of_jst is {as_of_jst.isoformat()}. "
+                "Provider data may be lagging or cached."
+            )
 
     # --- Step 3: forecast generation ---
     forecast_batch_id: str | None = None

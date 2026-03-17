@@ -12,6 +12,7 @@ from ugh_quantamental.fx_protocol.calendar import (
     is_protocol_business_day,
     next_as_of_jst,
     next_protocol_business_day,
+    prev_as_of_jst,
 )
 
 JST = ZoneInfo("Asia/Tokyo")
@@ -188,3 +189,47 @@ def test_current_and_next_as_of_are_one_business_day_apart() -> None:
     expected_next = next_protocol_business_day(current).replace(hour=8)
     actual_next = next_as_of_jst(_MON)
     assert actual_next == expected_next
+
+
+# ---------------------------------------------------------------------------
+# prev_as_of_jst
+# ---------------------------------------------------------------------------
+
+
+def test_prev_as_of_jst_from_tuesday_is_monday_at_0800() -> None:
+    result = prev_as_of_jst(_TUE)
+    assert result == datetime(2026, 3, 9, 8, 0, 0, tzinfo=JST)  # Monday
+
+
+def test_prev_as_of_jst_from_monday_is_friday_at_0800() -> None:
+    result = prev_as_of_jst(_MON)
+    assert result.weekday() == 4  # Friday
+    assert result.hour == 8
+
+
+def test_prev_as_of_jst_from_saturday_is_friday_at_0800() -> None:
+    result = prev_as_of_jst(_SAT)
+    assert result.weekday() == 4  # Friday
+    assert result.hour == 8
+
+
+def test_prev_as_of_jst_from_sunday_is_friday_at_0800() -> None:
+    result = prev_as_of_jst(_SUN)
+    assert result.weekday() == 4  # Friday
+    assert result.hour == 8
+
+
+def test_prev_as_of_jst_is_before_input() -> None:
+    result = prev_as_of_jst(_WED)
+    assert result < _WED
+
+
+def test_prev_as_of_jst_timezone_aware() -> None:
+    result = prev_as_of_jst(_THU)
+    assert result.tzinfo is not None
+
+
+def test_prev_and_next_as_of_jst_are_inverse() -> None:
+    """prev_as_of_jst(next_as_of_jst(dt)) == current_as_of_jst(dt) for weekdays."""
+    current = current_as_of_jst(_WED)
+    assert prev_as_of_jst(next_as_of_jst(_WED)) == current
