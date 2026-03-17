@@ -19,10 +19,12 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # FX_DATA_URL and FX_DATA_AUTH_TOKEN are not required.
-      # The built-in Yahoo Finance public provider is used by default.
-      # Set FX_DATA_URL as a repository secret only if you want to override
-      # with a private custom endpoint.
+      # Provider selection (evaluated in order):
+      #   FX_DATA_URL set          → custom HttpJsonFxMarketDataProvider
+      #   ALPHAVANTAGE_API_KEY set → AlphaVantageXMarketDataProvider (recommended)
+      #   neither set              → Yahoo Finance public provider (fallback)
+      # Set ALPHAVANTAGE_API_KEY as a repository secret (free key from alphavantage.co).
+      ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
       FX_DATA_URL: ${{ secrets.FX_DATA_URL }}
       FX_DATA_BRANCH: ${{ vars.FX_DATA_BRANCH || 'fx-daily-data' }}
       FX_SQLITE_FILENAME: ${{ vars.FX_SQLITE_FILENAME || 'fx_protocol.db' }}

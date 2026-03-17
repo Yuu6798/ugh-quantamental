@@ -3,6 +3,7 @@
 Provides:
 - ``FxMarketDataProvider``: structural protocol (unchanged)
 - ``YahooFinanceFxMarketDataProvider``: default public provider (no auth required)
+- ``AlphaVantageXMarketDataProvider``: Alpha Vantage FX_DAILY provider (free API key required)
 - ``HttpJsonFxMarketDataProvider``: optional custom-endpoint provider (retained for
   users with private data feeds; requires ``FX_DATA_URL``)
 
@@ -15,7 +16,7 @@ import json
 import os
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Protocol, runtime_checkable
 from zoneinfo import ZoneInfo
 
@@ -316,6 +317,253 @@ class YahooFinanceFxMarketDataProvider:
             ) from exc
 
         return _parse_yahoo_snapshot(payload, as_of_jst)
+
+
+# ---------------------------------------------------------------------------
+# Alpha Vantage FX_DAILY provider (free API key required)
+# ---------------------------------------------------------------------------
+
+_AV_BASE_URL = "https://www.alphavantage.co/query"
+_AV_FROM_SYMBOL = "USD"
+_AV_TO_SYMBOL = "JPY"
+_AV_OUTPUT_SIZE = "compact"  # last ~100 data points; ensures >= 20 completed windows
+
+
+def _av_date_to_window(
+    date_str: str,
+    open_p: float,
+    high_p: float,
+    low_p: float,
+    close_p: float,
+) -> FxCompletedWindow | None:
+    """Convert one Alpha Vantage ``FX_DAILY`` date entry into a protocol ``FxCompletedWindow``.
+
+    Normalization rule (deterministic)
+    -----------------------------------
+    Alpha Vantage ``FX_DAILY`` dates are UTC calendar date strings (``YYYY-MM-DD``).
+    The protocol window is aligned to 08:00 JST, so the mapping is:
+
+    1. Parse the date string as a UTC calendar date.
+    2. Construct ``window_start_jst`` = 08:00 JST on that date.
+    3. Discard dates that fall on Saturday or Sunday (JST calendar).
+    4. Derive ``window_end_jst`` = ``next_as_of_jst(window_start_jst)``
+       (08:00 JST on the next protocol business day, skipping weekends).
+    5. If ``high_p < low_p`` (rare data artefact), swap them.
+    6. Clamp ``open_p`` and ``close_p`` to ``[low_p, high_p]`` to tolerate
+       minor floating-point drift in the source data.
+
+    Returns ``None`` for weekend dates, invalid date strings, or entries that
+    fail ``FxCompletedWindow`` construction.
+    """
+    try:
+        d = date.fromisoformat(date_str)
+    except ValueError:
+        return None
+
+    window_start = datetime(d.year, d.month, d.day, 8, 0, 0, tzinfo=_JST)
+    if not is_protocol_business_day(window_start):
+        return None
+
+    window_end = next_as_of_jst(window_start)
+
+    # Guard against inverted high/low (very rare in FX source data).
+    if high_p < low_p:
+        high_p, low_p = low_p, high_p
+
+    # Clamp open/close to [low, high] so the strict protocol validator accepts
+    # otherwise-valid bars that have minor floating-point drift.
+    open_p = max(low_p, min(high_p, open_p))
+    close_p = max(low_p, min(high_p, close_p))
+
+    try:
+        return FxCompletedWindow(
+            window_start_jst=window_start,
+            window_end_jst=window_end,
+            open_price=open_p,
+            high_price=high_p,
+            low_price=low_p,
+            close_price=close_p,
+        )
+    except ValueError:
+        return None
+
+
+def _parse_av_snapshot(payload: dict, as_of_jst: datetime) -> FxProtocolMarketSnapshot:
+    """Parse an Alpha Vantage ``FX_DAILY`` response into an ``FxProtocolMarketSnapshot``.
+
+    Parameters
+    ----------
+    payload:
+        Parsed JSON from ``{_AV_BASE_URL}?function=FX_DAILY&from_symbol=USD
+        &to_symbol=JPY&outputsize=compact&apikey=...``.
+    as_of_jst:
+        Canonical 08:00 JST timestamp from the protocol calendar.  Only windows
+        whose ``window_end_jst <= as_of_jst`` are included (completed windows).
+
+    Raises
+    ------
+    FxDataFetchError
+        On unexpected response shape, empty time series (e.g. invalid API key or
+        rate limit), or fewer than 20 completed protocol windows.
+    """
+    try:
+        time_series: dict = payload.get("Time Series FX (Daily)") or {}
+    except (AttributeError, TypeError) as exc:
+        raise FxDataFetchError(
+            f"Unexpected Alpha Vantage response shape: {exc}"
+        ) from exc
+
+    if not time_series:
+        # Alpha Vantage returns rate-limit or auth errors as a 200 with a Note/Information key.
+        note = payload.get("Note") or payload.get("Information") or ""
+        raise FxDataFetchError(
+            f"Alpha Vantage returned no time-series data. "
+            f"API message: {note!r}"
+        )
+
+    # current_spot: close price from the most recent entry in the time series.
+    latest_date_str = max(time_series.keys())
+    try:
+        current_spot = float(time_series[latest_date_str].get("4. close") or 0)
+    except (TypeError, ValueError) as exc:
+        raise FxDataFetchError(
+            f"Cannot parse current_spot from latest close: {exc}"
+        ) from exc
+    if current_spot <= 0:
+        raise FxDataFetchError(f"current_spot must be positive; got {current_spot}")
+
+    windows: list[FxCompletedWindow] = []
+    for date_str, entry in time_series.items():
+        try:
+            open_p = float(entry["1. open"])
+            high_p = float(entry["2. high"])
+            low_p = float(entry["3. low"])
+            close_p = float(entry["4. close"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        win = _av_date_to_window(date_str, open_p, high_p, low_p, close_p)
+        if win is None:
+            continue
+
+        # Include only windows that have ended by as_of_jst (completed windows).
+        if win.window_end_jst <= as_of_jst:
+            windows.append(win)
+
+    windows.sort(key=lambda w: w.window_start_jst)
+
+    if len(windows) < 20:
+        raise FxDataFetchError(
+            f"Insufficient completed protocol windows: need ≥ 20, got {len(windows)} "
+            f"(as_of_jst={as_of_jst.isoformat()}). "
+            "The fetch range may need to be increased or the data source is lagging."
+        )
+
+    provenance = MarketDataProvenance(
+        vendor="alpha_vantage",
+        feed_name=f"FX_DAILY/{_AV_FROM_SYMBOL}{_AV_TO_SYMBOL}",
+        price_type="mid",
+        resolution="1d",
+        timezone="UTC",
+        retrieved_at_utc=datetime.now(timezone.utc),
+    )
+
+    return FxProtocolMarketSnapshot(
+        pair=CurrencyPair.USDJPY,
+        as_of_jst=as_of_jst,
+        current_spot=current_spot,
+        completed_windows=tuple(windows),
+        market_data_provenance=provenance,
+    )
+
+
+class AlphaVantageXMarketDataProvider:
+    """USDJPY market data provider using the Alpha Vantage FX_DAILY API.
+
+    Requires a free API key (register at https://www.alphavantage.co).
+    Uses only stdlib ``urllib``.
+
+    Endpoint::
+
+        https://www.alphavantage.co/query
+            ?function=FX_DAILY&from_symbol=USD&to_symbol=JPY&outputsize=compact&apikey={key}
+
+    Configure via:
+
+    - constructor parameter ``api_key``
+    - environment variable ``ALPHAVANTAGE_API_KEY``
+
+    Normalization (see ``_av_date_to_window`` for full rules):
+
+    - Each daily entry date (``YYYY-MM-DD`` UTC) is mapped to a JST protocol window.
+    - Weekend dates (Saturday / Sunday) are discarded.
+    - Canonical protocol window: ``[08:00 JST date D, 08:00 JST next business day)``.
+    - Only windows whose end ≤ ``as_of_jst`` are returned (completed windows).
+    - ``current_spot`` is taken from the close price of the most recent entry.
+
+    In tests, stub this class by monkeypatching ``fetch_snapshot`` or by
+    patching ``urllib.request.urlopen``; no real network calls are made in tests.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str | None = None,
+        timeout: int = 30,
+    ) -> None:
+        self._api_key = api_key or os.environ.get("ALPHAVANTAGE_API_KEY", "")
+        self._timeout = timeout
+
+    def fetch_snapshot(self, as_of_jst: datetime) -> FxProtocolMarketSnapshot:
+        """Fetch and parse a USDJPY snapshot from the Alpha Vantage FX_DAILY API.
+
+        Raises
+        ------
+        FxDataFetchError
+            On missing API key, network failure, non-200 response, invalid JSON,
+            rate-limit response, or fewer than 20 completed protocol windows.
+        """
+        if not self._api_key:
+            raise FxDataFetchError(
+                "ALPHAVANTAGE_API_KEY is not set. "
+                "Obtain a free key at https://www.alphavantage.co and set the "
+                "ALPHAVANTAGE_API_KEY environment variable or pass api_key= to the constructor."
+            )
+
+        url = (
+            f"{_AV_BASE_URL}"
+            f"?function=FX_DAILY"
+            f"&from_symbol={_AV_FROM_SYMBOL}"
+            f"&to_symbol={_AV_TO_SYMBOL}"
+            f"&outputsize={_AV_OUTPUT_SIZE}"
+            f"&apikey={self._api_key}"
+        )
+        headers = {"Accept": "application/json"}
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                status = resp.status
+                body = resp.read()
+        except urllib.error.HTTPError as exc:
+            raise FxDataFetchError(
+                f"HTTP {exc.code} from Alpha Vantage: {exc.reason}"
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise FxDataFetchError(
+                f"Network error fetching Alpha Vantage: {exc.reason}"
+            ) from exc
+
+        if status != 200:
+            raise FxDataFetchError(f"HTTP {status} from Alpha Vantage")
+
+        try:
+            payload = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise FxDataFetchError(
+                f"Invalid JSON from Alpha Vantage: {exc}"
+            ) from exc
+
+        return _parse_av_snapshot(payload, as_of_jst)
 
 
 # ---------------------------------------------------------------------------
