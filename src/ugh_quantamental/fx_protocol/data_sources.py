@@ -13,6 +13,7 @@ No provider-specific SDK dependency; uses only stdlib urllib.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import urllib.error
 import urllib.request
@@ -33,6 +34,7 @@ from ugh_quantamental.fx_protocol.models import (
 )
 
 _JST = ZoneInfo("Asia/Tokyo")
+logger = logging.getLogger(__name__)
 
 
 class FxDataFetchError(Exception):
@@ -553,6 +555,7 @@ class AlphaVantageXMarketDataProvider:
         try:
             payload = json.loads(body)
         except json.JSONDecodeError as exc:
+            logger.debug("Alpha Vantage returned non-JSON body: %s", exc)
             raise FxDataFetchError(
                 f"Invalid JSON from Alpha Vantage: {exc}"
             ) from exc

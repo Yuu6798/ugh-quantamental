@@ -8,6 +8,7 @@ SQLAlchemy is required at call time; the module itself is importable without it.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -30,6 +31,8 @@ from ugh_quantamental.fx_protocol.request_builders import (
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 
 def _make_default_ugh_request(snapshot_ref: str):  # type: ignore[return]
@@ -236,12 +239,12 @@ def run_fx_daily_protocol_once(
     newest_end = snapshot.completed_windows[-1].window_end_jst
     if newest_end != as_of_jst:
         if newest_end == prev_as_of_jst(as_of_jst):
-            print(
-                f"[WARN] Provider data is 1 business day behind "
-                f"(newest window ends {newest_end.isoformat()}); "
-                f"adjusting as_of_jst from {as_of_jst.isoformat()} "
-                f"to {newest_end.isoformat()}.",
-                flush=True,
+            logger.warning(
+                "Provider data is 1 business day behind "
+                "(newest window ends %s); adjusting as_of_jst from %s to %s.",
+                newest_end.isoformat(),
+                as_of_jst.isoformat(),
+                newest_end.isoformat(),
             )
             as_of_jst = newest_end
             snapshot = provider.fetch_snapshot(as_of_jst)

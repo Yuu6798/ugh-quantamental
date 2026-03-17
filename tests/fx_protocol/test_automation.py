@@ -694,6 +694,90 @@ class TestRunFxDailyProtocolOnce:
                 run_fx_daily_protocol_once(cfg, provider, session)
         session.close()
 
+    def test_one_day_lag_second_fetch_still_stale_raises(self) -> None:
+        """1-day fallback re-fetch returns a snapshot that is STILL stale: must raise ValueError.
+
+        Regression for automation.py line 252.  After the 1-day fallback adjusts
+        as_of_jst to adjusted_as_of and calls fetch_snapshot a second time, if the
+        returned snapshot's newest window_end != adjusted_as_of, the function must
+        raise ValueError('Stale snapshot after 1-day fallback').
+        """
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+        from ugh_quantamental.fx_protocol.calendar import next_as_of_jst
+        from ugh_quantamental.fx_protocol.models import MarketDataProvenance
+
+        # snap_day1: newest_end == adjusted_as_of (1 business day behind today).
+        snap_day1 = self._make_snapshot_no_previous_window()
+        adjusted_as_of = snap_day1.as_of_jst      # day D
+        today_as_of = next_as_of_jst(adjusted_as_of)  # day D+1
+
+        # snap_still_stale: built from 21 windows (wins[1:] = 20 windows whose
+        # newest end is wins[20].window_end_jst, which is one biz-day AFTER
+        # adjusted_as_of).  This makes newest_end != adjusted_as_of and triggers
+        # the "Stale snapshot after 1-day fallback" error at line 252.
+        wins21 = _build_windows_raw(21)
+        wins_still_stale = wins21[1:]  # drop first window → 20 windows, newest end > adjusted_as_of
+        snap_still_stale = FxProtocolMarketSnapshot(
+            pair=snap_day1.pair,
+            as_of_jst=wins_still_stale[-1].window_end_jst,
+            current_spot=snap_day1.current_spot,
+            completed_windows=wins_still_stale,
+            market_data_provenance=MarketDataProvenance(
+                vendor="test",
+                feed_name="feed",
+                price_type="mid",
+                resolution="1d",
+                timezone="Asia/Tokyo",
+                retrieved_at_utc=snap_day1.market_data_provenance.retrieved_at_utc,
+            ),
+        )
+
+        provider = MagicMock(spec=FxMarketDataProvider)
+        # First call returns snap_day1 (1 day behind → triggers fallback).
+        # Second call (after as_of_jst is adjusted) returns snap_still_stale
+        # whose newest_end != adjusted_as_of → must raise line-252 ValueError.
+        provider.fetch_snapshot.side_effect = [snap_day1, snap_still_stale]
+
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig(run_outcome_evaluation=False)
+
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=today_as_of,
+        ):
+            with pytest.raises(ValueError, match="Stale snapshot after 1-day fallback"):
+                run_fx_daily_protocol_once(cfg, provider, session)
+
+        assert provider.fetch_snapshot.call_count == 2
+        session.close()
+
+    def test_one_day_lag_emits_logger_warning(self, caplog) -> None:
+        """1-day lag fallback emits a logging.warning (not a bare print)."""
+        import logging
+
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+        from ugh_quantamental.fx_protocol.calendar import next_as_of_jst
+
+        snap = self._make_snapshot_no_previous_window()
+        adjusted_as_of = snap.as_of_jst
+        today_as_of = next_as_of_jst(adjusted_as_of)
+
+        provider = MagicMock(spec=FxMarketDataProvider)
+        provider.fetch_snapshot.side_effect = [snap, snap]
+
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig(run_outcome_evaluation=False)
+
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=today_as_of,
+        ):
+            with caplog.at_level(logging.WARNING, logger="ugh_quantamental.fx_protocol.automation"):
+                run_fx_daily_protocol_once(cfg, provider, session)
+
+        assert any("1 business day behind" in record.message for record in caplog.records)
+        session.close()
+
 
 # ---------------------------------------------------------------------------
 # _build_windows_raw helper for test_automation
