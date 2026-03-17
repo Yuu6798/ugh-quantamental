@@ -10,7 +10,9 @@ Importable without SQLAlchemy.
 from __future__ import annotations
 
 import csv
+import json
 import os
+import shutil
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -366,3 +368,95 @@ def export_daily_evaluation_csv(
     path = os.path.join(csv_output_dir, "evaluations", f"{stem}_evaluation.csv")
     rows = evaluation_records_to_rows(evaluations)
     return write_csv_rows(path, rows, EVALUATION_FIELDNAMES)
+
+
+# ---------------------------------------------------------------------------
+# Layout publication and manifest helpers
+# ---------------------------------------------------------------------------
+
+
+def publish_csv_to_layout(
+    csv_output_dir: str,
+    date_str: str,
+    forecast_batch_id: str,
+    forecast_path: str,
+    outcome_path: str | None,
+    evaluation_path: str | None,
+) -> dict[str, str | None]:
+    """Copy CSV files into the ``latest/`` and ``history/`` canonical layout.
+
+    Layout written:
+
+    - ``latest/forecast.csv`` — always; overwritten on each run.
+    - ``latest/outcome.csv`` — written when *outcome_path* is not ``None``;
+      **deleted** from ``latest/`` when ``None`` so stale files are not served.
+    - ``latest/evaluation.csv`` — same policy as outcome.
+    - ``history/{date_str}/{forecast_batch_id}/forecast.csv`` — immutable archive.
+    - ``history/{date_str}/{forecast_batch_id}/outcome.csv`` — when present.
+    - ``history/{date_str}/{forecast_batch_id}/evaluation.csv`` — when present.
+
+    The ``history/`` sub-tree uses *forecast_batch_id* as a run-scoped directory.
+    Because the batch ID is deterministic for a given ``(pair, as_of_jst,
+    protocol_version)`` triple, same-day reruns land in the same history directory
+    and overwrite it — this is the intended idempotency behaviour.
+
+    Returns a ``dict`` whose values are paths **relative to** *csv_output_dir*,
+    or ``None`` for absent optional files.
+    """
+    base = os.path.abspath(csv_output_dir)
+    latest_dir = os.path.join(base, "latest")
+    history_dir = os.path.join(base, "history", date_str, forecast_batch_id)
+    os.makedirs(latest_dir, exist_ok=True)
+    os.makedirs(history_dir, exist_ok=True)
+
+    # forecast — always present
+    shutil.copy2(forecast_path, os.path.join(latest_dir, "forecast.csv"))
+    shutil.copy2(forecast_path, os.path.join(history_dir, "forecast.csv"))
+
+    result: dict[str, str | None] = {
+        "latest_forecast": "latest/forecast.csv",
+        "history_forecast": f"history/{date_str}/{forecast_batch_id}/forecast.csv",
+        "latest_outcome": None,
+        "history_outcome": None,
+        "latest_evaluation": None,
+        "history_evaluation": None,
+    }
+
+    # outcome — write or delete stale
+    latest_outcome = os.path.join(latest_dir, "outcome.csv")
+    if outcome_path is not None:
+        shutil.copy2(outcome_path, latest_outcome)
+        shutil.copy2(outcome_path, os.path.join(history_dir, "outcome.csv"))
+        result["latest_outcome"] = "latest/outcome.csv"
+        result["history_outcome"] = f"history/{date_str}/{forecast_batch_id}/outcome.csv"
+    elif os.path.exists(latest_outcome):
+        os.remove(latest_outcome)
+
+    # evaluation — write or delete stale
+    latest_evaluation = os.path.join(latest_dir, "evaluation.csv")
+    if evaluation_path is not None:
+        shutil.copy2(evaluation_path, latest_evaluation)
+        shutil.copy2(evaluation_path, os.path.join(history_dir, "evaluation.csv"))
+        result["latest_evaluation"] = "latest/evaluation.csv"
+        result["history_evaluation"] = f"history/{date_str}/{forecast_batch_id}/evaluation.csv"
+    elif os.path.exists(latest_evaluation):
+        os.remove(latest_evaluation)
+
+    return result
+
+
+def write_latest_manifest(csv_output_dir: str, manifest_data: dict[str, object]) -> str:
+    """Write *manifest_data* as formatted JSON to ``{csv_output_dir}/latest/manifest.json``.
+
+    The manifest is overwritten on each run (idempotent).  Path values inside
+    *manifest_data* should be relative to *csv_output_dir* for portability.
+
+    Returns the absolute path of the written file.
+    """
+    latest_dir = os.path.join(os.path.abspath(csv_output_dir), "latest")
+    os.makedirs(latest_dir, exist_ok=True)
+    path = os.path.join(latest_dir, "manifest.json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(manifest_data, fh, ensure_ascii=False, indent=2)
+        fh.write("\n")
+    return path

@@ -190,9 +190,10 @@ Builds a `DailyOutcomeWorkflowRequest` from the most recent completed window (ne
 | `outcome_recorded` | `bool` | Whether a new outcome was recorded |
 | `evaluation_count` | `int` | Number of evaluation records |
 | `data_commit_created` | `bool` | Whether the data branch was updated (set by caller/script) |
-| `forecast_csv_path` | `str \| None` | Path of the written forecast CSV, or `None` if skipped |
-| `outcome_csv_path` | `str \| None` | Path of the written outcome CSV, or `None` if skipped |
-| `evaluation_csv_path` | `str \| None` | Path of the written evaluation CSV, or `None` if skipped |
+| `forecast_csv_path` | `str \| None` | Absolute path of the written forecast CSV (staging), or `None` if skipped |
+| `outcome_csv_path` | `str \| None` | Absolute path of the written outcome CSV (staging), or `None` if skipped |
+| `evaluation_csv_path` | `str \| None` | Absolute path of the written evaluation CSV (staging), or `None` if skipped |
+| `manifest_path` | `str \| None` | Absolute path of `latest/manifest.json`, or `None` if CSV exports disabled |
 
 ### `run_fx_daily_protocol_once(config, provider, session) -> FxDailyAutomationResult`
 
@@ -205,7 +206,8 @@ Orchestration function in `automation.py`:
 5. If `config.run_forecast_generation`: call `run_daily_forecast_workflow`; idempotent
 6. If `config.run_outcome_evaluation` and prior window data is available in snapshot: call `run_daily_outcome_evaluation_workflow`; idempotent
 7. If `config.write_csv_exports`: write forecast / outcome / evaluation CSVs under `config.csv_output_dir`; skipped gracefully when the relevant batch or outcome ID is `None`
-8. Return `FxDailyAutomationResult`
+8. If `config.write_csv_exports` and forecast CSV was written: **publish to `latest/` and `history/` layout** via `publish_csv_to_layout`; absent outcome/evaluation files are **deleted** from `latest/`; **write `latest/manifest.json`** via `write_latest_manifest`
+9. Return `FxDailyAutomationResult` (includes `manifest_path`)
 
 Idempotency: rerunning the same `as_of_jst` must not duplicate records. Both workflows are already idempotent per Milestones 14 and 15. CSV exports overwrite the same deterministic paths on each rerun.
 
@@ -272,7 +274,7 @@ Set `ALPHAVANTAGE_API_KEY` as a **repository secret** (Settings → Secrets → 
 | `FX_SCHEMA_VERSION` | Variable | No | Schema version (default: `v1`) |
 | `FX_PROTOCOL_VERSION` | Variable | No | Protocol version (default: `v1`) |
 | `FX_WRITE_CSV_EXPORTS` | Variable | No | Set to `"0"` to disable CSV exports (default: enabled) |
-| `FX_CSV_OUTPUT_DIR` | Variable | No | Root directory for CSV output (default: `./data/csv`) |
+| `FX_CSV_OUTPUT_DIR` | Variable | No | Root directory for CSV output; **must be inside `FX_DATA_DIR`** or the script fails fast. Default in Actions: `{github.workspace}/data/csv` (absolute path). |
 
 ---
 

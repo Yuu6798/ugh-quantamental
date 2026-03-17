@@ -58,16 +58,32 @@ def main() -> None:
     data_branch = _env("FX_DATA_BRANCH", "fx-daily-data")
 
     # SQLite path: full path wins, else build from filename.
+    # data_dir is always resolved so the CSV path guard below can reference it
+    # regardless of which branch is taken.
+    data_dir = _env("FX_DATA_DIR", "./data")
     sqlite_path = _env("FX_SQLITE_PATH")
     if not sqlite_path:
         sqlite_filename = _env("FX_SQLITE_FILENAME", "fx_protocol.db")
-        data_dir = _env("FX_DATA_DIR", "./data")
         sqlite_path = os.path.join(data_dir, sqlite_filename)
 
     run_outcome = _env("FX_DISABLE_OUTCOME") != "1"
     run_forecast = _env("FX_DISABLE_FORECAST") != "1"
     write_csv_exports = _env("FX_WRITE_CSV_EXPORTS", "1") != "0"
     csv_output_dir = _env("FX_CSV_OUTPUT_DIR", "./data/csv") or "./data/csv"
+
+    # Fail fast: csv_output_dir must be inside data_dir so that CSV files land
+    # inside the data-branch checkout and get committed.  A relative path like
+    # ./data/csv satisfies this when data_dir=./data; an absolute path outside
+    # data_dir (e.g. /tmp/csv) would produce CSV files that are never pushed.
+    if write_csv_exports:
+        abs_csv = os.path.abspath(csv_output_dir)
+        abs_data = os.path.abspath(data_dir)
+        if abs_csv != abs_data and not abs_csv.startswith(abs_data + os.sep):
+            _fail(
+                f"FX_CSV_OUTPUT_DIR ({abs_csv}) must be inside FX_DATA_DIR ({abs_data}). "
+                "CSV files written outside the data-branch checkout are not persisted. "
+                "Set FX_CSV_OUTPUT_DIR to a path under FX_DATA_DIR."
+            )
 
     if fx_data_url:
         provider_name = f"custom ({fx_data_url})"
@@ -183,6 +199,8 @@ def main() -> None:
         print(f"  outcome_csv        : {automation_result.outcome_csv_path}")
     if automation_result.evaluation_csv_path:
         print(f"  evaluation_csv     : {automation_result.evaluation_csv_path}")
+    if automation_result.manifest_path:
+        print(f"  manifest           : {automation_result.manifest_path}")
     print("=================================\n")
 
 
