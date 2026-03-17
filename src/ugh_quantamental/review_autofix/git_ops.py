@@ -60,8 +60,20 @@ def revert_working_tree_changes(preserve_paths: tuple[str, ...] = ()) -> None:
     via *preserve_paths* (e.g. a custom ``STATE_STORE_PATH``) are also skipped so that
     ``state.mark(key)`` can still complete after a validation failure regardless of where
     the state file lives.
+
+    *preserve_paths* values are resolved to absolute paths before comparison so that
+    both absolute paths (e.g. ``/repo/state.json``) and repo-relative paths (e.g.
+    ``state.json``) work correctly against the repo-relative output of ``git ls-files``.
     """
     import os
+    from pathlib import Path
+
+    cwd = Path.cwd()
+    resolved_preserve: tuple[Path, ...] = ()
+    try:
+        resolved_preserve = tuple(Path(p).resolve() for p in preserve_paths if p)
+    except Exception:
+        pass
 
     try:
         subprocess.run(["git", "checkout", "HEAD", "--", "."], check=False)
@@ -71,8 +83,15 @@ def revert_working_tree_changes(preserve_paths: tuple[str, ...] = ()) -> None:
         for path in list_untracked_files():
             if ".autofix-bot/" in path:
                 continue
-            if any(path == p or path.startswith(p.rstrip("/") + "/") for p in preserve_paths):
-                continue
+            try:
+                abs_path = (cwd / path).resolve()
+                if any(
+                    abs_path == rp or str(abs_path).startswith(str(rp) + os.sep)
+                    for rp in resolved_preserve
+                ):
+                    continue
+            except Exception:
+                pass
             try:
                 os.remove(path)
             except OSError:
