@@ -47,6 +47,31 @@ def push_head_branch(branch: str) -> None:
     subprocess.run(["git", "push", "origin", f"HEAD:{branch}"], check=True)
 
 
+def revert_working_tree_changes() -> None:
+    """Restore all tracked files to HEAD state and remove untracked files created by the bot.
+
+    Called when validation fails after the executor writes new file content to disk, so that
+    subsequent bot runs start from a clean working tree rather than a partially-broken state.
+    Untracked files (new files created by the executor) are removed; tracked files are
+    restored to their HEAD versions.  Best-effort — any error is silently ignored so that
+    a revert failure never blocks the bot from completing its run.
+    """
+    import os
+
+    try:
+        subprocess.run(["git", "checkout", "HEAD", "--", "."], check=False)
+    except Exception:
+        pass
+    try:
+        for path in list_untracked_files():
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
 def list_untracked_files() -> list[str]:
     """Return a list of untracked file paths in the working directory.
 
