@@ -104,3 +104,28 @@ def next_as_of_jst(dt: datetime) -> datetime:
     """
     next_day = next_protocol_business_day(dt, tz="Asia/Tokyo")
     return next_day.replace(hour=_AS_OF_HOUR, minute=0, second=0, microsecond=0)
+
+
+def prev_as_of_jst(dt: datetime) -> datetime:
+    """Return 08:00 JST on the previous protocol business day before *dt* in JST.
+
+    "Previous" means strictly before the date of *dt*: if *dt* is itself a
+    business day the returned value is the preceding business day, not the same day.
+    Weekends are skipped (Saturday → Friday, Monday → Friday).
+
+    Parameters
+    ----------
+    dt:
+        Reference datetime.  Timezone-aware values are converted to JST;
+        naive values are treated as already JST.
+
+    Returns
+    -------
+    datetime
+        A timezone-aware datetime at 08:00 JST on the previous business day.
+    """
+    local_dt = _to_local(dt, "Asia/Tokyo")
+    candidate = local_dt.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+    while candidate.weekday() in _WEEKEND:
+        candidate -= timedelta(days=1)
+    return candidate.replace(hour=_AS_OF_HOUR, minute=0, second=0, microsecond=0)

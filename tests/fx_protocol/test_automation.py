@@ -638,6 +638,62 @@ class TestRunFxDailyProtocolOnce:
                 run_fx_daily_protocol_once(cfg, provider, session)
         session.close()
 
+    def test_one_day_lag_adjusts_as_of_jst(self) -> None:
+        """Provider 1 business day behind: as_of_jst falls back to newest_end."""
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+        from ugh_quantamental.fx_protocol.calendar import next_as_of_jst
+
+        # Build a normal snapshot (newest_end == snap.as_of_jst).
+        snap = self._make_snapshot_no_previous_window()
+        adjusted_as_of = snap.as_of_jst  # e.g. 2026-03-10 08:00 JST
+
+        # The "today" seen by the automation is 1 business day ahead.
+        today_as_of = next_as_of_jst(adjusted_as_of)  # e.g. 2026-03-11 08:00 JST
+
+        # Provider: first call (with today_as_of) returns a snapshot whose
+        # newest_end is only adjusted_as_of; second call (after fallback) returns
+        # the same snapshot which now satisfies the guard.
+        provider = MagicMock(spec=FxMarketDataProvider)
+        provider.fetch_snapshot.side_effect = [snap, snap]
+
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig(run_outcome_evaluation=False)
+
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=today_as_of,
+        ):
+            result = run_fx_daily_protocol_once(cfg, provider, session)
+
+        # The result should reflect the adjusted (fallback) date.
+        assert result.as_of_jst == adjusted_as_of
+        # Provider must have been called twice: initial fetch + fallback re-fetch.
+        assert provider.fetch_snapshot.call_count == 2
+        session.close()
+
+    def test_two_day_lag_raises(self) -> None:
+        """Provider 2+ business days behind: must raise ValueError."""
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+        from ugh_quantamental.fx_protocol.calendar import next_as_of_jst
+
+        snap = self._make_snapshot_no_previous_window()
+        adjusted_as_of = snap.as_of_jst
+
+        # today is 2 business days ahead of the snapshot
+        two_days_ahead = next_as_of_jst(next_as_of_jst(adjusted_as_of))
+
+        provider = self._make_provider(snap)
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig()
+
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=two_days_ahead,
+        ):
+            with pytest.raises(ValueError, match="Stale snapshot"):
+                run_fx_daily_protocol_once(cfg, provider, session)
+        session.close()
+
 
 # ---------------------------------------------------------------------------
 # _build_windows_raw helper for test_automation

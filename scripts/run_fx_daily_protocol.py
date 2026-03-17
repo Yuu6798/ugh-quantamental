@@ -7,8 +7,12 @@ and runs one full daily protocol cycle for USDJPY.
 Environment variables
 ---------------------
 FX_DATA_URL          : optional custom market-data endpoint URL.
-                       If not set, the built-in Yahoo Finance public provider is used.
+                       If set, the custom HttpJsonFxMarketDataProvider is used.
 FX_DATA_AUTH_TOKEN   : optional bearer token for a custom endpoint (FX_DATA_URL must be set).
+ALPHAVANTAGE_API_KEY : Alpha Vantage API key (free, register at https://www.alphavantage.co).
+                       If set and FX_DATA_URL is not set, AlphaVantageXMarketDataProvider is used.
+                       If neither FX_DATA_URL nor ALPHAVANTAGE_API_KEY is set, the built-in
+                       Yahoo Finance public provider is used as fallback.
 FX_DATA_BRANCH       : git data branch name (default: fx-daily-data, informational only)
 FX_SQLITE_FILENAME   : SQLite filename under the data directory (default: fx_protocol.db)
 FX_THEORY_VERSION    : UGH theory version (default: v1)
@@ -40,9 +44,12 @@ def _fail(msg: str) -> None:
 def main() -> None:
     """Run the daily FX protocol once and print a summary."""
     # --- Config from environment ---
-    # FX_DATA_URL is optional: when set, the custom HttpJsonFxMarketDataProvider is
-    # used; when absent, the built-in YahooFinanceFxMarketDataProvider is used.
+    # Provider selection:
+    #   FX_DATA_URL set              → HttpJsonFxMarketDataProvider (custom endpoint)
+    #   ALPHAVANTAGE_API_KEY set     → AlphaVantageXMarketDataProvider (recommended)
+    #   neither set                  → YahooFinanceFxMarketDataProvider (fallback)
     fx_data_url = _env("FX_DATA_URL")
+    alphavantage_api_key = _env("ALPHAVANTAGE_API_KEY")
 
     theory_version = _env("FX_THEORY_VERSION", "v1")
     engine_version = _env("FX_ENGINE_VERSION", "v1")
@@ -62,7 +69,12 @@ def main() -> None:
     write_csv_exports = _env("FX_WRITE_CSV_EXPORTS", "1") != "0"
     csv_output_dir = _env("FX_CSV_OUTPUT_DIR", "./data/csv") or "./data/csv"
 
-    provider_name = f"custom ({fx_data_url})" if fx_data_url else "yahoo_finance (public)"
+    if fx_data_url:
+        provider_name = f"custom ({fx_data_url})"
+    elif alphavantage_api_key:
+        provider_name = "alpha_vantage"
+    else:
+        provider_name = "yahoo_finance (public, fallback)"
     print(f"[INFO] provider        = {provider_name}")
     print(f"[INFO] sqlite_path     = {sqlite_path}")
     print(f"[INFO] data_branch     = {data_branch}")
@@ -85,6 +97,7 @@ def main() -> None:
         from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
         from ugh_quantamental.fx_protocol.automation_models import FxDailyAutomationConfig
         from ugh_quantamental.fx_protocol.data_sources import (
+            AlphaVantageXMarketDataProvider,
             HttpJsonFxMarketDataProvider,
             YahooFinanceFxMarketDataProvider,
         )
@@ -127,6 +140,8 @@ def main() -> None:
     # --- Instantiate provider ---
     if fx_data_url:
         provider = HttpJsonFxMarketDataProvider(url=fx_data_url)
+    elif alphavantage_api_key:
+        provider = AlphaVantageXMarketDataProvider(api_key=alphavantage_api_key)
     else:
         provider = YahooFinanceFxMarketDataProvider()
 
