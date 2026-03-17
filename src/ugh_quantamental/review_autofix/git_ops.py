@@ -55,6 +55,9 @@ def revert_working_tree_changes() -> None:
     Untracked files (new files created by the executor) are removed; tracked files are
     restored to their HEAD versions.  Best-effort — any error is silently ignored so that
     a revert failure never blocks the bot from completing its run.
+
+    ``.autofix-bot/`` files (state.json, shadow-audit.db, …) are intentionally excluded
+    from removal so that ``state.mark(key)`` can still complete after a validation failure.
     """
     import os
 
@@ -64,6 +67,8 @@ def revert_working_tree_changes() -> None:
         pass
     try:
         for path in list_untracked_files():
+            if ".autofix-bot/" in path:
+                continue
             try:
                 os.remove(path)
             except OSError:
