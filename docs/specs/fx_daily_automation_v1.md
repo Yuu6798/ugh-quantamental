@@ -64,9 +64,34 @@ class FxMarketDataProvider(Protocol):
     def fetch_snapshot(self, as_of_jst: datetime) -> FxProtocolMarketSnapshot: ...
 ```
 
-### `YahooFinanceFxMarketDataProvider` (default, public)
+Provider selection order (evaluated by the script entrypoint):
 
-The default provider.  Uses the Yahoo Finance chart API with no authentication.
+1. `FX_DATA_URL` set → `HttpJsonFxMarketDataProvider` (custom private endpoint)
+2. `ALPHAVANTAGE_API_KEY` set → `AlphaVantageXMarketDataProvider` (**recommended**)
+3. Neither set → `YahooFinanceFxMarketDataProvider` (public fallback, no auth)
+
+### `AlphaVantageXMarketDataProvider` (recommended)
+
+Uses the [Alpha Vantage](https://www.alphavantage.co) `FX_DAILY` endpoint (free API key required).
+
+Endpoint:
+```
+https://www.alphavantage.co/query?function=FX_DAILY&from_symbol=USD&to_symbol=JPY&outputsize=full&apikey=<key>
+```
+
+- Requires `ALPHAVANTAGE_API_KEY` set as a GitHub Actions repository secret.
+- Uses only stdlib `urllib.request`; no third-party SDK dependency.
+- `outputsize=full` returns full daily history; completed windows are filtered to those
+  with `window_end_jst ≤ as_of_jst`.
+- **Freshness guard:** the provider allows up to **1 business-day provider lag** before
+  raising a `ValueError`.  This tolerates the ~24-hour data publication delay that is
+  common with free-tier Alpha Vantage keys.
+- **`current_spot`** is set to the `close_price` of the newest completed window (not a
+  separate live quote field), which avoids look-ahead contamination.
+
+### `YahooFinanceFxMarketDataProvider` (public fallback)
+
+Uses the Yahoo Finance chart API with no authentication.
 
 Endpoint:
 ```
@@ -76,6 +101,7 @@ https://query2.finance.yahoo.com/v8/finance/chart/USDJPY=X?interval=1d&range=60d
 - No API key, no GitHub Secrets required.
 - Uses only stdlib `urllib.request`.
 - Returns the last 60 calendar days of daily OHLC bars.
+- `current_spot` is taken from `meta.regularMarketPrice` in the response.
 
 ### `HttpJsonFxMarketDataProvider` (optional, custom endpoint)
 
@@ -85,27 +111,30 @@ Configuration via environment variables:
 - `FX_DATA_URL` — base URL for the data endpoint (required for this provider only)
 - `FX_DATA_AUTH_TOKEN` — optional bearer token
 
-When `FX_DATA_URL` is not set, the script automatically uses `YahooFinanceFxMarketDataProvider`.
-
 ---
 
 ## Normalization rule: public source → protocol windows
 
-Yahoo Finance returns Unix-second UTC timestamps at midnight UTC for each daily bar.
-USDJPY bars are mapped to protocol windows as follows (deterministic):
+Both `YahooFinanceFxMarketDataProvider` and `AlphaVantageXMarketDataProvider` map raw daily
+bars to protocol windows as follows (deterministic):
 
 | Step | Operation |
 |---|---|
-| 1 | Convert Unix timestamp to UTC datetime |
-| 2 | Convert to JST: UTC+0000 → JST+0900 (same calendar date for midnight UTC) |
-| 3 | Discard bars whose JST date is Saturday or Sunday |
-| 4 | `window_start_jst` = 08:00 JST on the JST date of the bar |
-| 5 | `window_end_jst` = `next_as_of_jst(window_start_jst)` = 08:00 JST next business day |
-| 6 | Only include windows where `window_end_jst ≤ as_of_jst` (completed windows) |
-| 7 | If `high < low` (rare FX artefact): swap them |
-| 8 | Clamp `open` and `close` to `[low, high]` to tolerate floating-point drift |
+| 1 | Parse the bar date string (or Unix timestamp) and convert to JST |
+| 2 | Discard bars whose JST date is Saturday or Sunday |
+| 3 | `window_start_jst` = 08:00 JST on the JST date of the bar |
+| 4 | `window_end_jst` = `next_as_of_jst(window_start_jst)` = 08:00 JST next business day |
+| 5 | Only include windows where `window_end_jst ≤ as_of_jst` (completed windows) |
+| 6 | If `high < low` (rare FX artefact): swap them |
+| 7 | Clamp `open` and `close` to `[low, high]` to tolerate floating-point drift |
 
-`current_spot` is taken from `meta.regularMarketPrice` in the response.
+`current_spot` derivation differs by provider:
+
+| Provider | `current_spot` source |
+|---|---|
+| `YahooFinanceFxMarketDataProvider` | `meta.regularMarketPrice` from the API response |
+| `AlphaVantageXMarketDataProvider` | `close_price` of the **newest completed window** (avoids look-ahead contamination) |
+| `HttpJsonFxMarketDataProvider` | `current_spot` field from the JSON payload |
 
 ---
 
@@ -150,6 +179,8 @@ Builds a `DailyOutcomeWorkflowRequest` from the most recent completed window (ne
 | `sqlite_path` | `str` | Path to SQLite file in the data branch checkout |
 | `run_outcome_evaluation` | `bool` | Whether to run outcome/evaluation workflow |
 | `run_forecast_generation` | `bool` | Whether to run forecast workflow |
+| `write_csv_exports` | `bool` | Whether to write CSV exports after each run (default: `True`) |
+| `csv_output_dir` | `str` | Root directory for CSV output files (default: `./data/csv`) |
 
 ### `FxDailyAutomationResult` (`automation_models.py`)
 
@@ -162,6 +193,9 @@ Builds a `DailyOutcomeWorkflowRequest` from the most recent completed window (ne
 | `outcome_recorded` | `bool` | Whether a new outcome was recorded |
 | `evaluation_count` | `int` | Number of evaluation records |
 | `data_commit_created` | `bool` | Whether the data branch was updated (set by caller/script) |
+| `forecast_csv_path` | `str \| None` | Path of the written forecast CSV, or `None` if skipped |
+| `outcome_csv_path` | `str \| None` | Path of the written outcome CSV, or `None` if skipped |
+| `evaluation_csv_path` | `str \| None` | Path of the written evaluation CSV, or `None` if skipped |
 
 ### `run_fx_daily_protocol_once(config, provider, session) -> FxDailyAutomationResult`
 
@@ -172,9 +206,10 @@ Orchestration function in `automation.py`:
 3. Build `DailyForecastWorkflowRequest` using request builders
 4. If `config.run_forecast_generation`: call `run_daily_forecast_workflow`; idempotent
 5. If `config.run_outcome_evaluation` and prior window data is available in snapshot: call `run_daily_outcome_evaluation_workflow`; idempotent
-6. Return `FxDailyAutomationResult`
+6. If `config.write_csv_exports`: write forecast / outcome / evaluation CSVs under `config.csv_output_dir`; skipped gracefully when the relevant batch or outcome ID is `None`
+7. Return `FxDailyAutomationResult`
 
-Idempotency: rerunning the same `as_of_jst` must not duplicate records. Both workflows are already idempotent per Milestones 14 and 15.
+Idempotency: rerunning the same `as_of_jst` must not duplicate records. Both workflows are already idempotent per Milestones 14 and 15. CSV exports overwrite the same deterministic paths on each rerun.
 
 ---
 
@@ -224,19 +259,22 @@ Required to push to the data branch.
 
 ### Environment variables
 
-No GitHub Secrets are required.  The built-in Yahoo Finance public provider is used
-by default.
+Provider selection: `FX_DATA_URL` (custom) → `ALPHAVANTAGE_API_KEY` (recommended) → Yahoo Finance (public fallback).
+Set `ALPHAVANTAGE_API_KEY` as a **repository secret** (Settings → Secrets → Actions) for the recommended provider.
 
-| Variable | Required | Description |
-|---|---|---|
-| `FX_DATA_URL` | No | Override with a custom private endpoint; if absent, Yahoo Finance is used |
-| `FX_DATA_AUTH_TOKEN` | No | Bearer token for custom endpoint only |
-| `FX_DATA_BRANCH` | No | Data branch name (default: `fx-daily-data`) |
-| `FX_SQLITE_FILENAME` | No | SQLite filename (default: `fx_protocol.db`) |
-| `FX_THEORY_VERSION` | No | Theory version (default: `v1`) |
-| `FX_ENGINE_VERSION` | No | Engine version (default: `v1`) |
-| `FX_SCHEMA_VERSION` | No | Schema version (default: `v1`) |
-| `FX_PROTOCOL_VERSION` | No | Protocol version (default: `v1`) |
+| Variable | Kind | Required | Description |
+|---|---|---|---|
+| `ALPHAVANTAGE_API_KEY` | Secret | No | Alpha Vantage API key; activates `AlphaVantageXMarketDataProvider` (recommended) |
+| `FX_DATA_URL` | Secret | No | Custom private endpoint URL; takes precedence over `ALPHAVANTAGE_API_KEY` |
+| `FX_DATA_AUTH_TOKEN` | Secret | No | Bearer token for custom endpoint only |
+| `FX_DATA_BRANCH` | Variable | No | Data branch name (default: `fx-daily-data`) |
+| `FX_SQLITE_FILENAME` | Variable | No | SQLite filename (default: `fx_protocol.db`) |
+| `FX_THEORY_VERSION` | Variable | No | Theory version (default: `v1`) |
+| `FX_ENGINE_VERSION` | Variable | No | Engine version (default: `v1`) |
+| `FX_SCHEMA_VERSION` | Variable | No | Schema version (default: `v1`) |
+| `FX_PROTOCOL_VERSION` | Variable | No | Protocol version (default: `v1`) |
+| `FX_WRITE_CSV_EXPORTS` | Variable | No | Set to `"0"` to disable CSV exports (default: enabled) |
+| `FX_CSV_OUTPUT_DIR` | Variable | No | Root directory for CSV output (default: `./data/csv`) |
 
 ---
 
@@ -245,9 +283,9 @@ by default.
 - Reads all config from environment variables
 - Initializes DB engine against the SQLite file
 - Runs Alembic migrations
-- Instantiates `HttpJsonFxMarketDataProvider`
+- Selects provider by priority: `FX_DATA_URL` → `ALPHAVANTAGE_API_KEY` → Yahoo Finance fallback
 - Creates a session and calls `run_fx_daily_protocol_once`
-- Prints a concise summary
+- Prints a concise summary including provider name and CSV paths
 - Exits non-zero on validation failure
 
 ---
