@@ -13,19 +13,17 @@ permissions:
 
 jobs:
   review-autofix:
-    # Skip jobs triggered by actors not in the configured allowlist.
-    # This is a cost-optimisation gate only — bot.py performs the authoritative
-    # actor check at runtime using the same ALLOWED_BOT_REVIEWERS value.
-    # contains() does substring matching on the CSV variable, which is sufficient
-    # for bot login names and avoids hardcoding a single bot identity here.
+    # Only run for the canonical Codex review actor (exact match).
+    # bot.py performs the same check at runtime via CODEX_REVIEW_ACTOR.
+    # workflow_dispatch is kept for manual diagnostics.
     if: >-
       (
         github.event_name == 'pull_request_review_comment' &&
-        contains(vars.ALLOWED_BOT_REVIEWERS || 'chatgpt-codex-connector[bot]', github.event.comment.user.login)
+        github.event.comment.user.login == (vars.CODEX_REVIEW_ACTOR || 'chatgpt-codex-connector[bot]')
       ) || (
         github.event_name == 'pull_request_review' &&
         github.event.review.state != 'approved' &&
-        contains(vars.ALLOWED_BOT_REVIEWERS || 'chatgpt-codex-connector[bot]', github.event.review.user.login)
+        github.event.review.user.login == (vars.CODEX_REVIEW_ACTOR || 'chatgpt-codex-connector[bot]')
       ) || (
         github.event_name == 'workflow_dispatch'
       )
@@ -138,6 +136,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           BOT_MODE: ${{ vars.BOT_MODE || 'detect_only' }}
+          CODEX_REVIEW_ACTOR: ${{ vars.CODEX_REVIEW_ACTOR || 'chatgpt-codex-connector[bot]' }}
           TARGET_REVIEWERS: ${{ vars.TARGET_REVIEWERS || '' }}
           ALLOWED_BOT_REVIEWERS: ${{ vars.ALLOWED_BOT_REVIEWERS || 'chatgpt-codex-connector[bot]' }}
           SELF_BOT_ACTORS: ${{ vars.SELF_BOT_ACTORS || 'github-actions[bot]' }}

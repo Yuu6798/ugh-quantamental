@@ -103,11 +103,13 @@ def _set_common_env(monkeypatch, tmp_path: Path, event_path: Path, event_name: s
     monkeypatch.setenv("GITHUB_EVENT_NAME", event_name)
     monkeypatch.setenv("STATE_STORE_PATH", str(tmp_path / "state.json"))
     monkeypatch.setenv("BOT_MODE", "apply_and_push")
-    monkeypatch.setenv("TARGET_REVIEWERS", "chatgpt-codex-connector[bot]")
-    monkeypatch.setenv("ALLOWED_BOT_REVIEWERS", "chatgpt-codex-connector[bot]")
     monkeypatch.setenv("DRY_RUN", "false")
     monkeypatch.setenv("VALIDATION_LINT_COMMANDS", "true")
     monkeypatch.setenv("VALIDATION_TEST_COMMANDS", "true")
+    # Ensure no live GitHub API calls leak from the test environment.
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    # TARGET_REVIEWERS is intentionally NOT set — the Codex actor single-check
+    # path must work without it.
 
 
 def test_codex_reviewer_comment_builds_task(tmp_path: Path, monkeypatch) -> None:
@@ -562,6 +564,144 @@ def test_invalid_review_body_path_hint_skips_without_executor(tmp_path: Path, mo
     result = bot.run()
     assert result.reason == "invalid-review-body-path"
     assert called["executor"] is False
+
+
+# ---------------------------------------------------------------------------
+# Codex actor exact-match and isolation tests
+# ---------------------------------------------------------------------------
+
+
+def test_substring_actor_not_processed(tmp_path: Path, monkeypatch) -> None:
+    """An actor whose login is a substring of the Codex actor must NOT be processed."""
+    event = tmp_path / "event.json"
+    # "codex-connector[bot]" is a substring of "chatgpt-codex-connector[bot]"
+    _write_comment_event(event, reviewer="codex-connector[bot]")
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review_comment")
+    assert bot.run().reason == "ignored-actor"
+
+
+def test_other_bot_reviewer_not_processed(tmp_path: Path, monkeypatch) -> None:
+    """A different bot reviewer must be ignored — executor never called."""
+    event = tmp_path / "event.json"
+    _write_comment_event(event, reviewer="dependabot[bot]")
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review_comment")
+
+    called = {"executor": False}
+
+    def _builder(model, timeout_seconds):
+        called["executor"] = True
+        raise AssertionError("executor should not run for non-Codex bot")
+
+    monkeypatch.setattr(bot, "build_executor", _builder)
+    result = bot.run()
+    assert result.reason == "ignored-actor"
+    assert called["executor"] is False
+
+
+def test_apply_mode_works_without_target_reviewers(tmp_path: Path, monkeypatch) -> None:
+    """apply_and_push must succeed for Codex actor even when TARGET_REVIEWERS is unset."""
+    event = tmp_path / "event.json"
+    _write_comment_event(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review_comment")
+    # Explicitly verify TARGET_REVIEWERS is not set
+    monkeypatch.delenv("TARGET_REVIEWERS", raising=False)
+
+    stub = _ExecutorStub(
+        CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
+        CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
+    )
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    result = bot.run()
+    assert result.reason == "pushed"
+
+
+def test_codex_review_comment_reaches_executor(tmp_path: Path, monkeypatch) -> None:
+    """pull_request_review_comment from Codex actor must reach the executor."""
+    event = tmp_path / "event.json"
+    _write_comment_event(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review_comment")
+
+    submitted: list[str] = []
+
+    class _Stub:
+        def submit_fix_task(self, task):
+            submitted.append(task.prompt)
+            return CodexTaskHandle(task_id=task.task_id)
+
+        def wait_for_result(self, handle):
+            return CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok")
+
+        def apply_or_confirm_branch_update(self, handle, result):
+            return CodexApplyResult(changed=True, branch_updated=False, summary="ok")
+
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: _Stub())
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    result = bot.run()
+    assert result.reason == "pushed"
+    assert submitted, "executor must have been called"
+
+
+def test_review_body_no_path_fallback_only_processes_codex_actor(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """review_body inline fallback must skip inline comments from non-Codex actors."""
+    non_codex_comment = {
+        **_FAKE_INLINE_COMMENT,
+        "user": {"login": "human-reviewer"},
+    }
+    _FakeGithubClientWithInlineComments.markers = set()
+    _FakeGithubClientWithInlineComments.inline_comments = (non_codex_comment,)
+
+    event = tmp_path / "event.json"
+    _write_review_event_no_path(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review")
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setattr(bot, "GithubClient", _FakeGithubClientWithInlineComments)
+
+    called = {"executor": False}
+
+    def _builder(model, timeout_seconds):
+        called["executor"] = True
+        raise AssertionError("executor should not run for non-Codex inline comment")
+
+    monkeypatch.setattr(bot, "build_executor", _builder)
+
+    result = bot.run()
+    assert called["executor"] is False
+    assert result.reason == "non-codex-inline-actor"
+
+
+def test_no_github_api_calls_without_token(tmp_path: Path, monkeypatch) -> None:
+    """When GITHUB_TOKEN is absent, GithubClient must never be instantiated."""
+    event = tmp_path / "event.json"
+    _write_comment_event(event)
+    _set_common_env(monkeypatch, tmp_path, event, "pull_request_review_comment")
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+
+    stub = _ExecutorStub(
+        CodexExecutionResult(CodexExecutionStatus.succeeded, True, "ok"),
+        CodexApplyResult(changed=True, branch_updated=False, summary="ok"),
+    )
+    monkeypatch.setattr(bot, "build_executor", lambda model, timeout_seconds: stub)
+    monkeypatch.setattr(bot, "has_changes", lambda: True)
+    monkeypatch.setattr(bot, "commit_changes", lambda msg: None)
+    monkeypatch.setattr(bot, "push_head_branch", lambda branch: None)
+
+    # Patch GithubClient to fail if instantiated
+    def _fail_client(token, api_url="https://api.github.com"):
+        raise AssertionError("GithubClient should not be instantiated without token")
+
+    monkeypatch.setattr(bot, "GithubClient", _fail_client)
+
+    result = bot.run()
+    assert result.reason == "pushed"
 
 
 # ---------------------------------------------------------------------------

@@ -3,10 +3,16 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+# Canonical GitHub login of the Codex review bot.  Only reviews posted by this
+# actor trigger the autofix path.  Override via the ``CODEX_REVIEW_ACTOR`` env
+# variable (single value, exact match — no CSV, no substring).
+CODEX_REVIEW_ACTOR = "chatgpt-codex-connector[bot]"
+
 
 @dataclass(frozen=True)
 class BotConfig:
     bot_mode: str
+    codex_review_actor: str
     target_reviewers: tuple[str, ...]
     allowed_bot_reviewers: tuple[str, ...]
     self_bot_actors: tuple[str, ...]
@@ -63,6 +69,7 @@ def _parse_multiline(name: str, default: str = "") -> tuple[str, ...]:
 def load_config() -> BotConfig:
     return BotConfig(
         bot_mode=os.getenv("BOT_MODE", "detect_only"),
+        codex_review_actor=os.getenv("CODEX_REVIEW_ACTOR", CODEX_REVIEW_ACTOR).strip(),
         target_reviewers=_parse_csv("TARGET_REVIEWERS"),
         allowed_bot_reviewers=_parse_csv("ALLOWED_BOT_REVIEWERS", "chatgpt-codex-connector[bot]"),
         self_bot_actors=_parse_csv("SELF_BOT_ACTORS", "github-actions[bot]"),
