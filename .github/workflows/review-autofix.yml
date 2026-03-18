@@ -182,10 +182,19 @@ jobs:
       # that the downstream CI workflow_run job can check out exactly this
       # revision — avoiding the race condition where a human commit lands on the
       # branch between this run completing and CI starting its checkout.
+      #
+      # Use @{u} (upstream tracking ref) rather than HEAD so that we record
+      # the SHA that actually exists on the remote.  If the bot created a local
+      # commit but the push failed, @{u} still points at the last successfully
+      # pushed revision, preventing downstream CI from trying to check out a
+      # SHA that does not exist on the remote.  Fall back to HEAD only when no
+      # upstream tracking branch is configured.
       - name: Capture post-run commit SHA
         if: always()
         working-directory: pr-head
-        run: git rev-parse HEAD > "${{ runner.temp }}/autofix-sha.txt"
+        run: |
+          { git rev-parse @{u} 2>/dev/null || git rev-parse HEAD; } \
+            > "${{ runner.temp }}/autofix-sha.txt"
 
       - name: Upload post-run commit SHA artifact
         if: always()
