@@ -75,6 +75,12 @@ jobs:
       - name: Configure git author
         working-directory: pr-head
         env:
+          # WORKFLOW_PAT is a Personal Access Token with the `workflow` scope.
+          # GITHUB_TOKEN cannot push changes to .github/workflows/ files, so
+          # we fall back to WORKFLOW_PAT which has the required permission.
+          # If WORKFLOW_PAT is not set the bot will fall back to GITHUB_TOKEN,
+          # which is sufficient for non-workflow file changes.
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Mirror the repository expression used in the "Check out PR head
           # branch" step so that origin always points at the repository that
@@ -85,8 +91,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Prefer WORKFLOW_PAT (has `workflow` scope) so the bot can push
+          # changes that touch .github/workflows/ files.  Fall back to
+          # GITHUB_TOKEN when WORKFLOW_PAT is absent.
+          _token="${WORKFLOW_PAT:-${GITHUB_TOKEN}}"
           git remote set-url origin \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/${HEAD_REPO}.git"
+            "https://x-access-token:${_token}@github.com/${HEAD_REPO}.git"
 
       # Preflight: emit key runtime settings.  Advisory-only — never exits non-zero
       # so that bot.py can always post its outcome regardless of mode.
