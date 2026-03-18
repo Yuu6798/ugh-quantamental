@@ -3,6 +3,13 @@ name: CI
 on:
   pull_request:
   push:
+  # Run CI after the review-autofix bot pushes a commit.
+  # GitHub blocks GITHUB_TOKEN-pushed commits from triggering pull_request/push
+  # events (anti-loop mechanism), so workflow_run is the only way to get a CI
+  # check on bot commits without a PAT.
+  workflow_run:
+    workflows: ["Review Autofix Bot"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -12,11 +19,46 @@ jobs:
     if: >-
       (github.event_name == 'pull_request' && github.base_ref == github.event.repository.default_branch)
       || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch)
+      || github.event_name == 'workflow_run'
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          # For workflow_run, check out the exact SHA that triggered the bot;
+          # for pull_request/push, fall back to the default (github.sha).
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          # Enough history for the loop guard to inspect consecutive bot commits.
+          fetch-depth: 10
+
+      # ---------------------------------------------------------------------------
+      # Loop guard — only active when triggered via workflow_run (bot push path).
+      # Counts consecutive commits authored by github-actions[bot] starting from
+      # HEAD.  If the count reaches the limit we fail immediately so that a
+      # misbehaving bot cannot push indefinitely.
+      # Threshold: 3 consecutive bot commits → CI error.
+      # ---------------------------------------------------------------------------
+      - name: Loop guard — stop on consecutive bot commits
+        if: github.event_name == 'workflow_run'
+        run: |
+          limit=3
+          count=0
+          while IFS= read -r author_email; do
+            case "$author_email" in
+              *github-actions*)
+                count=$((count + 1))
+                ;;
+              *)
+                break
+                ;;
+            esac
+          done < <(git log --format="%ae" -"${limit}")
+          echo "Consecutive github-actions[bot] commits from HEAD: ${count}"
+          if [ "${count}" -ge "${limit}" ]; then
+            echo "::error::Loop guard triggered: ${count} consecutive github-actions[bot] commits detected. Stopping CI to prevent an infinite bot loop."
+            exit 1
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
