@@ -41,9 +41,9 @@ src/ugh_quantamental/
 ├── schemas/          # Enums, SSVSnapshot, Omega, MarketSVP, ProjectionSnapshot
 ├── engine/           # projection.py, state.py, review_audit.py + their *_models.py
 ├── persistence/      # ORM models, repositories, serializers, db helpers
-├── workflows/        # models.py (SQLAlchemy-free), runners.py (DB-dependent)
-├── query/            # models.py (SQLAlchemy-free), readers.py (DB-dependent)
-├── replay/           # models, runners, batch, suites, baselines (read-only except baseline writes)
+├── workflows/        # models.py (SQLAlchemy-free), runners.py (DB-dependent; includes review-audit)
+├── query/            # models.py (SQLAlchemy-free), readers.py (DB-dependent; includes review-audit)
+├── replay/           # models, runners (includes review-audit), batch, suites, baselines (read-only except baseline writes)
 ├── fx_protocol/      # models, forecasting, outcomes, csv_exports, reporting, automation
 └── review_autofix/   # bot, classifier, feature_extractor, rules, git_ops, github_client
 
@@ -85,6 +85,7 @@ These rules are non-negotiable across the entire codebase:
 - **Workflow flush-only.** Workflows flush but never commit; the caller owns the session and transaction boundary.
 - **Import isolation.** `workflows.models`, `query.__init__`, and `replay.__init__` must be importable without SQLAlchemy. DB-dependent functions live in `runners.py`, `readers.py`, `batch.py`, `suites.py`, `baselines.py` and require SQLAlchemy at call time. SQLAlchemy-transitive imports (e.g. `run_regression_suite`) must be deferred inside function bodies.
 - **Read-only replay.** All replay runners (`runners.py`, `batch.py`, `suites.py`) and `baselines.py` never write, flush, or commit during read operations.
+- **Review-audit boundary.** Raw review text never enters `run_review_audit_engine` directly — it must pass through the extractor first. Extractor replay is separate from engine replay. Bot integration is shadow-only: verdicts are persisted and logged but never block pushes.
 
 ---
 
