@@ -43,7 +43,7 @@ src/ugh_quantamental/
 ├── persistence/      # ORM models, repositories, serializers, db helpers
 ├── workflows/        # models.py (SQLAlchemy-free), runners.py (DB-dependent)
 ├── query/            # models.py (SQLAlchemy-free), readers.py (DB-dependent)
-├── replay/           # models, runners, batch, suites, baselines (all read-only)
+├── replay/           # models, runners, batch, suites, baselines (read-only except baseline writes)
 ├── fx_protocol/      # models, forecasting, outcomes, csv_exports, reporting, automation
 └── review_autofix/   # bot, classifier, feature_extractor, rules, git_ops, github_client
 
