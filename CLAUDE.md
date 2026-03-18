@@ -128,6 +128,7 @@ These rules are non-negotiable across the entire codebase:
 - Reader and runner imports go inside test function bodies or behind `HAS_SQLALCHEMY` guards
 - All replay runners (`runners.py`, `batch.py`, `suites.py`) and `baselines.py` must not write, flush, or commit during read operations
 - `baselines.py` defers `run_regression_suite` import inside DB-dependent function bodies to avoid transitive SQLAlchemy imports at module load time
+- Query bundle rehydration must use named attribute access (`record.foo_json`), never `record.__dict__` — deferred `load_only(...)` columns are silently omitted from `__dict__` when the row is already in the identity map
 
 ### Tests
 - Do not modify existing tests unless explicitly required
