@@ -26,9 +26,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          # For workflow_run, check out the exact SHA that triggered the bot;
-          # for pull_request/push, fall back to the default (github.sha).
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          # For workflow_run: check out the branch tip (head_branch) so that
+          # the bot's pushed commit is validated, not the pre-fix SHA that
+          # triggered the bot.  repository must point at the head repository
+          # so that fork PRs resolve the SHA in the correct repo.
+          repository: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.sha }}
           # Enough history for the loop guard to inspect consecutive bot commits.
           fetch-depth: 10
 
