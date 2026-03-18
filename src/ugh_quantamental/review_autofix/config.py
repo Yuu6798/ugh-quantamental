@@ -75,8 +75,8 @@ def _resolve_codex_review_actor() -> str:
     No ``.strip()`` is applied so the value is compared identically to the raw
     ``vars.*`` expression in the workflow ``if:`` gate (which cannot trim).
     """
-    explicit = os.getenv("CODEX_REVIEW_ACTOR", "")
-    if explicit:
+    explicit = os.getenv("CODEX_REVIEW_ACTOR", "").strip()
+    if explicit and "," not in explicit:
         return explicit
     allowed = _parse_csv("ALLOWED_BOT_REVIEWERS")
     if allowed:
@@ -104,3 +104,4 @@ def load_config() -> BotConfig:
         executor_model=os.getenv("EXECUTOR_MODEL", "gpt-4o").strip() or "gpt-4o",
         executor_timeout_seconds=int(os.getenv("EXECUTOR_TIMEOUT_SECONDS", "900")),
     )
+
