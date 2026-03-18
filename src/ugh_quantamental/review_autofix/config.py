@@ -3,10 +3,16 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+# Canonical GitHub login of the Codex review bot.  Only reviews posted by this
+# actor trigger the autofix path.  Override via the ``CODEX_REVIEW_ACTOR`` env
+# variable (single value, exact match — no CSV, no substring).
+CODEX_REVIEW_ACTOR = "chatgpt-codex-connector[bot]"
+
 
 @dataclass(frozen=True)
 class BotConfig:
     bot_mode: str
+    codex_review_actor: str
     target_reviewers: tuple[str, ...]
     allowed_bot_reviewers: tuple[str, ...]
     self_bot_actors: tuple[str, ...]
@@ -60,9 +66,28 @@ def _parse_multiline(name: str, default: str = "") -> tuple[str, ...]:
     return tuple(line.strip() for line in raw.splitlines() if line.strip())
 
 
+def _resolve_codex_review_actor() -> str:
+    """Resolve the Codex review actor login with backwards-compatible fallback.
+
+    Priority: ``CODEX_REVIEW_ACTOR`` env → first ``ALLOWED_BOT_REVIEWERS`` entry
+    → module-level ``CODEX_REVIEW_ACTOR`` constant.
+
+    No ``.strip()`` is applied so the value is compared identically to the raw
+    ``vars.*`` expression in the workflow ``if:`` gate (which cannot trim).
+    """
+    explicit = os.getenv("CODEX_REVIEW_ACTOR", "").strip()
+    if explicit and "," not in explicit:
+        return explicit
+    allowed = _parse_csv("ALLOWED_BOT_REVIEWERS")
+    if allowed:
+        return allowed[0]
+    return CODEX_REVIEW_ACTOR
+
+
 def load_config() -> BotConfig:
     return BotConfig(
         bot_mode=os.getenv("BOT_MODE", "detect_only"),
+        codex_review_actor=_resolve_codex_review_actor(),
         target_reviewers=_parse_csv("TARGET_REVIEWERS"),
         allowed_bot_reviewers=_parse_csv("ALLOWED_BOT_REVIEWERS", "chatgpt-codex-connector[bot]"),
         self_bot_actors=_parse_csv("SELF_BOT_ACTORS", "github-actions[bot]"),
@@ -79,3 +104,4 @@ def load_config() -> BotConfig:
         executor_model=os.getenv("EXECUTOR_MODEL", "gpt-4o").strip() or "gpt-4o",
         executor_timeout_seconds=int(os.getenv("EXECUTOR_TIMEOUT_SECONDS", "900")),
     )
+

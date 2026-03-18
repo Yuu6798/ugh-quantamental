@@ -96,17 +96,24 @@ def _run_shadow_audit(context, audit_id: str, action_features=None) -> None:
 
 
 def should_process_actor(login: str | None, config: BotConfig) -> bool:
+    """Return True only when *login* is the canonical Codex review actor.
+
+    Uses exact equality against ``config.codex_review_actor`` — no substring
+    matching, no multi-actor allowlist.  Self-bot actors are still rejected
+    first so that feedback-loop scenarios are caught even if someone
+    misconfigures CODEX_REVIEW_ACTOR to equal the bot's own login.
+    """
     logging.debug(
-        "review_autofix actor_check: login=%r allowed_bot_reviewers=%r self_bot_actors=%r",
+        "review_autofix actor_check: login=%r codex_review_actor=%r self_bot_actors=%r",
         login,
-        config.allowed_bot_reviewers,
+        config.codex_review_actor,
         config.self_bot_actors,
     )
     if not login:
         return False
     if login in config.self_bot_actors:
         return False
-    return login in config.allowed_bot_reviewers
+    return login == config.codex_review_actor
 
 
 def _processed_key(context) -> str:
@@ -316,9 +323,9 @@ def _run_review_body_inline_fallback(
             )
             continue
 
-        if config.target_reviewers and (inline_ctx.reviewer_login or "") not in config.target_reviewers:
+        if (inline_ctx.reviewer_login or "") != config.codex_review_actor:
             last_result = ProcessResult(
-                inline_key, Classification.skip, None, False, False, False, False, "reviewer-filter"
+                inline_key, Classification.skip, None, False, False, False, False, "non-codex-inline-actor"
             )
             continue
 
@@ -360,9 +367,6 @@ def run() -> ProcessResult:
     if config.bot_mode not in _VALID_BOT_MODES:
         return ProcessResult("mode:invalid", Classification.skip, None, False, False, False, False, "invalid-bot-mode")
 
-    if config.bot_mode in {"apply_and_push", "apply_push_and_resolve"} and not config.target_reviewers:
-        return ProcessResult("reviewer:missing-allowlist", Classification.skip, None, False, False, False, False, "reviewer-allowlist-required")
-
     state = FileStateStore(os.getenv("STATE_STORE_PATH", ".autofix-bot/state.json"))
     key = _processed_key(context)
     marker = _dedupe_marker(key)
@@ -374,9 +378,6 @@ def run() -> ProcessResult:
 
     if state.seen(key):
         return ProcessResult(key, Classification.skip, None, False, False, False, False, "duplicate")
-
-    if config.target_reviewers and (context.reviewer_login or "") not in config.target_reviewers:
-        return ProcessResult(key, Classification.skip, None, False, False, False, False, "reviewer-filter")
 
     # A "file:" / "path:" line-start hint was found but the path could not be sanitized
     # (e.g. path traversal).  Reject before classification so the reason is distinct from
