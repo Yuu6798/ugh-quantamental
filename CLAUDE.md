@@ -4,7 +4,7 @@ Guidelines for AI assistants working in this repository.
 
 ## Repository overview
 
-`ugh-quantamental` is a deterministic Python 3.11+ library. It is schema-first, synchronous, connector-free, and typed throughout. The codebase is a research/scaffold tool, not a production application.
+`ugh-quantamental` is a deterministic Python 3.11+ library. It is schema-first, synchronous, and typed throughout. The codebase is a research/scaffold tool, not a production application.
 
 | Package | Description |
 |---|---|
@@ -17,7 +17,7 @@ Guidelines for AI assistants working in this repository.
 | `fx_protocol` | FX daily prediction protocol: forecasting, outcomes, evaluation, CSV exports, weekly reports, automation |
 | `review_autofix` | PR review autofix bot: classifier, feature extraction, rule engine, GitHub integration |
 
-Milestones 1–13 are complete. See `docs/specs/` for formal specifications per milestone.
+Milestones 1–17 are complete. See `docs/specs/` for formal specifications per milestone.
 
 ---
 
@@ -68,7 +68,7 @@ When implementing a new milestone, read the corresponding spec in `docs/specs/` 
 | pytest | Test runner — quiet mode, `src/` on `PYTHONPATH` |
 | GitHub Actions | CI on PR and push to main |
 
-No external network calls, no secrets, no environment variables.
+Core packages make no external network calls. `fx_protocol` and `review_autofix` contain HTTP-backed integrations (API keys, GitHub/OpenAI).
 
 ---
 
