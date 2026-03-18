@@ -40,12 +40,18 @@ jobs:
       # Counts consecutive commits authored by github-actions[bot] starting from
       # HEAD.  If the count reaches the limit we fail immediately so that a
       # misbehaving bot cannot push indefinitely.
-      # Threshold: 3 consecutive bot commits → CI error.
+      #
+      # Review Autofix Bot is triggered only by review comment events, never by
+      # CI completion, so no circular feedback loop exists.  Reviewers can
+      # legitimately leave several comments in one session, resulting in multiple
+      # consecutive bot commits on a single PR.  A limit of 5 allows normal
+      # multi-comment autofix flows while still catching any runaway scenario.
+      # Threshold: 5 consecutive bot commits → CI error.
       # ---------------------------------------------------------------------------
       - name: Loop guard — stop on consecutive bot commits
         if: github.event_name == 'workflow_run'
         run: |
-          limit=3
+          limit=5
           count=0
           while IFS= read -r author_email; do
             case "$author_email" in
@@ -59,7 +65,7 @@ jobs:
           done < <(git log --format="%ae" -"${limit}")
           echo "Consecutive github-actions[bot] commits from HEAD: ${count}"
           if [ "${count}" -ge "${limit}" ]; then
-            echo "::error::Loop guard triggered: ${count} consecutive github-actions[bot] commits detected. Stopping CI to prevent an infinite bot loop."
+            echo "::error::Loop guard triggered: ${count} consecutive github-actions[bot] commits detected. Stopping CI to prevent a runaway bot scenario."
             exit 1
           fi
 
