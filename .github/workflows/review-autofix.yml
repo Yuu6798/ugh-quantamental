@@ -204,3 +204,8 @@ jobs:
           path: ${{ runner.temp }}/autofix-sha.txt
           retention-days: 1
           overwrite: true
+
+      # Skip CI run on PATCH commits if WORKFLOW_PAT is used
+      - name: Skip CI if WORKFLOW_PAT
+        if: ${{ env.WORKFLOW_PAT }}
+        run: echo 'Skipping CI run because WORKFLOW_PAT is used.'
