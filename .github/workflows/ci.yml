@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   test:
@@ -23,15 +24,48 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # -------------------------------------------------------------------------
+      # Resolve the exact commit the bot pushed, not just the branch tip.
+      # The bot's review-autofix workflow uploads an "autofix-sha" artifact
+      # containing `git rev-parse HEAD` captured immediately after any push.
+      # Downloading it here gives us an immutable revision that is immune to
+      # the race where a human commit lands on the branch between bot completion
+      # and CI checkout.  Falls back to head_branch when the artifact is absent
+      # (e.g. pull_request / push triggers, or a non-pushing bot run).
+      # -------------------------------------------------------------------------
+      - name: Download autofix commit SHA artifact
+        if: github.event_name == 'workflow_run'
+        id: dl-sha
+        uses: actions/download-artifact@v4
+        with:
+          name: autofix-sha
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: /tmp/autofix-sha
+        continue-on-error: true
+
+      - name: Resolve checkout ref
+        if: github.event_name == 'workflow_run'
+        id: resolve-ref
+        run: |
+          if [ -f /tmp/autofix-sha/autofix-sha.txt ]; then
+            sha=$(tr -d '[:space:]' < /tmp/autofix-sha/autofix-sha.txt)
+            echo "ref=${sha}" >> "$GITHUB_OUTPUT"
+            echo "Resolved immutable autofix SHA: ${sha}"
+          else
+            echo "ref=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_OUTPUT"
+            echo "Artifact absent — falling back to head_branch"
+          fi
+
       - name: Check out repository
         uses: actions/checkout@v4
         with:
-          # For workflow_run: check out the branch tip (head_branch) so that
-          # the bot's pushed commit is validated, not the pre-fix SHA that
-          # triggered the bot.  repository must point at the head repository
-          # so that fork PRs resolve the SHA in the correct repo.
+          # For workflow_run: use the immutable SHA captured by the bot immediately
+          # after its push (downloaded from the autofix-sha artifact).  Falls back
+          # to head_branch if the artifact is absent.  repository points at the
+          # head repository so fork PRs resolve correctly.
           repository: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name || github.repository }}
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.sha }}
+          ref: ${{ github.event_name == 'workflow_run' && steps.resolve-ref.outputs.ref || github.sha }}
           # Enough history for the loop guard to inspect consecutive bot commits.
           fetch-depth: 10
 
