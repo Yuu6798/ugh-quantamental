@@ -8,12 +8,7 @@ from .models import ValidationResult
 # Credentials that must never be forwarded into validation subprocesses
 # (e.g. ``pytest -q``).  Stripping them prevents unit tests executed as part
 # of validation from accidentally hitting live GitHub or OpenAI endpoints.
-_STRIP_FROM_VALIDATION_ENV: frozenset[str] = frozenset()
-
-
-def is_default_validation_command(command: str) -> bool:
-    """Check if the command is a default validation like 'pytest -q'."""
-    return command.startswith("pytest -q")
+_STRIP_FROM_VALIDATION_ENV: frozenset[str] = frozenset({"GITHUB_TOKEN", "OPENAI_API_KEY"})
 
 
 def run_validation(commands: tuple[str, ...]) -> ValidationResult:
@@ -23,13 +18,9 @@ def run_validation(commands: tuple[str, ...]) -> ValidationResult:
     validation commands (e.g. ``pytest -q``) cannot accidentally reach live
     GitHub or OpenAI endpoints.
     """
+    _env = {k: v for k, v in os.environ.items() if k not in _STRIP_FROM_VALIDATION_ENV}
     results: list[tuple[str, int]] = []
     for command in commands:
-        # Apply environment filtering only to default validation commands
-        if is_default_validation_command(command):
-            _env = {k: v for k, v in os.environ.items() if k not in _STRIP_FROM_VALIDATION_ENV}
-        else:
-            _env = os.environ.copy()
         proc = subprocess.run(command, shell=True, check=False, env=_env)
         results.append((command, proc.returncode))
         if proc.returncode != 0:
