@@ -66,10 +66,28 @@ def _parse_multiline(name: str, default: str = "") -> tuple[str, ...]:
     return tuple(line.strip() for line in raw.splitlines() if line.strip())
 
 
+def _resolve_codex_review_actor() -> str:
+    """Resolve the Codex review actor login with backwards-compatible fallback.
+
+    Priority: ``CODEX_REVIEW_ACTOR`` env → first ``ALLOWED_BOT_REVIEWERS`` entry
+    → module-level ``CODEX_REVIEW_ACTOR`` constant.
+
+    No ``.strip()`` is applied so the value is compared identically to the raw
+    ``vars.*`` expression in the workflow ``if:`` gate (which cannot trim).
+    """
+    explicit = os.getenv("CODEX_REVIEW_ACTOR", "")
+    if explicit:
+        return explicit
+    allowed = _parse_csv("ALLOWED_BOT_REVIEWERS")
+    if allowed:
+        return allowed[0]
+    return CODEX_REVIEW_ACTOR
+
+
 def load_config() -> BotConfig:
     return BotConfig(
         bot_mode=os.getenv("BOT_MODE", "detect_only"),
-        codex_review_actor=os.getenv("CODEX_REVIEW_ACTOR", CODEX_REVIEW_ACTOR).strip(),
+        codex_review_actor=_resolve_codex_review_actor(),
         target_reviewers=_parse_csv("TARGET_REVIEWERS"),
         allowed_bot_reviewers=_parse_csv("ALLOWED_BOT_REVIEWERS", "chatgpt-codex-connector[bot]"),
         self_bot_actors=_parse_csv("SELF_BOT_ACTORS", "github-actions[bot]"),

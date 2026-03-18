@@ -14,16 +14,18 @@ permissions:
 jobs:
   review-autofix:
     # Only run for the canonical Codex review actor (exact match).
-    # bot.py performs the same check at runtime via CODEX_REVIEW_ACTOR.
+    # Fallback chain: CODEX_REVIEW_ACTOR → ALLOWED_BOT_REVIEWERS → hardcoded default.
+    # This preserves existing deployments that customised ALLOWED_BOT_REVIEWERS
+    # before CODEX_REVIEW_ACTOR was introduced.  bot.py uses the same chain.
     # workflow_dispatch is kept for manual diagnostics.
     if: >-
       (
         github.event_name == 'pull_request_review_comment' &&
-        github.event.comment.user.login == (vars.CODEX_REVIEW_ACTOR || 'chatgpt-codex-connector[bot]')
+        github.event.comment.user.login == (vars.CODEX_REVIEW_ACTOR || vars.ALLOWED_BOT_REVIEWERS || 'chatgpt-codex-connector[bot]')
       ) || (
         github.event_name == 'pull_request_review' &&
         github.event.review.state != 'approved' &&
-        github.event.review.user.login == (vars.CODEX_REVIEW_ACTOR || 'chatgpt-codex-connector[bot]')
+        github.event.review.user.login == (vars.CODEX_REVIEW_ACTOR || vars.ALLOWED_BOT_REVIEWERS || 'chatgpt-codex-connector[bot]')
       ) || (
         github.event_name == 'workflow_dispatch'
       )
