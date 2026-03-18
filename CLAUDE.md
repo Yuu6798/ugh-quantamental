@@ -86,7 +86,7 @@ These rules are non-negotiable across the entire codebase:
 - **Naive-UTC persistence.** `created_at` is normalised to naive UTC at the repository boundary via `_normalize_created_at`. ORM columns use `DateTime(timezone=False)`.
 - **Workflow flush-only.** Workflows flush but never commit; the caller owns the session and transaction boundary.
 - **Import isolation.** `workflows.models`, `query.__init__`, and `replay.__init__` must be importable without SQLAlchemy. DB-dependent functions live in `runners.py`, `readers.py`, `batch.py`, `suites.py`, `baselines.py` and require SQLAlchemy at call time. SQLAlchemy-transitive imports (e.g. `run_regression_suite`) must be deferred inside function bodies.
-- **Read-only replay.** All replay runners (`runners.py`, `batch.py`, `suites.py`) and `baselines.py` never write, flush, or commit during read operations.
+- **Read-only replay.** All replay runners (`runners.py`, `batch.py`, `suites.py`) and `baselines.py` never write, flush, or commit during read operations. Regression suites fail when `requested_count == 0` to prevent false-positive passes on empty queries. Baseline deltas are computed per `(group, name)` pair — never flatten to a single-name map.
 - **Review-audit boundary.** Raw review text never enters `run_review_audit_engine` directly — it must pass through the extractor first. Extractor replay is separate from engine replay. Bot integration is shadow-only: verdicts are persisted and logged but never block pushes.
 
 ---
