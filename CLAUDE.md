@@ -17,7 +17,7 @@ Guidelines for AI assistants working in this repository.
 | `fx_protocol` | FX daily prediction protocol: forecasting, outcomes, evaluation, CSV exports, weekly reports, automation |
 | `review_autofix` | PR review autofix bot: classifier, feature extraction, rule engine, GitHub integration |
 
-Milestones 1–17 are complete. See `docs/specs/` for formal specifications per milestone.
+Milestones 1–17 are complete across two phases. Phase 1 (M1–12): core engine, persistence, workflows, query, replay. Phase 2 (M13–17): `fx_protocol` daily prediction cycle. `review_autofix` ships outside the milestone sequence. See `docs/specs/` for formal specifications per milestone.
 
 ---
 
@@ -48,6 +48,8 @@ src/ugh_quantamental/
 └── review_autofix/   # bot, classifier, feature_extractor, rules, git_ops, github_client
 
 alembic/versions/     # 0001 initial → 0002 baselines → 0003–0004 fx → 0005 review_audit
+scripts/              # run_fx_daily_protocol.py — CLI entrypoint for FX automation
+.github/workflows/    # ci.yml, fx-daily-protocol.yml, review-autofix.yml
 tests/                # mirrors src/ structure; test filenames match source filenames
 docs/specs/           # formal v1 specifications per milestone
 ```
