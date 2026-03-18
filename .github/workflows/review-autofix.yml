@@ -10,6 +10,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  actions: write
 
 jobs:
   review-autofix:
@@ -74,6 +75,12 @@ jobs:
       - name: Configure git author
         working-directory: pr-head
         env:
+          # WORKFLOW_PAT is a Personal Access Token with the `workflow` scope.
+          # GITHUB_TOKEN cannot push changes to .github/workflows/ files, so
+          # we fall back to WORKFLOW_PAT which has the required permission.
+          # If WORKFLOW_PAT is not set the bot will fall back to GITHUB_TOKEN,
+          # which is sufficient for non-workflow file changes.
+          WORKFLOW_PAT: ${{ secrets.WORKFLOW_PAT }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Mirror the repository expression used in the "Check out PR head
           # branch" step so that origin always points at the repository that
@@ -84,8 +91,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Prefer WORKFLOW_PAT (has `workflow` scope) so the bot can push
+          # changes that touch .github/workflows/ files.  Fall back to
+          # GITHUB_TOKEN when WORKFLOW_PAT is absent.
+          _token="${WORKFLOW_PAT:-${GITHUB_TOKEN}}"
           git remote set-url origin \
-            "https://x-access-token:${GITHUB_TOKEN}@github.com/${HEAD_REPO}.git"
+            "https://x-access-token:${_token}@github.com/${HEAD_REPO}.git"
 
       # Preflight: emit key runtime settings.  Advisory-only — never exits non-zero
       # so that bot.py can always post its outcome regardless of mode.
@@ -165,3 +176,36 @@ jobs:
           sys.path = [trusted_src, *[p for p in sys.path if p not in {"", "."}]]
           runpy.run_module("ugh_quantamental.review_autofix.bot", run_name="__main__")
           PY
+
+      # Capture the HEAD SHA of pr-head after the bot has run (and potentially
+      # pushed a fix commit).  This immutable SHA is uploaded as an artifact so
+      # that the downstream CI workflow_run job can check out exactly this
+      # revision — avoiding the race condition where a human commit lands on the
+      # branch between this run completing and CI starting its checkout.
+      #
+      # Use @{u} (upstream tracking ref) rather than HEAD so that we record
+      # the SHA that actually exists on the remote.  If the bot created a local
+      # commit but the push failed, @{u} still points at the last successfully
+      # pushed revision, preventing downstream CI from trying to check out a
+      # SHA that does not exist on the remote.  Fall back to HEAD only when no
+      # upstream tracking branch is configured.
+      - name: Capture post-run commit SHA
+        if: always()
+        working-directory: pr-head
+        run: |
+          { git rev-parse @{u} 2>/dev/null || git rev-parse HEAD; } \
+            > "${{ runner.temp }}/autofix-sha.txt"
+
+      - name: Upload post-run commit SHA artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: autofix-sha
+          path: ${{ runner.temp }}/autofix-sha.txt
+          retention-days: 1
+          overwrite: true
+
+      # Skip CI run on PATCH commits if WORKFLOW_PAT is used
+      - name: Skip CI if WORKFLOW_PAT
+        if: ${{ env.WORKFLOW_PAT }}
+        run: echo 'Skipping CI run because WORKFLOW_PAT is used.'
