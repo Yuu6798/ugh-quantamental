@@ -45,6 +45,7 @@ src/ugh_quantamental/
 ├── query/            # models.py (SQLAlchemy-free), readers.py (DB-dependent; includes review-audit)
 ├── replay/           # models, runners (includes review-audit), batch, suites, baselines (read-only except baseline writes)
 ├── fx_protocol/      # calendar, ids, data_models, data_sources, request_builders (contracts);
+│                     #   models, forecast_models, outcome_models, report_models (schemas);
 │                     #   forecasting, outcomes, csv_exports, reporting, automation (application)
 └── review_autofix/   # bot (orchestrator), task_builder, validator, codex_executor (execution);
                       #   classifier, feature_extractor, rules, config, state_store, git_ops, github_client
@@ -54,7 +55,8 @@ scripts/              # run_fx_daily_protocol.py — CLI entrypoint for FX autom
 .github/workflows/    # ci.yml, fx-daily-protocol.yml, review-autofix.yml
                       #   review-autofix.yml uses trusted checkout: base→trusted-bot/, PR→pr-head/,
                       #   PYTHONPATH forced to trusted-bot/src to prevent untrusted code execution
-tests/                # mirrors src/ structure; test filenames match source filenames
+tests/                # mostly mirrors src/; some integration tests span multiple modules
+                      #   (e.g. test_automation.py, test_task_builder_executor.py)
 docs/specs/           # formal v1 specifications per milestone
 ```
 
@@ -136,7 +138,7 @@ These rules are non-negotiable across the entire codebase:
 - Do not modify existing tests unless explicitly required
 - New tests follow the existing pattern: parametrised for multiple cases, single-case for edge conditions
 - No network calls, no file I/O, no randomness
-- Test filenames mirror source filenames
+- Test filenames mostly mirror source filenames; some integration tests span multiple modules
 
 ### Commits and PRs
 - Do not commit, push, or open a PR unless explicitly asked
