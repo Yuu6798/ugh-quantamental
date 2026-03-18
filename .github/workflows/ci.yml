@@ -4,9 +4,14 @@ on:
   pull_request:
   push:
   # Run CI after the review-autofix bot pushes a commit.
-  # GitHub blocks GITHUB_TOKEN-pushed commits from triggering pull_request/push
-  # events (anti-loop mechanism), so workflow_run is the only way to get a CI
-  # check on bot commits without a PAT.
+  # When the bot pushes with GITHUB_TOKEN, GitHub's anti-loop mechanism
+  # suppresses pull_request/push events, so workflow_run is the only path
+  # to get a CI check on bot commits.
+  # When the bot pushes with WORKFLOW_PAT (a personal access token), GitHub
+  # treats the push as a normal event and pull_request fires as usual — so
+  # workflow_run and pull_request both enqueue CI for the same commit.
+  # The concurrency group on the test job (keyed by head SHA) ensures only
+  # one run proceeds; the duplicate is cancelled automatically.
   workflow_run:
     workflows: ["Review Autofix Bot"]
     types: [completed]
@@ -22,6 +27,22 @@ jobs:
       || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch)
       || github.event_name == 'workflow_run'
     runs-on: ubuntu-latest
+    # Deduplicate CI runs triggered by both pull_request and workflow_run for
+    # the same commit.  When WORKFLOW_PAT is set the bot pushes via PAT, which
+    # causes GitHub to fire pull_request normally in addition to workflow_run.
+    # Keying on the actual PR head SHA (not the synthetic merge SHA used by
+    # pull_request events) means both triggers map to the same group; the
+    # second run to arrive cancels the first, ensuring exactly one CI run per
+    # commit regardless of which token was used for the push.
+    concurrency:
+      group: >-
+        ci-test-${{
+          github.event_name == 'workflow_run'
+            && github.event.workflow_run.head_sha
+            || github.event.pull_request.head.sha
+            || github.sha
+        }}
+      cancel-in-progress: true
 
     steps:
       # -------------------------------------------------------------------------
