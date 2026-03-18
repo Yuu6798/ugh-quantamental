@@ -44,8 +44,10 @@ src/ugh_quantamental/
 ├── workflows/        # models.py (SQLAlchemy-free), runners.py (DB-dependent; includes review-audit)
 ├── query/            # models.py (SQLAlchemy-free), readers.py (DB-dependent; includes review-audit)
 ├── replay/           # models, runners (includes review-audit), batch, suites, baselines (read-only except baseline writes)
-├── fx_protocol/      # models, forecasting, outcomes, csv_exports, reporting, automation
-└── review_autofix/   # bot, classifier, feature_extractor, rules, git_ops, github_client
+├── fx_protocol/      # calendar, ids, data_models, data_sources, request_builders (contracts);
+│                     #   forecasting, outcomes, csv_exports, reporting, automation (application)
+└── review_autofix/   # bot (orchestrator), task_builder, validator, codex_executor (execution);
+                      #   classifier, feature_extractor, rules, config, state_store, git_ops, github_client
 
 alembic/versions/     # 0001 initial → 0002 baselines → 0003–0004 fx → 0005 review_audit
 scripts/              # run_fx_daily_protocol.py — CLI entrypoint for FX automation
