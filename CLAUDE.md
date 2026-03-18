@@ -4,7 +4,7 @@ Guidelines for AI assistants working in this repository.
 
 ## Repository overview
 
-`ugh-quantamental` is a deterministic Python 3.11+ library. It is schema-first, synchronous, and typed throughout. The codebase is a research/scaffold tool, not a production application.
+`ugh-quantamental` is a Python 3.11+ library. Core packages (`schemas`, `engine`, `persistence`, `workflows`, `query`, `replay`) are deterministic and make no network calls. `fx_protocol` and `review_autofix` depend on live external state (APIs, GitHub). The codebase is schema-first, synchronous, and typed throughout — a research/scaffold tool, not a production application.
 
 | Package | Description |
 |---|---|
@@ -52,6 +52,8 @@ src/ugh_quantamental/
 alembic/versions/     # 0001 initial → 0002 baselines → 0003–0004 fx → 0005 review_audit
 scripts/              # run_fx_daily_protocol.py — CLI entrypoint for FX automation
 .github/workflows/    # ci.yml, fx-daily-protocol.yml, review-autofix.yml
+                      #   review-autofix.yml uses trusted checkout: base→trusted-bot/, PR→pr-head/,
+                      #   PYTHONPATH forced to trusted-bot/src to prevent untrusted code execution
 tests/                # mirrors src/ structure; test filenames match source filenames
 docs/specs/           # formal v1 specifications per milestone
 ```
