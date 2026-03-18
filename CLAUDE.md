@@ -48,6 +48,7 @@ src/ugh_quantamental/
 │                     #   models, forecast_models, outcome_models, report_models (schemas);
 │                     #   forecasting, outcomes, csv_exports, reporting, automation (application)
 └── review_autofix/   # bot (orchestrator), task_builder, validator, codex_executor (execution);
+                      #   models, executor_models (contracts);
                       #   classifier, feature_extractor, rules, config, state_store, git_ops, github_client
 
 alembic/versions/     # 0001 initial → 0002 baselines → 0003–0004 fx → 0005 review_audit
@@ -82,7 +83,7 @@ Core packages make no external network calls. `fx_protocol` and `review_autofix`
 
 ## Architecture invariants
 
-These rules are non-negotiable across the entire codebase:
+These rules are non-negotiable for core packages (`schemas`, `engine`, `persistence`, `workflows`, `query`, `replay`). `fx_protocol` and `review_autofix` contain intentional side effects (HTTP calls, `datetime.now()`, API integrations) — purity and determinism invariants do not apply to those packages.
 
 - **Pure engine functions.** All engine logic is pure: same inputs → same output. No globals, no mutation, no I/O.
 - **Frozen immutable schemas.** All Pydantic models use `model_config = ConfigDict(extra="forbid", frozen=True)`. Never mutate; construct a new instance.
