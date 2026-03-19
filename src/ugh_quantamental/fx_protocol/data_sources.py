@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 import urllib.error
 import urllib.request
 from datetime import date, datetime, timezone
@@ -329,6 +330,8 @@ _AV_BASE_URL = "https://www.alphavantage.co/query"
 _AV_FROM_SYMBOL = "USD"
 _AV_TO_SYMBOL = "JPY"
 _AV_OUTPUT_SIZE = "compact"  # last ~100 data points; ensures >= 20 completed windows
+_AV_MAX_RETRIES = 3  # retry up to 3 times on rate-limit responses
+_AV_RETRY_BASE_DELAY = 15.0  # seconds; Alpha Vantage free tier allows 1 req/sec
 
 
 def _av_date_to_window(
@@ -506,18 +509,27 @@ class AlphaVantageXMarketDataProvider:
         *,
         api_key: str | None = None,
         timeout: int = 30,
+        max_retries: int = _AV_MAX_RETRIES,
+        retry_base_delay: float = _AV_RETRY_BASE_DELAY,
     ) -> None:
         self._api_key = api_key or os.environ.get("ALPHAVANTAGE_API_KEY", "")
         self._timeout = timeout
+        self._max_retries = max_retries
+        self._retry_base_delay = retry_base_delay
 
     def fetch_snapshot(self, as_of_jst: datetime) -> FxProtocolMarketSnapshot:
         """Fetch and parse a USDJPY snapshot from the Alpha Vantage FX_DAILY API.
+
+        Retries up to ``_AV_MAX_RETRIES`` times with exponential back-off when
+        the API returns a rate-limit response (HTTP 200 with no time-series
+        data and a ``Note`` or ``Information`` message).
 
         Raises
         ------
         FxDataFetchError
             On missing API key, network failure, non-200 response, invalid JSON,
-            rate-limit response, or fewer than 20 completed protocol windows.
+            rate-limit response (after retries exhausted), or fewer than 20
+            completed protocol windows.
         """
         if not self._api_key:
             raise FxDataFetchError(
@@ -534,6 +546,39 @@ class AlphaVantageXMarketDataProvider:
             f"&outputsize={_AV_OUTPUT_SIZE}"
             f"&apikey={self._api_key}"
         )
+
+        last_error: FxDataFetchError | None = None
+        for attempt in range(self._max_retries + 1):
+            payload = self._fetch_json(url)
+
+            # Check for rate-limit response before parsing.
+            time_series = payload.get("Time Series FX (Daily)")
+            if time_series:
+                return _parse_av_snapshot(payload, as_of_jst)
+
+            # No time-series data — likely a rate-limit or auth error.
+            note = payload.get("Note") or payload.get("Information") or ""
+            last_error = FxDataFetchError(
+                f"Alpha Vantage returned no time-series data. "
+                f"API message: {note!r}"
+            )
+
+            if attempt < self._max_retries:
+                delay = self._retry_base_delay * (2 ** attempt)
+                logger.warning(
+                    "Alpha Vantage rate-limit detected (attempt %d/%d). "
+                    "Retrying in %.0fs. API message: %s",
+                    attempt + 1,
+                    self._max_retries + 1,
+                    delay,
+                    note,
+                )
+                time.sleep(delay)
+
+        raise last_error  # type: ignore[misc]
+
+    def _fetch_json(self, url: str) -> dict:
+        """Execute the HTTP request and return the parsed JSON payload."""
         headers = {"Accept": "application/json"}
         req = urllib.request.Request(url, headers=headers)
         try:
@@ -560,7 +605,7 @@ class AlphaVantageXMarketDataProvider:
                 f"Invalid JSON from Alpha Vantage: {exc}"
             ) from exc
 
-        return _parse_av_snapshot(payload, as_of_jst)
+        return payload
 
 
 # ---------------------------------------------------------------------------
