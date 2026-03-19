@@ -24,6 +24,9 @@ FX_DISABLE_OUTCOME   : set to "1" to skip outcome/evaluation workflow
 FX_DISABLE_FORECAST  : set to "1" to skip forecast workflow
 FX_WRITE_CSV_EXPORTS : set to "0" to disable CSV export (default: enabled)
 FX_CSV_OUTPUT_DIR    : directory for CSV exports (default: ./data/csv)
+FX_LAST_RETRY        : set to "1" on the final retry (16:00 JST) or manual dispatch.
+                       When set, data-fetch errors fail hard (exit 1) instead of
+                       skipping gracefully, so the data gap is visible in CI.
 """
 
 from __future__ import annotations
@@ -183,12 +186,17 @@ def main() -> None:
             automation_result = run_fx_daily_protocol_once(config, provider, session)
             session.commit()
         except FxDataFetchError as exc:
-            # Data-fetch failures (rate-limit, network) are transient.
-            # Skip gracefully so CI stays green; the next scheduled run
-            # will catch up thanks to protocol idempotency.
             session.rollback()
+            is_last_retry = _env("FX_LAST_RETRY") == "1"
+            if is_last_retry:
+                # Final retry (16:00 JST) or manual dispatch — fail hard so
+                # CI goes red and the data gap is visible.
+                _fail(f"Data fetch failed on final retry: {exc}")
+                return
+            # Earlier retry (08:00 / 12:00 JST) — skip gracefully so CI
+            # stays green; the next scheduled run will retry.
             print(f"[WARN] Data fetch failed (skipping): {exc}")
-            print("[INFO] Protocol is idempotent — next run will recover automatically.")
+            print("[INFO] Retries remaining today — next run will retry automatically.")
             return
         except Exception as exc:
             session.rollback()
