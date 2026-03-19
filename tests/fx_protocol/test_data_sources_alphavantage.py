@@ -234,7 +234,9 @@ class TestAlphaVantageXMarketDataProvider:
     _AS_OF = datetime(2026, 3, 10, 8, 0, 0, tzinfo=_JST)  # Tuesday
 
     def _make_provider(self, api_key: str = "test_key_abc") -> AlphaVantageXMarketDataProvider:
-        return AlphaVantageXMarketDataProvider(api_key=api_key)
+        return AlphaVantageXMarketDataProvider(
+            api_key=api_key, max_retries=0, retry_base_delay=0.0,
+        )
 
     def _mock_urlopen(self, payload: dict) -> MagicMock:
         body = json.dumps(payload).encode()
@@ -384,3 +386,37 @@ class TestAlphaVantageXMarketDataProvider:
                     provider.fetch_snapshot(self._AS_OF)
 
         assert any("non-JSON" in record.message for record in caplog.records)
+
+    def test_rate_limit_retries_then_succeeds(self) -> None:
+        """Provider retries on rate-limit and succeeds when data arrives."""
+        rate_limit_payload = {
+            "Note": "Thank you for using Alpha Vantage! Our standard API rate limit...",
+        }
+        valid_payload = _build_av_payload(22, self._AS_OF)
+
+        provider = AlphaVantageXMarketDataProvider(
+            api_key="test_key_abc", max_retries=2, retry_base_delay=0.0,
+        )
+        rate_resp = self._mock_urlopen(rate_limit_payload)
+        valid_resp = self._mock_urlopen(valid_payload)
+
+        with patch("urllib.request.urlopen", side_effect=[rate_resp, valid_resp]):
+            snap = provider.fetch_snapshot(self._AS_OF)
+
+        assert snap.pair == CurrencyPair.USDJPY
+        assert len(snap.completed_windows) >= 20
+
+    def test_rate_limit_retries_exhausted_raises(self) -> None:
+        """Provider raises after exhausting all retries on rate-limit responses."""
+        rate_limit_payload = {
+            "Note": "Thank you for using Alpha Vantage! Our standard API rate limit...",
+        }
+
+        provider = AlphaVantageXMarketDataProvider(
+            api_key="test_key_abc", max_retries=2, retry_base_delay=0.0,
+        )
+        responses = [self._mock_urlopen(rate_limit_payload) for _ in range(3)]
+
+        with patch("urllib.request.urlopen", side_effect=responses):
+            with pytest.raises(FxDataFetchError, match="no time-series data"):
+                provider.fetch_snapshot(self._AS_OF)
