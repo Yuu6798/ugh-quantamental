@@ -175,11 +175,21 @@ def main() -> None:
         csv_output_dir=csv_output_dir,
     )
 
+    from ugh_quantamental.fx_protocol.data_sources import FxDataFetchError
+
     session_factory = create_session_factory(engine)
     with session_factory() as session:
         try:
             automation_result = run_fx_daily_protocol_once(config, provider, session)
             session.commit()
+        except FxDataFetchError as exc:
+            # Data-fetch failures (rate-limit, network) are transient.
+            # Skip gracefully so CI stays green; the next scheduled run
+            # will catch up thanks to protocol idempotency.
+            session.rollback()
+            print(f"[WARN] Data fetch failed (skipping): {exc}")
+            print("[INFO] Protocol is idempotent — next run will recover automatically.")
+            return
         except Exception as exc:
             session.rollback()
             _fail(f"Protocol run failed: {exc}")

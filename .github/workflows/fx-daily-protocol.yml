@@ -2,13 +2,13 @@ name: FX Daily Protocol
 
 on:
   schedule:
-    # 08:00 JST = 23:00 UTC previous day.
-    # Mon 08:00 JST = Sun 23:00 UTC  -> cron day 0
-    # Tue 08:00 JST = Mon 23:00 UTC  -> cron day 1
-    # Wed 08:00 JST = Tue 23:00 UTC  -> cron day 2
-    # Thu 08:00 JST = Wed 23:00 UTC  -> cron day 3
-    # Fri 08:00 JST = Thu 23:00 UTC  -> cron day 4
+    # Primary: 08:00 JST = 23:00 UTC previous day (Sun-Thu).
     - cron: '0 23 * * 0-4'
+    # Retry 1: 12:00 JST = 03:00 UTC same day (Mon-Fri).
+    # If the 08:00 run succeeded, this is a no-op (idempotent).
+    - cron: '0 3 * * 1-5'
+    # Retry 2: 16:00 JST = 07:00 UTC same day (Mon-Fri).
+    - cron: '0 7 * * 1-5'
   workflow_dispatch:
 
 permissions:
