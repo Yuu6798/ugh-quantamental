@@ -154,10 +154,14 @@ def main() -> None:
     engine = create_db_engine(db_url)
 
     # --- Instantiate provider ---
+    # When Alpha Vantage is configured, keep Yahoo Finance as a fallback in case
+    # the daily API quota (25 requests/day on the free tier) is exhausted.
+    fallback_provider = None
     if fx_data_url:
         provider = HttpJsonFxMarketDataProvider(url=fx_data_url)
     elif alphavantage_api_key:
         provider = AlphaVantageXMarketDataProvider(api_key=alphavantage_api_key)
+        fallback_provider = YahooFinanceFxMarketDataProvider()
     else:
         provider = YahooFinanceFxMarketDataProvider()
 
@@ -181,9 +185,23 @@ def main() -> None:
             automation_result = run_fx_daily_protocol_once(config, provider, session)
             session.commit()
         except Exception as exc:
+            if fallback_provider is None:
+                session.rollback()
+                _fail(f"Protocol run failed: {exc}")
+                return
+            # Primary provider failed — try the fallback.
+            print(f"[WARN] Primary provider failed: {exc}")
+            print("[INFO] Falling back to yahoo_finance provider.")
             session.rollback()
-            _fail(f"Protocol run failed: {exc}")
-            return
+            try:
+                automation_result = run_fx_daily_protocol_once(
+                    config, fallback_provider, session,
+                )
+                session.commit()
+            except Exception as fallback_exc:
+                session.rollback()
+                _fail(f"Fallback provider also failed: {fallback_exc}")
+                return
 
     # --- Summary ---
     print("\n=== FX Daily Protocol Summary ===")
