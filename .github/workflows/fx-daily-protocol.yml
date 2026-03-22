@@ -26,6 +26,9 @@ jobs:
       # Set ALPHAVANTAGE_API_KEY as a repository secret (free key from alphavantage.co).
       ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
       FX_DATA_URL: ${{ secrets.FX_DATA_URL }}
+      # Last retry (16:00 JST / 07:00 UTC) and manual dispatch: fail hard on
+      # data-fetch errors so CI goes red and the gap is visible.
+      FX_LAST_RETRY: ${{ (github.event.schedule == '0 7 * * 1-5' || github.event_name == 'workflow_dispatch') && '1' || '0' }}
       FX_DATA_BRANCH: ${{ vars.FX_DATA_BRANCH || 'fx-daily-data' }}
       FX_SQLITE_FILENAME: ${{ vars.FX_SQLITE_FILENAME || 'fx_protocol.db' }}
       FX_THEORY_VERSION: ${{ vars.FX_THEORY_VERSION || 'v1' }}
