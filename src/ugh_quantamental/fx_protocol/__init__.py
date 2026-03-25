@@ -103,6 +103,21 @@ from ugh_quantamental.fx_protocol.analytics_rebuild import (
     rebuild_annotation_analytics,
     rebuild_weekly_report,
 )
+from ugh_quantamental.fx_protocol.monthly_review import (
+    run_monthly_review,
+)
+from ugh_quantamental.fx_protocol.monthly_review_exports import (
+    MONTHLY_REVIEW_FLAGS_FIELDNAMES,
+    MONTHLY_STRATEGY_METRICS_FIELDNAMES,
+    build_monthly_review_md,
+    export_monthly_review_artifacts,
+    export_monthly_review_json,
+    export_monthly_review_md,
+    export_monthly_review_flags_csv,
+    export_monthly_strategy_metrics_csv,
+    export_monthly_slice_metrics_csv,
+    rebuild_monthly_review,
+)
 
 __all__ = [
     "BaselineContext",
@@ -182,4 +197,17 @@ __all__ = [
     # analytics_rebuild
     "rebuild_annotation_analytics",
     "rebuild_weekly_report",
+    # monthly_review
+    "run_monthly_review",
+    # monthly_review_exports
+    "MONTHLY_REVIEW_FLAGS_FIELDNAMES",
+    "MONTHLY_STRATEGY_METRICS_FIELDNAMES",
+    "build_monthly_review_md",
+    "export_monthly_review_artifacts",
+    "export_monthly_review_json",
+    "export_monthly_review_md",
+    "export_monthly_review_flags_csv",
+    "export_monthly_strategy_metrics_csv",
+    "export_monthly_slice_metrics_csv",
+    "rebuild_monthly_review",
 ]
