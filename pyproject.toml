@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ugh-quantamental"
 version = "0.1.0"
-description = "Deterministic quantamental engines with persistence, workflow composition, query inspection, batch replay, regression suite execution, baseline / golden snapshot management, FX daily prediction protocol, and PR review auto-fix bot."
+description = "Deterministic quantamental engines with persistence, workflow composition, query inspection, batch replay, regression suite execution, baseline / golden snapshot management, and FX daily prediction protocol."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "Contributors" }]

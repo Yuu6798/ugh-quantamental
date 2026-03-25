@@ -310,7 +310,7 @@ def replay_review_audit_extractor_run(
     Returns ``None`` if the run_id is not found.
     Does not write, flush, or commit the session.
     """
-    from ugh_quantamental.review_autofix.feature_extractor import (
+    from ugh_quantamental.engine.review_audit_extractor import (
         extract_review_intent_features,
         extract_review_observation,
     )

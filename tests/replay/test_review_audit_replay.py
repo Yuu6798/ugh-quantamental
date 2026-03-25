@@ -29,7 +29,7 @@ def _make_db_session():
 
 
 def _make_review_context(pr_number: int = 42, reviewer_login: str | None = "alice"):
-    from ugh_quantamental.review_autofix.models import ReviewContext, ReviewKind
+    from ugh_quantamental.engine.review_audit_models import ReviewContext, ReviewKind
 
     return ReviewContext(
         kind=ReviewKind.diff_comment,
@@ -79,7 +79,7 @@ def _seed_review_audit_run(
     from ugh_quantamental.engine.review_audit import run_review_audit_engine
     from ugh_quantamental.engine.review_audit_models import ReviewAuditConfig
     from ugh_quantamental.persistence.repositories import ReviewAuditRunRepository
-    from ugh_quantamental.review_autofix.feature_extractor import (
+    from ugh_quantamental.engine.review_audit_extractor import (
         extract_review_intent_features,
         extract_review_observation,
     )

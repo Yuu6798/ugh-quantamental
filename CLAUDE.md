@@ -4,7 +4,7 @@ Guidelines for AI assistants working in this repository.
 
 ## Repository overview
 
-`ugh-quantamental` is a Python 3.11+ library. Core packages (`schemas`, `engine`, `persistence`, `workflows`, `query`, `replay`) are deterministic and make no network calls. `fx_protocol` and `review_autofix` depend on live external state (APIs, GitHub). The codebase is schema-first, synchronous, and typed throughout — a research/scaffold tool, not a production application.
+`ugh-quantamental` is a Python 3.11+ library. Core packages (`schemas`, `engine`, `persistence`, `workflows`, `query`, `replay`) are deterministic and make no network calls. `fx_protocol` depends on live external state (APIs). The codebase is schema-first, synchronous, and typed throughout — a research/scaffold tool, not a production application.
 
 | Package | Description |
 |---|---|
@@ -15,9 +15,8 @@ Guidelines for AI assistants working in this repository.
 | `query` | Read-only inspection layer: summaries, filtering, and full bundle rehydration from persisted records |
 | `replay` | Deterministic replay / regression checker (single-run, batch, suites, baselines) |
 | `fx_protocol` | FX daily prediction protocol: forecasting, outcomes, evaluation, CSV exports, weekly reports, automation |
-| `review_autofix` | PR review autofix bot: classifier, feature extraction, rule engine, GitHub integration |
 
-Milestones 1–17 are complete across two phases. Phase 1 (M1–12): core engine, persistence, workflows, query, replay. Phase 2 (M13–17): `fx_protocol` daily prediction cycle. `review_autofix` ships outside the milestone sequence. See `docs/specs/` for formal specifications per milestone.
+Milestones 1–17 are complete across two phases. Phase 1 (M1–12): core engine, persistence, workflows, query, replay. Phase 2 (M13–17): `fx_protocol` daily prediction cycle. See `docs/specs/` for formal specifications per milestone.
 
 ---
 
@@ -47,15 +46,9 @@ src/ugh_quantamental/
 ├── fx_protocol/      # calendar, ids, data_models, data_sources, request_builders (contracts);
 │                     #   models, forecast_models, outcome_models, report_models (schemas);
 │                     #   forecasting, outcomes, csv_exports, reporting, automation (application)
-└── review_autofix/   # bot (orchestrator), task_builder, validator, codex_executor (execution);
-                      #   models, executor_models (contracts);
-                      #   classifier, feature_extractor, rules, config, state_store, git_ops, github_client
-
 alembic/versions/     # 0001 initial → 0002 baselines → 0003–0004 fx → 0005 review_audit
 scripts/              # run_fx_daily_protocol.py — CLI entrypoint for FX automation
-.github/workflows/    # ci.yml, fx-daily-protocol.yml, review-autofix.yml
-                      #   review-autofix.yml uses trusted checkout: base→trusted-bot/, PR→pr-head/,
-                      #   PYTHONPATH forced to trusted-bot/src to prevent untrusted code execution
+.github/workflows/    # ci.yml, fx-daily-protocol.yml
 tests/                # mostly mirrors src/; some integration tests span multiple modules
                       #   (e.g. test_automation.py, test_task_builder_executor.py)
 docs/specs/           # formal v1 specifications per milestone
@@ -77,13 +70,13 @@ When implementing a new milestone, read the corresponding spec in `docs/specs/` 
 | pytest | Test runner — quiet mode, `src/` on `PYTHONPATH` |
 | GitHub Actions | CI on PR and push to main |
 
-Core packages make no external network calls. `fx_protocol` and `review_autofix` contain HTTP-backed integrations (API keys, GitHub/OpenAI).
+Core packages make no external network calls. `fx_protocol` contains HTTP-backed integrations (API keys).
 
 ---
 
 ## Architecture invariants
 
-These rules are non-negotiable for core packages (`schemas`, `engine`, `persistence`, `workflows`, `query`, `replay`). `fx_protocol` and `review_autofix` contain intentional side effects (HTTP calls, `datetime.now()`, API integrations) — purity and determinism invariants do not apply to those packages.
+These rules are non-negotiable for core packages (`schemas`, `engine`, `persistence`, `workflows`, `query`, `replay`). `fx_protocol` contains intentional side effects (HTTP calls, `datetime.now()`, API integrations) — purity and determinism invariants do not apply to that package.
 
 - **Pure engine functions.** All engine logic is pure: same inputs → same output. No globals, no mutation, no I/O.
 - **Frozen immutable schemas.** All Pydantic models use `model_config = ConfigDict(extra="forbid", frozen=True)`. Never mutate; construct a new instance.
@@ -92,7 +85,7 @@ These rules are non-negotiable for core packages (`schemas`, `engine`, `persiste
 - **Workflow flush-only.** Workflows flush but never commit; the caller owns the session and transaction boundary.
 - **Import isolation.** `workflows.models`, `query.__init__`, and `replay.__init__` must be importable without SQLAlchemy. DB-dependent functions live in `runners.py`, `readers.py`, `batch.py`, `suites.py`, `baselines.py` and require SQLAlchemy at call time. SQLAlchemy-transitive imports (e.g. `run_regression_suite`) must be deferred inside function bodies.
 - **Read-only replay.** All replay runners (`runners.py`, `batch.py`, `suites.py`) and `baselines.py` never write, flush, or commit during read operations. Regression suites fail when `requested_count == 0` to prevent false-positive passes on empty queries. Baseline deltas are computed per `(group, name)` pair — never flatten to a single-name map.
-- **Review-audit boundary.** Raw review text never enters `run_review_audit_engine` directly — it must pass through the extractor first. Extractor replay is separate from engine replay. Bot integration is shadow-only: verdicts are persisted and logged but never block pushes.
+- **Review-audit boundary.** Raw review text never enters `run_review_audit_engine` directly — it must pass through the extractor first. Extractor replay is separate from engine replay.
 
 ---
 

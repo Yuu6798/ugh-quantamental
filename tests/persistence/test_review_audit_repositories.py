@@ -16,7 +16,7 @@ HAS_SQLALCHEMY = importlib.util.find_spec("sqlalchemy") is not None
 
 
 def _make_review_context():
-    from ugh_quantamental.review_autofix.models import ReviewContext, ReviewKind
+    from ugh_quantamental.engine.review_audit_models import ReviewContext, ReviewKind
 
     return ReviewContext(
         kind=ReviewKind.diff_comment,
@@ -243,7 +243,7 @@ def test_dump_load_review_context_roundtrip() -> None:
         dump_review_context_json,
         load_review_context_json,
     )
-    from ugh_quantamental.review_autofix.models import ReviewKind
+    from ugh_quantamental.engine.review_audit_models import ReviewKind
 
     context = _make_review_context()
     payload = dump_review_context_json(context)
@@ -264,7 +264,7 @@ def test_dump_load_review_context_review_body_kind() -> None:
         dump_review_context_json,
         load_review_context_json,
     )
-    from ugh_quantamental.review_autofix.models import ReviewContext, ReviewKind
+    from ugh_quantamental.engine.review_audit_models import ReviewContext, ReviewKind
 
     context = ReviewContext(
         kind=ReviewKind.review_body,

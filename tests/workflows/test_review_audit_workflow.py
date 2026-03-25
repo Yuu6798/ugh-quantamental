@@ -12,7 +12,7 @@ from ugh_quantamental.engine.review_audit_models import (
     ReviewIntentFeatures,
     ReviewObservation,
 )
-from ugh_quantamental.review_autofix.models import ReviewContext, ReviewKind
+from ugh_quantamental.engine.review_audit_models import ReviewContext, ReviewKind
 from ugh_quantamental.workflows.models import ReviewAuditWorkflowRequest
 
 HAS_SQLALCHEMY = importlib.util.find_spec("sqlalchemy") is not None

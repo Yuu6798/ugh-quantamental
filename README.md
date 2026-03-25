@@ -1,6 +1,6 @@
 # ugh-quantamental
 
-Minimal Python 3.11+ library implementing deterministic quantamental engines with persistence, workflow composition, read-only query inspection, deterministic replay, multi-run batch replay, regression suite execution, baseline / golden snapshot management, FX daily prediction protocol with weekly reporting, and a PR review auto-fix bot. All core logic is synchronous, typed, schema-first, and connector-free.
+Minimal Python 3.11+ library implementing deterministic quantamental engines with persistence, workflow composition, read-only query inspection, deterministic replay, multi-run batch replay, regression suite execution, baseline / golden snapshot management, FX daily prediction protocol with weekly reporting. All core logic is synchronous, typed, schema-first, and connector-free.
 
 ## Features
 
@@ -15,8 +15,7 @@ Minimal Python 3.11+ library implementing deterministic quantamental engines wit
 - **Baseline / golden snapshot** — persist a named suite result; compare future reruns against the pinned baseline; per-`(group, name)` case deltas with exact-match and aggregate-diff reporting
 - **FX daily protocol** — frozen contracts (`ForecastRecord`, `OutcomeRecord`, `EvaluationRecord`), deterministic calendar helpers (`resolve_completed_window_ends`), deterministic ID generation, daily forecast/outcome/evaluation workflows, and GitHub Actions automation
 - **Weekly FX report** — read-only `run_weekly_report` aggregates a configurable number of completed protocol windows into strategy metrics, baseline comparisons, state/GRV/mismatch summaries, and curated case examples; `WeeklyReportRequest` / `WeeklyReportResult` frozen models with JST-canonical timestamp normalization
-- **Review-audit engine** — pure functions for extracting and auditing PR review text; shadow-only verdicts that never block pushes
-- **PR review auto-fix bot** — GitHub Actions-driven bot that classifies review comments, applies mechanical fixes, validates, and pushes to the same PR branch
+- **Review-audit engine** — pure functions for extracting and auditing PR review text
 - **Frozen schema contracts** — all data models use `ConfigDict(extra="forbid", frozen=True)`; invariants enforced at construction time
 - **Pure engine functions** — same inputs always produce the same output; no globals, no mutation, no I/O
 
@@ -89,26 +88,12 @@ src/ugh_quantamental/
 │   ├── automation.py      # run_fx_daily_protocol_once
 │   ├── report_models.py   # WeeklyReportRequest/Result, StrategyWeeklyMetrics, …
 │   └── reporting.py       # run_weekly_report (read-only)
-├── review_autofix/       # PR review auto-fix bot (GitHub Actions)
-│   ├── bot.py             # orchestrator entry point
-│   ├── models.py          # core data contracts
-│   ├── executor_models.py # executor-specific contracts
-│   ├── classifier.py      # review comment classifier
-│   ├── feature_extractor.py  # structured feature extraction from review text
-│   ├── rules.py           # mechanical fix rule engine
-│   ├── task_builder.py    # fix task construction
-│   ├── codex_executor.py  # code transformation executor
-│   ├── validator.py       # pre-push validation (lint, test)
-│   ├── config.py          # bot configuration
-│   ├── state_store.py     # duplicate-prevention state tracking
-│   ├── git_ops.py         # local git operations
-│   └── github_client.py   # GitHub API integration
 └── domain/               # domain abstractions
 
 alembic/versions/         # 0001 initial → 0002 baselines → 0003–0004 fx → 0005 review_audit
 docs/specs/               # formal v1 specifications per milestone
 scripts/                  # run_fx_daily_protocol.py — CLI entry point for automation
-.github/workflows/        # ci.yml, fx-daily-protocol.yml, review-autofix.yml
+.github/workflows/        # ci.yml, fx-daily-protocol.yml
 tests/                    # mirrors src layout
 ```
 
@@ -407,70 +392,3 @@ The following are intentionally not implemented:
 - Intra-day or high-frequency signal handling
 - Monthly reporting (next milestone)
 
-## PR review auto-fix bot (same PR branch)
-
-### Purpose
-- Automatically handle only **clear/mechanical** PR review findings (diff comments and review body comments) and keep fixes inside the **same PR head branch**.
-- Push is allowed only after validations succeed; no child PR workflow is used.
-
-### Non-goals
-- Large design refactors, API contract changes, abstract feedback interpretation, or risky multi-file transformations.
-
-### Why GitHub Actions (not GitHub App)
-- This repository already uses GitHub Actions CI and has no webhook server runtime.
-- The MVP can stay lightweight and repo-local by adding one workflow + Python module.
-- Triggering on review events and pushing to the PR head branch is directly supported.
-
-### Setup
-1. Ensure workflow `.github/workflows/review-autofix.yml` is enabled.
-2. Keep workflow permissions minimal (`contents: write`, `pull-requests: write`).
-3. Configure repository variables as needed (see env example below).
-
-### Required events
-- `pull_request_review_comment` (`created`, `edited`)
-- `pull_request_review` (`submitted`, `edited`)
-
-### Local run
-```bash
-export GITHUB_EVENT_PATH=/path/to/event.json
-export GITHUB_EVENT_NAME=pull_request_review_comment
-export BOT_MODE=detect_only
-python -m ugh_quantamental.review_autofix.bot
-```
-
-### Environment example
-```bash
-BOT_MODE=detect_only
-TARGET_REVIEWERS=
-DRY_RUN=true
-ALLOW_PUSH_ON_FORK=false
-VALIDATION_FORMAT_COMMANDS=
-VALIDATION_LINT_COMMANDS="ruff check ."
-VALIDATION_TYPECHECK_COMMANDS=
-VALIDATION_TEST_COMMANDS="pytest -q"
-REPLY_ON_SUCCESS=true
-REPLY_ON_FAILURE=true
-AUTO_RESOLVE=false
-LOG_LEVEL=INFO
-```
-
-### Operation modes
-- `detect_only` (Phase 1)
-- `propose_only` (Phase 2)
-- `apply_and_push` (Phase 3)
-- `apply_push_and_resolve` (Phase 4; resolve is flag-gated)
-
-### same-repo PR vs fork PR
-- same-repo PR: can apply, validate, and push to the same PR head branch.
-- fork PR: defaults to no push (`ALLOW_PUSH_ON_FORK=false`), handled as propose-only/dry-run.
-
-### Safety notes
-- Do not execute arbitrary commands from review text.
-- Keep changes minimal and directly linked to the matched rule.
-- Never push when validation fails.
-- Do not log secrets.
-
-### Known constraints
-- Rule set is intentionally narrow for MVP; unmatched/ambiguous comments are skipped.
-- Review-body automation requires enough location hints (e.g., `file: path/to/file.py`).
-- Duplicate prevention uses a state key (`review_comment_id + head_sha` or `review_id + head_sha`).

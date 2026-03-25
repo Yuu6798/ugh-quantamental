@@ -3,126 +3,20 @@ name: CI
 on:
   pull_request:
   push:
-  # Run CI after the review-autofix bot pushes a commit.
-  # When the bot pushes with GITHUB_TOKEN, GitHub's anti-loop mechanism
-  # suppresses pull_request/push events, so workflow_run is the only path
-  # to get a CI check on bot commits.
-  # When the bot pushes with WORKFLOW_PAT (a personal access token), GitHub
-  # treats the push as a normal event and pull_request fires as usual — so
-  # workflow_run and pull_request both enqueue CI for the same commit.
-  # The concurrency group on the test job (keyed by head SHA) ensures only
-  # one run proceeds; the duplicate is cancelled automatically.
-  workflow_run:
-    workflows: ["Review Autofix Bot"]
-    types: [completed]
 
 permissions:
   contents: read
-  actions: read
 
 jobs:
   test:
     if: >-
       (github.event_name == 'pull_request' && github.base_ref == github.event.repository.default_branch)
       || (github.event_name == 'push' && github.ref_name == github.event.repository.default_branch)
-      || github.event_name == 'workflow_run'
     runs-on: ubuntu-latest
-    # Deduplicate CI runs triggered by both pull_request and workflow_run for
-    # the same commit.  When WORKFLOW_PAT is set the bot pushes via PAT, which
-    # causes GitHub to fire pull_request normally in addition to workflow_run.
-    # Keying on the actual PR head SHA (not the synthetic merge SHA used by
-    # pull_request events) means both triggers map to the same group; the
-    # second run to arrive cancels the first, ensuring exactly one CI run per
-    # commit regardless of which token was used for the push.
-    concurrency:
-      group: >-
-        ci-test-${{
-          github.event_name == 'workflow_run'
-            && github.event.workflow_run.head_sha
-            || github.event.pull_request.head.sha
-            || github.sha
-        }}
-      cancel-in-progress: true
 
     steps:
-      # -------------------------------------------------------------------------
-      # Resolve the exact commit the bot pushed, not just the branch tip.
-      # The bot's review-autofix workflow uploads an "autofix-sha" artifact
-      # containing `git rev-parse HEAD` captured immediately after any push.
-      # Downloading it here gives us an immutable revision that is immune to
-      # the race where a human commit lands on the branch between bot completion
-      # and CI checkout.  Falls back to head_branch when the artifact is absent
-      # (e.g. pull_request / push triggers, or a non-pushing bot run).
-      # -------------------------------------------------------------------------
-      - name: Download autofix commit SHA artifact
-        if: github.event_name == 'workflow_run'
-        id: dl-sha
-        uses: actions/download-artifact@v4
-        with:
-          name: autofix-sha
-          run-id: ${{ github.event.workflow_run.id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          path: /tmp/autofix-sha
-        continue-on-error: true
-
-      - name: Resolve checkout ref
-        if: github.event_name == 'workflow_run'
-        id: resolve-ref
-        run: |
-          if [ -f /tmp/autofix-sha/autofix-sha.txt ]; then
-            sha=$(tr -d '[:space:]' < /tmp/autofix-sha/autofix-sha.txt)
-            echo "ref=${sha}" >> "$GITHUB_OUTPUT"
-            echo "Resolved immutable autofix SHA: ${sha}"
-          else
-            echo "ref=${{ github.event.workflow_run.head_branch }}" >> "$GITHUB_OUTPUT"
-            echo "Artifact absent — falling back to head_branch"
-          fi
-
       - name: Check out repository
         uses: actions/checkout@v4
-        with:
-          # For workflow_run: use the immutable SHA captured by the bot immediately
-          # after its push (downloaded from the autofix-sha artifact).  Falls back
-          # to head_branch if the artifact is absent.  repository points at the
-          # head repository so fork PRs resolve correctly.
-          repository: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name || github.repository }}
-          ref: ${{ github.event_name == 'workflow_run' && steps.resolve-ref.outputs.ref || github.sha }}
-          # Enough history for the loop guard to inspect consecutive bot commits.
-          fetch-depth: 10
-
-      # ---------------------------------------------------------------------------
-      # Loop guard — only active when triggered via workflow_run (bot push path).
-      # Counts consecutive commits authored by github-actions[bot] starting from
-      # HEAD.  If the count reaches the limit we fail immediately so that a
-      # misbehaving bot cannot push indefinitely.
-      #
-      # Review Autofix Bot is triggered only by review comment events, never by
-      # CI completion, so no circular feedback loop exists.  Reviewers can
-      # legitimately leave several comments in one session, resulting in multiple
-      # consecutive bot commits on a single PR.  A limit of 5 allows normal
-      # multi-comment autofix flows while still catching any runaway scenario.
-      # Threshold: 5 consecutive bot commits → CI error.
-      # ---------------------------------------------------------------------------
-      - name: Loop guard — stop on consecutive bot commits
-        if: github.event_name == 'workflow_run'
-        run: |
-          limit=5
-          count=0
-          while IFS= read -r author_email; do
-            case "$author_email" in
-              *github-actions*)
-                count=$((count + 1))
-                ;;
-              *)
-                break
-                ;;
-            esac
-          done < <(git log --format="%ae" -"${limit}")
-          echo "Consecutive github-actions[bot] commits from HEAD: ${count}"
-          if [ "${count}" -ge "${limit}" ]; then
-            echo "::error::Loop guard triggered: ${count} consecutive github-actions[bot] commits detected. Stopping CI to prevent a runaway bot scenario."
-            exit 1
-          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
