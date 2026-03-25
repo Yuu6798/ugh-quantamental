@@ -219,6 +219,10 @@ def main() -> None:
         print(f"  evaluation_csv     : {automation_result.evaluation_csv_path}")
     if automation_result.manifest_path:
         print(f"  manifest           : {automation_result.manifest_path}")
+    if automation_result.annotation_analytics:
+        for key, val in automation_result.annotation_analytics.items():
+            if val:
+                print(f"  {key}: {val}")
     print("=================================\n")
 
 

@@ -52,3 +52,4 @@ class FxDailyAutomationResult(BaseModel):
     daily_report_path: str | None = None
     scoreboard_path: str | None = None
     provider_health_path: str | None = None
+    annotation_analytics: dict[str, str | None] | None = None

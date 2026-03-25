@@ -62,6 +62,20 @@ from ugh_quantamental.fx_protocol.observability import (
     collect_all_evaluations_from_history,
     publish_observability_to_layout,
 )
+from ugh_quantamental.fx_protocol.analytics_annotations import (
+    AI_ANNOTATION_FIELDNAMES,
+    LABELED_OBSERVATION_FIELDNAMES,
+    MANUAL_ANNOTATION_FIELDNAMES,
+    SLICE_SCOREBOARD_FIELDNAMES,
+    TAG_SCOREBOARD_FIELDNAMES,
+    build_labeled_observations,
+    build_slice_scoreboard,
+    build_tag_scoreboard,
+    generate_ai_annotations,
+    generate_manual_annotation_template,
+    load_manual_annotations,
+    run_annotation_analytics,
+)
 from ugh_quantamental.fx_protocol.report_models import (
     BaselineWeeklyComparison,
     StateWeeklyMetrics,
@@ -124,4 +138,17 @@ __all__ = [
     "make_daily_csv_stem",
     "outcome_record_to_rows",
     "write_csv_rows",
+    # analytics_annotations
+    "AI_ANNOTATION_FIELDNAMES",
+    "LABELED_OBSERVATION_FIELDNAMES",
+    "MANUAL_ANNOTATION_FIELDNAMES",
+    "SLICE_SCOREBOARD_FIELDNAMES",
+    "TAG_SCOREBOARD_FIELDNAMES",
+    "build_labeled_observations",
+    "build_slice_scoreboard",
+    "build_tag_scoreboard",
+    "generate_ai_annotations",
+    "generate_manual_annotation_template",
+    "load_manual_annotations",
+    "run_annotation_analytics",
 ]
