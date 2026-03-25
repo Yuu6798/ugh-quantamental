@@ -1,0 +1,13 @@
+as_of_jst,forecast_batch_id,outcome_id,strategy_kind,forecast_direction,expected_close_change_bp,realized_direction,realized_close_change_bp,direction_hit,range_hit,state_proxy_hit,close_error_bp,magnitude_error_bp,regime_label,event_tags,volatility_label,intervention_risk,annotation_status
+2026-03-23T08:00:00+09:00,fb_USDJPY_20260323T080000_v1_faa82dc18b545794,,baseline_prev_day_direction,up,96.38554216867534,up,96.38554216867534,,,,,,,,,,
+2026-03-23T08:00:00+09:00,fb_USDJPY_20260323T080000_v1_faa82dc18b545794,,baseline_random_walk,flat,0.0,up,96.38554216867534,,,,,,,,,,
+2026-03-23T08:00:00+09:00,fb_USDJPY_20260323T080000_v1_faa82dc18b545794,,baseline_simple_technical,up,40.68756880508248,up,96.38554216867534,,,,,,,,,,
+2026-03-23T08:00:00+09:00,fb_USDJPY_20260323T080000_v1_faa82dc18b545794,,ugh,up,0.233875,up,96.38554216867534,,,,,,,,,,
+2026-03-24T08:00:00+09:00,fb_USDJPY_20260324T080000_v1_ced05f21f872e350,,baseline_prev_day_direction,down,-49.616882301217935,down,-49.616882301217935,,,,,,,,,,
+2026-03-24T08:00:00+09:00,fb_USDJPY_20260324T080000_v1_ced05f21f872e350,,baseline_random_walk,flat,0.0,down,-49.616882301217935,,,,,,,,,,
+2026-03-24T08:00:00+09:00,fb_USDJPY_20260324T080000_v1_ced05f21f872e350,,baseline_simple_technical,up,42.20017124702183,down,-49.616882301217935,,,,,,,,,,
+2026-03-24T08:00:00+09:00,fb_USDJPY_20260324T080000_v1_ced05f21f872e350,,ugh,up,0.233875,down,-49.616882301217935,,,,,,,,,,
+2026-03-25T08:00:00+09:00,fb_USDJPY_20260325T080000_v1_a299e8fb64a5c586,,baseline_prev_day_direction,up,17.044378511458255,up,17.044378511458255,,,,,,,,,,
+2026-03-25T08:00:00+09:00,fb_USDJPY_20260325T080000_v1_a299e8fb64a5c586,,baseline_random_walk,flat,0.0,up,17.044378511458255,,,,,,,,,,
+2026-03-25T08:00:00+09:00,fb_USDJPY_20260325T080000_v1_a299e8fb64a5c586,,baseline_simple_technical,up,39.01048368614322,up,17.044378511458255,,,,,,,,,,
+2026-03-25T08:00:00+09:00,fb_USDJPY_20260325T080000_v1_a299e8fb64a5c586,,ugh,up,0.233875,up,17.044378511458255,,,,,,,,,,

@@ -1,0 +1,25 @@
+{
+  "as_of_jst": "2026-03-25T08:00:00+09:00",
+  "provider_name": "alpha_vantage",
+  "versions": {
+    "theory_version": "v1",
+    "engine_version": "v1",
+    "schema_version": "v1",
+    "protocol_version": "v1"
+  },
+  "forecast_batch_id": "fb_USDJPY_20260325T080000_v1_a299e8fb64a5c586",
+  "outcome_id": "oc_USDJPY_20260324T080000_20260325T080000_v1_280b854970ab67e3",
+  "forecast_created": false,
+  "outcome_recorded": true,
+  "evaluation_count": 4,
+  "csv_paths": {
+    "forecast_csv_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/forecasts/USDJPY_20260325_forecast.csv",
+    "outcome_csv_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/outcomes/USDJPY_20260325_outcome.csv",
+    "evaluation_csv_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/evaluations/USDJPY_20260325_evaluation.csv"
+  },
+  "manifest_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/latest/manifest.json",
+  "snapshot_lag_business_days": 0,
+  "used_fallback_adjustment": false,
+  "run_status": "idempotent_skip",
+  "generated_at_utc": "2026-03-25T07:52:07Z"
+}
