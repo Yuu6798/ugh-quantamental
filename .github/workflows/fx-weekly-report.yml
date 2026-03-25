@@ -26,6 +26,7 @@ jobs:
           path: code
 
       - name: Check out data branch
+        id: checkout-data
         run: |
           git clone \
             --branch "$FX_DATA_BRANCH" \
@@ -34,10 +35,13 @@ jobs:
             data \
           || {
             echo "Data branch not found. Skipping weekly report."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
             exit 0
           }
+          echo "skip=false" >> "$GITHUB_OUTPUT"
 
       - name: Set up Python 3.11
+        if: steps.checkout-data.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -45,17 +49,20 @@ jobs:
           cache-dependency-path: code/pyproject.toml
 
       - name: Install project
+        if: steps.checkout-data.outputs.skip != 'true'
         working-directory: code
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
 
       - name: Run weekly report
+        if: steps.checkout-data.outputs.skip != 'true'
         working-directory: code
         run: |
           python scripts/run_fx_weekly_report.py
 
       - name: Commit and push data branch if changed
+        if: steps.checkout-data.outputs.skip != 'true'
         working-directory: data
         run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"

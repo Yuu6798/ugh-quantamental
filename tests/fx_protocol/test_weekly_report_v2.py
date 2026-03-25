@@ -298,6 +298,30 @@ class TestProviderHealthSummary:
         assert summary["failed_count"] == 1
         assert summary["success_count"] == 0
 
+    def test_ok_and_idempotent_skip_statuses(self) -> None:
+        """Verify that actual automation run_status values are counted correctly."""
+        rows = [
+            {
+                "as_of_jst": "2026-03-17T08:00:00+09:00",
+                "provider_name": "alphavantage",
+                "used_fallback_adjustment": "False",
+                "snapshot_lag_business_days": "0",
+                "run_status": "ok",
+            },
+            {
+                "as_of_jst": "2026-03-18T08:00:00+09:00",
+                "provider_name": "alphavantage",
+                "used_fallback_adjustment": "False",
+                "snapshot_lag_business_days": "0",
+                "run_status": "idempotent_skip",
+            },
+        ]
+        summary = build_provider_health_summary(rows)
+        assert summary["total_runs"] == 2
+        assert summary["success_count"] == 1
+        assert summary["skipped_count"] == 1
+        assert summary["failed_count"] == 0
+
 
 # ---------------------------------------------------------------------------
 # Tests: full v2 report

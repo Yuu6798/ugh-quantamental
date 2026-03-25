@@ -406,11 +406,11 @@ def build_provider_health_summary(
             pass
 
         status = row.get("run_status", "").lower()
-        if status == "success":
+        if status in ("success", "ok"):
             success_count += 1
         elif status in ("failed", "error"):
             failed_count += 1
-        elif status in ("skipped", "skip"):
+        elif status in ("skipped", "skip", "idempotent_skip"):
             skipped_count += 1
 
     return {
