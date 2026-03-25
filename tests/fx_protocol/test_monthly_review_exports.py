@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 
 from ugh_quantamental.fx_protocol.monthly_review import run_monthly_review
 from ugh_quantamental.fx_protocol.monthly_review_exports import (
+    _enrich_observations_with_forecast_data,
+    _filter_observations_by_pair,
     build_monthly_review_md,
     export_monthly_review_artifacts,
     export_monthly_review_flags_csv,
@@ -292,3 +294,70 @@ class TestRebuildMonthlyReview:
         )
         assert review["included_window_count"] == 0
         assert any(f["flag"] == "insufficient_data" for f in review["review_flags"])
+
+
+# ---------------------------------------------------------------------------
+# Tests: observation enrichment and pair filtering
+# ---------------------------------------------------------------------------
+
+
+class TestEnrichObservationsWithForecastData:
+    def test_dominant_state_populated(self) -> None:
+        obs = [
+            {"as_of_jst": "2026-03-18T08:00:00+09:00", "strategy_kind": "ugh",
+             "dominant_state": ""},
+        ]
+        lookup = {
+            ("20260318", "ugh"): {"dominant_state": "fire", "pair": "USDJPY"},
+        }
+        enriched = _enrich_observations_with_forecast_data(obs, lookup)
+        assert enriched[0]["dominant_state"] == "fire"
+        assert enriched[0]["pair"] == "USDJPY"
+
+    def test_does_not_overwrite_existing(self) -> None:
+        obs = [
+            {"as_of_jst": "2026-03-18T08:00:00+09:00", "strategy_kind": "ugh",
+             "dominant_state": "dormant", "pair": "USDJPY"},
+        ]
+        lookup = {
+            ("20260318", "ugh"): {"dominant_state": "fire", "pair": "EURUSD"},
+        }
+        enriched = _enrich_observations_with_forecast_data(obs, lookup)
+        assert enriched[0]["dominant_state"] == "dormant"
+        assert enriched[0]["pair"] == "USDJPY"
+
+    def test_missing_lookup_entry(self) -> None:
+        obs = [
+            {"as_of_jst": "2026-03-18T08:00:00+09:00", "strategy_kind": "ugh",
+             "dominant_state": ""},
+        ]
+        enriched = _enrich_observations_with_forecast_data(obs, {})
+        assert enriched[0]["dominant_state"] == ""
+
+
+class TestFilterObservationsByPair:
+    def test_filters_to_pair(self) -> None:
+        obs = [
+            {"pair": "USDJPY", "strategy_kind": "ugh"},
+            {"pair": "EURUSD", "strategy_kind": "ugh"},
+            {"pair": "USDJPY", "strategy_kind": "baseline_random_walk"},
+        ]
+        filtered = _filter_observations_by_pair(obs, "USDJPY")
+        assert len(filtered) == 2
+        assert all(r["pair"] == "USDJPY" for r in filtered)
+
+    def test_includes_rows_without_pair(self) -> None:
+        obs = [
+            {"pair": "", "strategy_kind": "ugh"},
+            {"strategy_kind": "ugh"},
+            {"pair": "USDJPY", "strategy_kind": "ugh"},
+        ]
+        filtered = _filter_observations_by_pair(obs, "USDJPY")
+        assert len(filtered) == 3
+
+    def test_case_insensitive(self) -> None:
+        obs = [
+            {"pair": "usdjpy", "strategy_kind": "ugh"},
+        ]
+        filtered = _filter_observations_by_pair(obs, "USDJPY")
+        assert len(filtered) == 1
