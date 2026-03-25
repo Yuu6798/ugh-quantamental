@@ -549,6 +549,26 @@ def run_fx_daily_protocol_once(
             provider_health_path=provider_health_path,
         )
 
+    # --- Step 8: annotation + analytics (non-fatal) ---
+    annotation_analytics: dict[str, str | None] = {}
+    if config.write_csv_exports:
+        try:
+            from ugh_quantamental.fx_protocol.analytics_annotations import (
+                run_annotation_analytics,
+            )
+
+            annotation_analytics = run_annotation_analytics(
+                config.csv_output_dir,
+                as_of_jst,
+                generated_at_utc=datetime.now(timezone.utc),
+            )
+        except Exception:
+            logger.warning(
+                "Annotation/analytics layer failed (non-fatal); "
+                "existing artifacts are unaffected.",
+                exc_info=True,
+            )
+
     return FxDailyAutomationResult(
         as_of_jst=as_of_jst,
         forecast_batch_id=forecast_batch_id,
@@ -566,4 +586,5 @@ def run_fx_daily_protocol_once(
         daily_report_path=daily_report_path,
         scoreboard_path=scoreboard_path,
         provider_health_path=provider_health_path,
+        annotation_analytics=annotation_analytics if annotation_analytics else None,
     )
