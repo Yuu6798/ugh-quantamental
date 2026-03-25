@@ -1,0 +1,82 @@
+name: FX Monthly Review v1
+
+on:
+  schedule:
+    # Monthly: 1st of each month at 10:00 JST = 01:00 UTC
+    # Generates the previous month's review after all daily/weekly runs are complete.
+    - cron: '0 1 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to push to fx-daily-data branch
+
+jobs:
+  run-monthly-review:
+    runs-on: ubuntu-latest
+
+    env:
+      FX_DATA_BRANCH: ${{ vars.FX_DATA_BRANCH || 'fx-daily-data' }}
+      FX_CSV_OUTPUT_DIR: ${{ github.workspace }}/data/csv
+      FX_MONTH_DAYS: '20'
+      FX_PAIR: 'USDJPY'
+
+    steps:
+      - name: Check out code branch
+        uses: actions/checkout@v4
+        with:
+          path: code
+
+      - name: Check out data branch
+        id: checkout-data
+        run: |
+          clone_output=$(git clone \
+            --branch "$FX_DATA_BRANCH" \
+            --depth 1 \
+            "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+            data 2>&1) && {
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          }
+          if echo "$clone_output" | grep -qiE "remote branch .* not found|could not find remote branch"; then
+            echo "Data branch '$FX_DATA_BRANCH' not found. Skipping monthly review."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::error::git clone failed: $clone_output"
+          exit 1
+
+      - name: Set up Python 3.11
+        if: steps.checkout-data.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: code/pyproject.toml
+
+      - name: Install project
+        if: steps.checkout-data.outputs.skip != 'true'
+        working-directory: code
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: Run monthly review
+        if: steps.checkout-data.outputs.skip != 'true'
+        working-directory: code
+        run: |
+          python scripts/run_fx_monthly_review.py
+
+      - name: Commit and push data branch if changed
+        if: steps.checkout-data.outputs.skip != 'true'
+        working-directory: data
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No data changes to commit."
+          else
+            git commit -m "FX monthly review v1 $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git push origin HEAD:"$FX_DATA_BRANCH"
+            echo "Data branch updated with monthly review."
+          fi
