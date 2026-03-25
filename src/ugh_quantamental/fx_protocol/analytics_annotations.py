@@ -618,10 +618,14 @@ def _aggregate_tag_scoreboard(
     groups: dict[TagKey, list[dict[str, str]]] = defaultdict(list)
 
     for row in obs_rows:
+        # Only confirmed annotations contribute to per-tag analysis.
+        # Pending/unlabeled rows are excluded to prevent draft labels from
+        # skewing tag-level metrics.
+        if row.get("annotation_status", "") != "confirmed":
+            continue
         tags_str = row.get("event_tags", "")
         if not tags_str:
             continue
-        # Include confirmed rows preferentially; also include unlabeled for coverage
         tags = [t.strip() for t in tags_str.split("|") if t.strip()]
         sk = row.get("strategy_kind", "")
         for tag in tags:

@@ -187,10 +187,16 @@ Per-tag aggregation with tag expansion.
 | `mean_magnitude_error_bp` | Mean magnitude error |
 | `last_updated_utc` | Generation timestamp |
 
+### Filtering
+
+Only rows with `annotation_status=confirmed` are included in the tag scoreboard.
+Pending and unlabeled rows are excluded to prevent draft labels from skewing
+tag-level metrics.
+
 ### Tag expansion
 
-If an observation has `event_tags=fomc|cpi_us`, it contributes one observation
-to the `fomc` group and one to the `cpi_us` group.
+If a confirmed observation has `event_tags=fomc|cpi_us`, it contributes one
+observation to the `fomc` group and one to the `cpi_us` group.
 
 ---
 

@@ -474,6 +474,30 @@ class TestTagScoreboard:
         for col in TAG_SCOREBOARD_FIELDNAMES:
             assert col in rows[0]
 
+    def test_pending_excluded_from_tag_scoreboard(self, tmp_path: str) -> None:
+        """Pending annotations must not contribute to tag scoreboard."""
+        tmpdir = str(tmp_path)
+        _setup_history(tmpdir)
+        ann_dir = os.path.join(tmpdir, "annotations")
+        os.makedirs(ann_dir, exist_ok=True)
+        _write_csv(
+            os.path.join(ann_dir, "manual_annotations.csv"),
+            MANUAL_ANNOTATION_FIELDNAMES,
+            [{
+                "as_of_jst": "2026-03-13T08:00:00+09:00",
+                "regime_label": "choppy",
+                "event_tags": "boj|nfp_us",
+                "volatility_label": "high",
+                "intervention_risk": "high",
+                "notes": "",
+                "annotation_status": "pending",
+            }],
+        )
+        build_labeled_observations(tmpdir, _NOW)
+        result = build_tag_scoreboard(tmpdir, _NOW)
+        # Pending rows should be excluded → no confirmed tags → None
+        assert result is None
+
     def test_no_tags_returns_none(self, tmp_path: str) -> None:
         """If no rows have event_tags, tag_scoreboard should return None."""
         tmpdir = str(tmp_path)
