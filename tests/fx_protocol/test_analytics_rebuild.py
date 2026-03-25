@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 import os
 from datetime import datetime, timezone
+
+import pytest
 from zoneinfo import ZoneInfo
 
 from ugh_quantamental.fx_protocol.analytics_rebuild import (
@@ -236,12 +238,12 @@ class TestRebuildWeeklyReport:
         cov = report["annotation_coverage"]
         assert cov["confirmed_annotation_count"] == 0
 
-    def test_rebuild_empty_dir(self, tmp_path: str) -> None:
+    def test_rebuild_empty_dir_raises(self, tmp_path: str) -> None:
         tmpdir = str(tmp_path)
-        report = rebuild_weekly_report(
-            tmpdir, _REPORT_DATE, generated_at_utc=_NOW
-        )
-        assert report["observation_count"] == 0
+        with pytest.raises(RuntimeError, match="labeled_observations rebuild produced no output"):
+            rebuild_weekly_report(
+                tmpdir, _REPORT_DATE, generated_at_utc=_NOW
+            )
 
     def test_rebuild_preserves_existing_logic(self) -> None:
         """Weekly v1 models must still be importable after v2 is added."""

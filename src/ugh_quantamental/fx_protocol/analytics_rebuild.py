@@ -125,12 +125,13 @@ def rebuild_weekly_report(
         csv_output_dir, generated_at_utc=generated_at_utc
     )
 
-    # Guard: if labeled observations were not regenerated, abort to prevent
-    # silently reporting on stale data from a previous run.
+    # Guard: if labeled observations were not regenerated, raise to prevent
+    # silently publishing an empty or stale weekly report.
     if analytics_result.get("labeled_observations_path") is None:
-        logger.warning(
+        raise RuntimeError(
             "labeled_observations rebuild produced no output; "
-            "weekly report may be empty or reflect stale data."
+            "cannot generate weekly report without fresh observation data. "
+            "Check that history/ contains forecast and evaluation CSVs."
         )
 
     # Step 2: Generate v2 report
