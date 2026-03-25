@@ -41,7 +41,7 @@ def _make_review_audit_inputs(
         ReviewIntentFeatures,
         ReviewObservation,
     )
-    from ugh_quantamental.review_autofix.models import ReviewContext, ReviewKind
+    from ugh_quantamental.engine.review_audit_models import ReviewContext, ReviewKind
 
     ctx = ReviewContext(
         kind=ReviewKind.diff_comment,
@@ -334,7 +334,7 @@ def test_get_review_audit_run_bundle_returns_fully_typed_bundle() -> None:
     from ugh_quantamental.engine.review_audit_models import ReviewAuditEngineResult
     from ugh_quantamental.query.models import ReviewAuditRunBundle
     from ugh_quantamental.query.readers import get_review_audit_run_bundle
-    from ugh_quantamental.review_autofix.models import ReviewContext
+    from ugh_quantamental.engine.review_audit_models import ReviewContext
 
     session = _make_db_session()
     _seed_review_audit_run(session, "r-bundle", pr_number=55, reviewer_login="carol")
