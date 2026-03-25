@@ -21,7 +21,7 @@ from ugh_quantamental.engine.review_audit_models import (
     ReviewObservation,
 )
 from ugh_quantamental.engine.state_models import StateConfig, StateEngineResult, StateEventFeatures
-from ugh_quantamental.review_autofix.models import ReviewContext
+from ugh_quantamental.engine.review_audit_models import ReviewContext
 from ugh_quantamental.schemas.omega import Omega
 from ugh_quantamental.schemas.ssv import SSVSnapshot
 

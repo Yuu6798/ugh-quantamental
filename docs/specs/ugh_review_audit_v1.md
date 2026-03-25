@@ -2,9 +2,8 @@
 
 ## Why this layer exists
 
-The `review_autofix` bot classifies and applies mechanical PR review fixes. It
-records what it fixed, but not whether the fix was semantically aligned with
-the reviewer's intent.
+PR review tools classify and apply mechanical fixes. They record what was fixed,
+but not whether the fix was semantically aligned with the reviewer's intent.
 
 The review audit engine adds a deterministic audit layer that computes:
 
@@ -17,9 +16,8 @@ The review audit engine adds a deterministic audit layer that computes:
   insufficient_data`.
 
 This layer follows the same `engine → persist → replay` pattern as the
-projection and state engines. v1 integrates with the review_autofix bot in
-**shadow mode only** — results are stored and logged, but never used to block
-pushes or trigger enforcement.
+projection and state engines. v1 operates in **shadow mode only** — results are
+stored and logged, but never used to block pushes or trigger enforcement.
 
 ---
 

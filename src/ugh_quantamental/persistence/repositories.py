@@ -41,7 +41,7 @@ from ugh_quantamental.persistence.serializers import (
     review_audit_payload_to_models,
     state_payload_to_models,
 )
-from ugh_quantamental.review_autofix.models import ReviewContext
+from ugh_quantamental.engine.review_audit_models import ReviewContext
 from ugh_quantamental.schemas.omega import Omega
 from ugh_quantamental.schemas.ssv import SSVSnapshot
 

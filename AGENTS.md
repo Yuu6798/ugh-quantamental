@@ -14,9 +14,8 @@
 - **regression suite** — named suite runner over batch replay cases with deterministic pass/fail reporting
 - **baseline / golden snapshot** — persist named suite results; compare future reruns against a pinned baseline
 - **fx_protocol** — FX daily prediction cycle: frozen contracts, calendar helpers, deterministic ID generation, daily forecast/outcome/evaluation workflows, CSV exports, GitHub Actions automation, and read-only weekly report aggregation
-- **review_autofix** — PR review auto-fix bot: classifier, feature extraction, rule engine, task builder, code executor, validator, and GitHub integration
 
-Milestones 1–17 are complete. Core packages are deterministic, synchronous, and connector-free. `fx_protocol` and `review_autofix` contain intentional side effects (HTTP calls, API integrations).
+Milestones 1–17 are complete. Core packages are deterministic, synchronous, and connector-free. `fx_protocol` contains intentional side effects (HTTP calls, API integrations).
 
 ## Durable working rules
 

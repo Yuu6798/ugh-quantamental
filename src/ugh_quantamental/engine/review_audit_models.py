@@ -2,7 +2,7 @@
 
 These are the canonical Pydantic models consumed and produced by
 ``engine/review_audit.py``.  The extractor in
-``review_autofix/feature_extractor.py`` imports ``ReviewObservation`` and
+``engine/review_audit_extractor.py`` imports ``ReviewObservation`` and
 ``ReviewIntentFeatures`` from here rather than defining them locally.
 
 All models use ``extra="forbid", frozen=True`` to enforce immutability and
@@ -11,8 +11,43 @@ prevent accidental field additions.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
+from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class Classification(str, Enum):
+    auto_fixable = "auto_fixable"
+    propose_only = "propose_only"
+    skip = "skip"
+
+
+class ReviewKind(str, Enum):
+    diff_comment = "diff_comment"
+    review_body = "review_body"
+
+
+@dataclass(frozen=True)
+class ReviewContext:
+    kind: ReviewKind
+    repository: str
+    pr_number: int
+    review_id: int | None
+    review_comment_id: int | None
+    head_sha: str
+    base_ref: str
+    head_ref: str
+    same_repo: bool
+    reviewer_login: str | None
+    body: str
+    path: str | None
+    diff_hunk: str | None
+    line: int | None
+    start_line: int | None
+    version_discriminator: str
+    review_comment_node_id: str | None = None
+    review_body_path_hint_present: bool = False
 
 
 class ReviewObservation(BaseModel):

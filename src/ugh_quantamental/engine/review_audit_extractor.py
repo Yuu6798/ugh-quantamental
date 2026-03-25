@@ -1,34 +1,60 @@
-"""Deterministic feature extraction pipeline for PR review semantic audit.
+"""Deterministic feature extraction for the PR Review Semantic Audit Engine.
 
-Three-layer extraction:
-  ReviewContext -> ReviewObservation (symbolic) -> ReviewIntentFeatures ([0,1] floats)
-
-The canonical ``ReviewObservation`` and ``ReviewIntentFeatures`` models now live
-in ``engine/review_audit_models.py`` (added in Milestone 3).  They are
-re-exported from this module so that existing callers continue to work without
-modification.
+Migrated from the removed ``review_autofix`` package.  All extraction functions
+are pure and deterministic — no I/O, no network calls.
 """
 from __future__ import annotations
 
-from ugh_quantamental.engine.review_audit_models import (
+import re
+
+from .review_audit_models import (
     FixActionFeatures,
+    ReviewContext,
     ReviewIntentFeatures,
     ReviewObservation,
 )
 
-from .classifier import _AUTO_KEYWORDS, _SKIP_KEYWORDS, extract_priority
-from .models import ReviewContext
-
-# Re-export canonical models for backwards-compatible imports.
 __all__ = [
     "FixActionFeatures",
     "ReviewObservation",
     "ReviewIntentFeatures",
+    "extract_priority",
     "extract_review_observation",
     "extract_review_intent_features",
     "extract_review_features",
     "extract_fix_action_features",
 ]
+
+# ---------------------------------------------------------------------------
+# Priority extraction (from classifier)
+# ---------------------------------------------------------------------------
+
+_PRIORITY_RE = re.compile(r"\bP([0-3])\b", re.IGNORECASE)
+
+_AUTO_KEYWORDS: tuple[str, ...] = (
+    "lint",
+    "ruff",
+    "import",
+    "unused",
+    "none",
+    "null",
+    "utc",
+    "validator",
+    "normalizer",
+    "型",
+    "整理",
+    "未使用",
+)
+
+_SKIP_KEYWORDS: tuple[str, ...] = ("design", "refactor", "大規模", "アーキ", "仕様変更")
+
+
+def extract_priority(text: str) -> str:
+    match = _PRIORITY_RE.search(text)
+    if not match:
+        return "P2"
+    return f"P{match.group(1)}"
+
 
 # ---------------------------------------------------------------------------
 # Keyword lookup tables used by extract_review_observation
