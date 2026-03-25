@@ -203,11 +203,13 @@ def _load_provider_health_rows(csv_output_dir: str) -> list[dict[str, str]]:
         if os.path.isfile(candidate):
             return _read_csv_rows(candidate)
 
-    # Scan history for provider_health.csv files and merge
+    # Scan history for provider_health.csv files and merge.
+    # History files are cumulative snapshots, so deduplicate by as_of_jst
+    # to avoid inflating counts.
     history_dir = os.path.join(base, "history")
     if not os.path.isdir(history_dir):
         return []
-    rows: list[dict[str, str]] = []
+    seen: dict[str, dict[str, str]] = {}
     for date_dir in sorted(os.listdir(history_dir)):
         date_path = os.path.join(history_dir, date_dir)
         if not os.path.isdir(date_path):
@@ -215,8 +217,11 @@ def _load_provider_health_rows(csv_output_dir: str) -> list[dict[str, str]]:
         for batch_dir in sorted(os.listdir(date_path)):
             ph_csv = os.path.join(date_path, batch_dir, "provider_health.csv")
             if os.path.isfile(ph_csv):
-                rows.extend(_read_csv_rows(ph_csv))
-    return rows
+                for row in _read_csv_rows(ph_csv):
+                    key = row.get("as_of_jst", "")
+                    if key:
+                        seen[key] = row
+    return list(seen.values())
 
 
 def _filter_provider_health_for_week(

@@ -10,6 +10,7 @@ Importable without SQLAlchemy.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -111,8 +112,26 @@ def rebuild_weekly_report(
     if generated_at_utc is None:
         generated_at_utc = datetime.now(timezone.utc)
 
+    # Step 0: Remove stale labeled_observations.csv so that if rebuild fails,
+    # run_weekly_report_v2 cannot silently use outdated data.
+    stale_obs = os.path.join(
+        os.path.abspath(csv_output_dir), "analytics", "labeled_observations.csv"
+    )
+    if os.path.isfile(stale_obs):
+        os.remove(stale_obs)
+
     # Step 1: Rebuild analytics first
-    rebuild_annotation_analytics(csv_output_dir, generated_at_utc=generated_at_utc)
+    analytics_result = rebuild_annotation_analytics(
+        csv_output_dir, generated_at_utc=generated_at_utc
+    )
+
+    # Guard: if labeled observations were not regenerated, abort to prevent
+    # silently reporting on stale data from a previous run.
+    if analytics_result.get("labeled_observations_path") is None:
+        logger.warning(
+            "labeled_observations rebuild produced no output; "
+            "weekly report may be empty or reflect stale data."
+        )
 
     # Step 2: Generate v2 report
     report = run_weekly_report_v2(
