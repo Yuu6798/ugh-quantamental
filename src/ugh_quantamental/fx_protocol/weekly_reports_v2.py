@@ -72,8 +72,10 @@ def _resolve_week_window(
 ) -> tuple[str, str]:
     """Return (start_date_str, end_date_str) for the week window.
 
-    Walks backwards from *report_date_jst* collecting *business_day_count*
-    Mon-Fri dates.  Returns YYYYMMDD strings for the oldest and newest dates.
+    Walks backwards from the day *before* *report_date_jst* collecting
+    *business_day_count* Mon-Fri dates.  The report date itself is excluded
+    to avoid including an incomplete current-day bucket.
+    Returns YYYYMMDD strings for the oldest and newest dates.
     """
     if report_date_jst.tzinfo is not None:
         ts = report_date_jst.astimezone(_JST)
@@ -81,7 +83,8 @@ def _resolve_week_window(
         ts = report_date_jst.replace(tzinfo=_JST)
 
     dates: list[datetime] = []
-    candidate = ts.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Start from the day before report_date to exclude the (potentially incomplete) current day.
+    candidate = ts.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
     while len(dates) < business_day_count:
         if candidate.isoweekday() in range(1, 6):
             dates.append(candidate)

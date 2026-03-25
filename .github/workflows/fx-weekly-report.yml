@@ -2,9 +2,9 @@ name: FX Weekly Report v2
 
 on:
   schedule:
-    # Weekly: Monday 10:00 JST = Sunday 01:00 UTC
+    # Weekly: Monday 10:00 JST = Monday 01:00 UTC
     # Generates the previous week's report after all daily runs are complete.
-    - cron: '0 1 * * 0'
+    - cron: '0 1 * * 1'
   workflow_dispatch:
 
 permissions:
