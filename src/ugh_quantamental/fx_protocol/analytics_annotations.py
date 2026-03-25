@@ -327,7 +327,7 @@ def load_manual_annotations(csv_output_dir: str) -> dict[str, dict[str, str]]:
     if not os.path.isfile(path):
         return {}
     result: dict[str, dict[str, str]] = {}
-    with open(path, newline="", encoding="utf-8") as fh:
+    with open(path, newline="", encoding="utf-8-sig") as fh:
         reader = csv.DictReader(fh)
         for row in reader:
             key = row.get("as_of_jst", "")
@@ -510,7 +510,7 @@ def _aggregate_slice_scoreboard(
     groups: dict[GroupKey, list[dict[str, str]]] = defaultdict(list)
 
     for row in obs_rows:
-        status = row.get("annotation_status", "")
+        status = row.get("annotation_status", "").strip().lower()
         if status == "confirmed":
             key: GroupKey = (
                 row.get("strategy_kind", ""),
@@ -621,7 +621,7 @@ def _aggregate_tag_scoreboard(
         # Only confirmed annotations contribute to per-tag analysis.
         # Pending/unlabeled rows are excluded to prevent draft labels from
         # skewing tag-level metrics.
-        if row.get("annotation_status", "") != "confirmed":
+        if row.get("annotation_status", "").strip().lower() != "confirmed":
             continue
         tags_str = row.get("event_tags", "")
         if not tags_str:

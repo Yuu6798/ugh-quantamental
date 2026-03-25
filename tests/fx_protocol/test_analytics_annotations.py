@@ -306,6 +306,30 @@ class TestLoadManualAnnotations:
         result = load_manual_annotations(tmpdir)
         assert result["2026-03-13T08:00:00+09:00"]["annotation_status"] == "pending"
 
+    def test_utf8_bom_handled(self, tmp_path: str) -> None:
+        """CSV saved with UTF-8 BOM (e.g. Excel) should still be loaded correctly."""
+        tmpdir = str(tmp_path)
+        ann_dir = os.path.join(tmpdir, "annotations")
+        os.makedirs(ann_dir, exist_ok=True)
+        path = os.path.join(ann_dir, "manual_annotations.csv")
+        # Write with BOM prefix
+        with open(path, "w", encoding="utf-8-sig", newline="") as fh:
+            import csv as _csv
+            writer = _csv.DictWriter(fh, fieldnames=list(MANUAL_ANNOTATION_FIELDNAMES))
+            writer.writeheader()
+            writer.writerow({
+                "as_of_jst": "2026-03-13T08:00:00+09:00",
+                "regime_label": "trending",
+                "event_tags": "fomc",
+                "volatility_label": "high",
+                "intervention_risk": "low",
+                "notes": "bom test",
+                "annotation_status": "confirmed",
+            })
+        result = load_manual_annotations(tmpdir)
+        assert "2026-03-13T08:00:00+09:00" in result
+        assert result["2026-03-13T08:00:00+09:00"]["regime_label"] == "trending"
+
 
 # ---------------------------------------------------------------------------
 # Test: Labeled observations
@@ -432,6 +456,33 @@ class TestSliceScoreboard:
         # Without annotations, all should be unlabeled (empty labels)
         for row in rows:
             assert row["regime_label"] == ""
+
+    def test_case_insensitive_confirmed(self, tmp_path: str) -> None:
+        """'Confirmed' and ' confirmed ' should be treated as confirmed."""
+        tmpdir = str(tmp_path)
+        _setup_history(tmpdir)
+        ann_dir = os.path.join(tmpdir, "annotations")
+        os.makedirs(ann_dir, exist_ok=True)
+        _write_csv(
+            os.path.join(ann_dir, "manual_annotations.csv"),
+            MANUAL_ANNOTATION_FIELDNAMES,
+            [{
+                "as_of_jst": "2026-03-13T08:00:00+09:00",
+                "regime_label": "choppy",
+                "event_tags": "fomc",
+                "volatility_label": "low",
+                "intervention_risk": "high",
+                "notes": "",
+                "annotation_status": " Confirmed ",
+            }],
+        )
+        build_labeled_observations(tmpdir, _NOW)
+        path = build_slice_scoreboard(tmpdir, _NOW)
+        assert path is not None
+        with open(path, newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        labeled = [r for r in rows if r["regime_label"] == "choppy"]
+        assert len(labeled) >= 1
 
     def test_no_observations_returns_none(self, tmp_path: str) -> None:
         result = build_slice_scoreboard(str(tmp_path), _NOW)
