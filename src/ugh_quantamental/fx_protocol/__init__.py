@@ -86,6 +86,23 @@ from ugh_quantamental.fx_protocol.report_models import (
     WeeklyReportRequest,
     WeeklyReportResult,
 )
+from ugh_quantamental.fx_protocol.weekly_reports_v2 import (
+    WEEKLY_SLICE_METRICS_FIELDNAMES,
+    WEEKLY_STRATEGY_METRICS_FIELDNAMES,
+    run_weekly_report_v2,
+)
+from ugh_quantamental.fx_protocol.weekly_report_exports import (
+    build_weekly_report_md,
+    export_weekly_report_artifacts,
+    export_weekly_report_json,
+    export_weekly_report_md,
+    export_weekly_slice_metrics_csv,
+    export_weekly_strategy_metrics_csv,
+)
+from ugh_quantamental.fx_protocol.analytics_rebuild import (
+    rebuild_annotation_analytics,
+    rebuild_weekly_report,
+)
 
 __all__ = [
     "BaselineContext",
@@ -151,4 +168,18 @@ __all__ = [
     "generate_manual_annotation_template",
     "load_manual_annotations",
     "run_annotation_analytics",
+    # weekly_reports_v2
+    "WEEKLY_SLICE_METRICS_FIELDNAMES",
+    "WEEKLY_STRATEGY_METRICS_FIELDNAMES",
+    "run_weekly_report_v2",
+    # weekly_report_exports
+    "build_weekly_report_md",
+    "export_weekly_report_artifacts",
+    "export_weekly_report_json",
+    "export_weekly_report_md",
+    "export_weekly_slice_metrics_csv",
+    "export_weekly_strategy_metrics_csv",
+    # analytics_rebuild
+    "rebuild_annotation_analytics",
+    "rebuild_weekly_report",
 ]
