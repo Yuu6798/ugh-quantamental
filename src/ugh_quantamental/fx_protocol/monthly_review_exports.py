@@ -492,18 +492,21 @@ def _build_forecast_lookup(
     csv_output_dir: str,
     month_start: str,
     month_end: str,
-) -> dict[tuple[str, str], dict[str, str]]:
-    """Build a lookup of (as_of_jst_datestr, strategy_kind) -> forecast row.
+) -> dict[tuple[str, str, str], dict[str, str]]:
+    """Build a lookup of (forecast_batch_id, strategy_kind, date_str) -> forecast row.
 
     Scans ``history/`` for forecast CSVs to extract ``dominant_state`` and ``pair``
     which are not included in ``labeled_observations.csv``.
+
+    The key includes ``forecast_batch_id`` to disambiguate reruns or different
+    pairs that share the same date and strategy.
     """
     base = os.path.abspath(csv_output_dir)
     history_dir = os.path.join(base, "history")
     if not os.path.isdir(history_dir):
         return {}
 
-    lookup: dict[tuple[str, str], dict[str, str]] = {}
+    lookup: dict[tuple[str, str, str], dict[str, str]] = {}
     for date_dir in sorted(os.listdir(history_dir)):
         # Quick date range check on directory name (YYYYMMDD)
         if len(date_dir) == 8 and date_dir.isdigit():
@@ -521,26 +524,31 @@ def _build_forecast_lookup(
                 as_of = row.get("as_of_jst", "")
                 date_str = as_of[:10].replace("-", "") if len(as_of) >= 10 else ""
                 sk = row.get("strategy_kind", "")
+                batch_id = row.get("forecast_batch_id", "")
                 if date_str and sk:
-                    lookup[(date_str, sk)] = row
+                    lookup[(batch_id, sk, date_str)] = row
     return lookup
 
 
 def _enrich_observations_with_forecast_data(
     observations: list[dict[str, str]],
-    forecast_lookup: dict[tuple[str, str], dict[str, str]],
+    forecast_lookup: dict[tuple[str, str, str], dict[str, str]],
 ) -> list[dict[str, str]]:
     """Enrich observation rows with ``dominant_state`` and ``pair`` from forecast history.
 
     ``labeled_observations.csv`` does not include these columns, so we populate
     them from the original forecast CSVs to enable state-level monthly analysis
     and pair filtering.
+
+    Looks up by ``(forecast_batch_id, strategy_kind, date_str)`` to avoid
+    collisions when multiple batches share the same date and strategy.
     """
     for obs in observations:
         as_of = obs.get("as_of_jst", "")
         date_str = as_of[:10].replace("-", "") if len(as_of) >= 10 else ""
         sk = obs.get("strategy_kind", "")
-        fc = forecast_lookup.get((date_str, sk), {})
+        batch_id = obs.get("forecast_batch_id", "")
+        fc = forecast_lookup.get((batch_id, sk, date_str), {})
 
         if not obs.get("dominant_state"):
             obs["dominant_state"] = fc.get("dominant_state", "")

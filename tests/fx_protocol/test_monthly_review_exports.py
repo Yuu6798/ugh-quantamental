@@ -305,10 +305,10 @@ class TestEnrichObservationsWithForecastData:
     def test_dominant_state_populated(self) -> None:
         obs = [
             {"as_of_jst": "2026-03-18T08:00:00+09:00", "strategy_kind": "ugh",
-             "dominant_state": ""},
+             "forecast_batch_id": "batch_001", "dominant_state": ""},
         ]
         lookup = {
-            ("20260318", "ugh"): {"dominant_state": "fire", "pair": "USDJPY"},
+            ("batch_001", "ugh", "20260318"): {"dominant_state": "fire", "pair": "USDJPY"},
         }
         enriched = _enrich_observations_with_forecast_data(obs, lookup)
         assert enriched[0]["dominant_state"] == "fire"
@@ -317,10 +317,11 @@ class TestEnrichObservationsWithForecastData:
     def test_does_not_overwrite_existing(self) -> None:
         obs = [
             {"as_of_jst": "2026-03-18T08:00:00+09:00", "strategy_kind": "ugh",
+             "forecast_batch_id": "batch_001",
              "dominant_state": "dormant", "pair": "USDJPY"},
         ]
         lookup = {
-            ("20260318", "ugh"): {"dominant_state": "fire", "pair": "EURUSD"},
+            ("batch_001", "ugh", "20260318"): {"dominant_state": "fire", "pair": "EURUSD"},
         }
         enriched = _enrich_observations_with_forecast_data(obs, lookup)
         assert enriched[0]["dominant_state"] == "dormant"
@@ -329,10 +330,32 @@ class TestEnrichObservationsWithForecastData:
     def test_missing_lookup_entry(self) -> None:
         obs = [
             {"as_of_jst": "2026-03-18T08:00:00+09:00", "strategy_kind": "ugh",
-             "dominant_state": ""},
+             "forecast_batch_id": "batch_001", "dominant_state": ""},
         ]
         enriched = _enrich_observations_with_forecast_data(obs, {})
         assert enriched[0]["dominant_state"] == ""
+
+    def test_disambiguates_by_batch_id(self) -> None:
+        """Different batch IDs on the same date/strategy get correct data."""
+        obs = [
+            {"as_of_jst": "2026-03-18T08:00:00+09:00", "strategy_kind": "ugh",
+             "forecast_batch_id": "batch_A", "dominant_state": ""},
+            {"as_of_jst": "2026-03-18T08:00:00+09:00", "strategy_kind": "ugh",
+             "forecast_batch_id": "batch_B", "dominant_state": ""},
+        ]
+        lookup = {
+            ("batch_A", "ugh", "20260318"): {
+                "dominant_state": "fire", "pair": "USDJPY",
+            },
+            ("batch_B", "ugh", "20260318"): {
+                "dominant_state": "dormant", "pair": "EURUSD",
+            },
+        }
+        enriched = _enrich_observations_with_forecast_data(obs, lookup)
+        assert enriched[0]["dominant_state"] == "fire"
+        assert enriched[0]["pair"] == "USDJPY"
+        assert enriched[1]["dominant_state"] == "dormant"
+        assert enriched[1]["pair"] == "EURUSD"
 
 
 class TestFilterObservationsByPair:
