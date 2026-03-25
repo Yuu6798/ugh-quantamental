@@ -531,6 +531,27 @@ def rebuild_monthly_review(
     if generated_at_utc is None:
         generated_at_utc = datetime.now(timezone.utc)
 
+    # Step 0: Remove stale labeled_observations.csv so that if rebuild fails,
+    # data loading cannot silently use outdated data.
+    stale_obs = os.path.join(
+        os.path.abspath(csv_output_dir), "analytics", "labeled_observations.csv"
+    )
+    if os.path.isfile(stale_obs):
+        os.remove(stale_obs)
+
+    # Step 1: Rebuild annotation analytics to ensure fresh observations.
+    from ugh_quantamental.fx_protocol.analytics_rebuild import rebuild_annotation_analytics
+
+    analytics_result = rebuild_annotation_analytics(
+        csv_output_dir, generated_at_utc=generated_at_utc
+    )
+
+    if analytics_result.get("labeled_observations_path") is None:
+        logger.warning(
+            "labeled_observations rebuild produced no output; "
+            "monthly review will run on empty observation set."
+        )
+
     # Resolve window
     month_start, month_end = _resolve_month_window(review_date_jst, business_day_count)
 
