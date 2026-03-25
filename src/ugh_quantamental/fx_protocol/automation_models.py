@@ -47,3 +47,8 @@ class FxDailyAutomationResult(BaseModel):
     outcome_csv_path: str | None = None
     evaluation_csv_path: str | None = None
     manifest_path: str | None = None
+    input_snapshot_path: str | None = None
+    run_summary_path: str | None = None
+    daily_report_path: str | None = None
+    scoreboard_path: str | None = None
+    provider_health_path: str | None = None

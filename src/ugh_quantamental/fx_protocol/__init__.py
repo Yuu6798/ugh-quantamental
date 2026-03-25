@@ -51,6 +51,17 @@ from ugh_quantamental.fx_protocol.data_models import (
     FxCompletedWindow,
     FxProtocolMarketSnapshot,
 )
+from ugh_quantamental.fx_protocol.observability import (
+    PROVIDER_HEALTH_FIELDNAMES,
+    SCOREBOARD_FIELDNAMES,
+    build_daily_report_md,
+    build_input_snapshot,
+    build_provider_health_row,
+    build_run_summary,
+    build_scoreboard_rows,
+    collect_all_evaluations_from_history,
+    publish_observability_to_layout,
+)
 from ugh_quantamental.fx_protocol.report_models import (
     BaselineWeeklyComparison,
     StateWeeklyMetrics,
@@ -91,6 +102,16 @@ __all__ = [
     "WeeklyMismatchSummary",
     "WeeklyReportRequest",
     "WeeklyReportResult",
+    # observability
+    "PROVIDER_HEALTH_FIELDNAMES",
+    "SCOREBOARD_FIELDNAMES",
+    "build_daily_report_md",
+    "build_input_snapshot",
+    "build_provider_health_row",
+    "build_run_summary",
+    "build_scoreboard_rows",
+    "collect_all_evaluations_from_history",
+    "publish_observability_to_layout",
     # csv_exports
     "EVALUATION_FIELDNAMES",
     "FORECAST_FIELDNAMES",

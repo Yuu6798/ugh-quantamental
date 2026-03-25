@@ -9,6 +9,7 @@ SQLAlchemy is required at call time; the module itself is importable without it.
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -376,6 +377,7 @@ def run_fx_daily_protocol_once(
 
     # --- Step 6: publish to latest/ + history/ layout and write manifest ---
     manifest_path: str | None = None
+    manifest_data: dict[str, object] | None = None
 
     if config.write_csv_exports and forecast_csv_path is not None:
         from ugh_quantamental.fx_protocol.csv_exports import (
@@ -392,7 +394,7 @@ def run_fx_daily_protocol_once(
             outcome_csv_path,
             evaluation_csv_path,
         )
-        manifest_data: dict[str, object] = {
+        manifest_data = {
             "as_of_jst": as_of_jst.isoformat(),
             "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "forecast_batch_id": forecast_batch_id,
@@ -408,6 +410,145 @@ def run_fx_daily_protocol_once(
         }
         manifest_path = write_latest_manifest(config.csv_output_dir, manifest_data)
 
+    # --- Step 7: observability artifacts ---
+    input_snapshot_path: str | None = None
+    run_summary_path: str | None = None
+    daily_report_path: str | None = None
+    scoreboard_path: str | None = None
+    provider_health_path: str | None = None
+
+    if config.write_csv_exports and forecast_batch_id is not None:
+        from ugh_quantamental.fx_protocol.observability import (
+            PROVIDER_HEALTH_FIELDNAMES,
+            SCOREBOARD_FIELDNAMES,
+            append_csv_row,
+            build_daily_report_md,
+            build_input_snapshot,
+            build_provider_health_row,
+            build_run_summary,
+            build_scoreboard_rows,
+            collect_all_evaluations_from_history,
+            publish_observability_to_layout,
+            write_csv_artifact,
+            write_json_artifact,
+            write_md_artifact,
+        )
+        from ugh_quantamental.persistence.repositories import (
+            FxForecastRepository as _FxFR2,
+            FxOutcomeEvaluationRepository as _FxOER2,
+        )
+
+        obs_now = datetime.now(timezone.utc)
+        date_str_obs = as_of_jst.strftime("%Y%m%d")
+        obs_base = os.path.join(os.path.abspath(config.csv_output_dir), "observability")
+
+        # Determine lag and fallback
+        newest_end = snapshot.completed_windows[-1].window_end_jst
+        _snapshot_lag = 0
+        _used_fallback = False
+        original_as_of = current_as_of_jst(now_utc)
+        if newest_end != original_as_of:
+            _snapshot_lag = 1
+            _used_fallback = True
+
+        _run_status = "ok"
+        if not forecast_created and forecast_batch_id is not None:
+            _run_status = "idempotent_skip"
+
+        # 7a. input_snapshot.json
+        snap_data = build_input_snapshot(snapshot, obs_now)
+        snap_path = os.path.join(obs_base, f"{date_str_obs}_input_snapshot.json")
+        input_snapshot_path = write_json_artifact(snap_path, snap_data)
+
+        # 7b. run_summary.json
+        summary_data = build_run_summary(
+            as_of_jst=as_of_jst,
+            provider_name=snapshot.market_data_provenance.vendor,
+            forecast_batch_id=forecast_batch_id,
+            outcome_id=outcome_id,
+            forecast_created=forecast_created,
+            outcome_recorded=outcome_recorded,
+            evaluation_count=evaluation_count,
+            forecast_csv_path=forecast_csv_path,
+            outcome_csv_path=outcome_csv_path,
+            evaluation_csv_path=evaluation_csv_path,
+            manifest_path=manifest_path,
+            snapshot_lag_business_days=_snapshot_lag,
+            used_fallback_adjustment=_used_fallback,
+            run_status=_run_status,
+            theory_version=config.theory_version,
+            engine_version=config.engine_version,
+            schema_version=config.schema_version,
+            protocol_version=config.protocol_version,
+            generated_at_utc=obs_now,
+        )
+        summary_file = os.path.join(obs_base, f"{date_str_obs}_run_summary.json")
+        run_summary_path = write_json_artifact(summary_file, summary_data)
+
+        # 7c. daily_report.md
+        _forecasts: tuple = ()
+        _outcome = None
+        _evals: tuple = ()
+
+        batch2 = _FxFR2.load_fx_forecast_batch(session, forecast_batch_id)
+        if batch2 is not None:
+            _forecasts = batch2.forecasts
+
+        if outcome_id is not None:
+            _outcome = _FxOER2.load_fx_outcome_record(session, outcome_id)
+            eval_batch2 = _FxOER2.load_fx_evaluation_batch(session, outcome_id)
+            if eval_batch2:
+                _evals = eval_batch2
+
+        report_md = build_daily_report_md(
+            as_of_jst=as_of_jst,
+            forecast_batch_id=forecast_batch_id,
+            forecasts=_forecasts,
+            outcome=_outcome,
+            evaluations=_evals,
+            manifest_data=manifest_data,
+            generated_at_utc=obs_now,
+        )
+        report_file = os.path.join(obs_base, f"{date_str_obs}_daily_report.md")
+        daily_report_path = write_md_artifact(report_file, report_md)
+
+        # 7d. scoreboard.csv (from all history evaluations)
+        all_evals = collect_all_evaluations_from_history(config.csv_output_dir)
+        if all_evals:
+            sb_rows = build_scoreboard_rows(all_evals, obs_now)
+            sb_file = os.path.join(obs_base, f"{date_str_obs}_scoreboard.csv")
+            scoreboard_path = write_csv_artifact(sb_file, sb_rows, SCOREBOARD_FIELDNAMES)
+
+        # 7e. provider_health.csv (append)
+        health_row = build_provider_health_row(
+            as_of_jst=as_of_jst,
+            generated_at_utc=obs_now,
+            provider_name=snapshot.market_data_provenance.vendor,
+            newest_completed_window_end_jst=newest_end,
+            snapshot_lag_business_days=_snapshot_lag,
+            used_fallback_adjustment=_used_fallback,
+            run_status=_run_status,
+            notes="",
+        )
+        health_file = os.path.join(
+            os.path.abspath(config.csv_output_dir), "provider_health.csv"
+        )
+        provider_health_path = append_csv_row(
+            health_file, health_row, PROVIDER_HEALTH_FIELDNAMES
+        )
+
+        # Publish observability artifacts to latest/ + history/
+        publish_observability_to_layout(
+            config.csv_output_dir,
+            date_str_obs,
+            forecast_batch_id,
+            input_snapshot_path=input_snapshot_path,
+            run_summary_path=run_summary_path,
+            daily_report_path=daily_report_path,
+            scoreboard_path=scoreboard_path,
+            provider_health_path=provider_health_path,
+        )
+
     return FxDailyAutomationResult(
         as_of_jst=as_of_jst,
         forecast_batch_id=forecast_batch_id,
@@ -420,4 +561,9 @@ def run_fx_daily_protocol_once(
         outcome_csv_path=outcome_csv_path,
         evaluation_csv_path=evaluation_csv_path,
         manifest_path=manifest_path,
+        input_snapshot_path=input_snapshot_path,
+        run_summary_path=run_summary_path,
+        daily_report_path=daily_report_path,
+        scoreboard_path=scoreboard_path,
+        provider_health_path=provider_health_path,
     )
