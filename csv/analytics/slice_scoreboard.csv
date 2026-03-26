@@ -1,5 +1,5 @@
 strategy_kind,regime_label,volatility_label,intervention_risk,observation_count,direction_hit_count,direction_hit_rate,range_hit_count,range_hit_rate,state_proxy_hit_count,state_proxy_hit_rate,mean_close_error_bp,median_close_error_bp,mean_magnitude_error_bp,last_updated_utc
-baseline_prev_day_direction,,,,4,0,0.0,,,,,,,,2026-03-25T23:25:22Z
-baseline_random_walk,,,,4,0,0.0,,,,,,,,2026-03-25T23:25:22Z
-baseline_simple_technical,,,,4,0,0.0,,,,,,,,2026-03-25T23:25:22Z
-ugh,,,,4,0,0.0,,,,,,,,2026-03-25T23:25:22Z
+baseline_prev_day_direction,,,,4,0,0.0,,,,,,,,2026-03-26T05:07:40Z
+baseline_random_walk,,,,4,0,0.0,,,,,,,,2026-03-26T05:07:40Z
+baseline_simple_technical,,,,4,0,0.0,,,,,,,,2026-03-26T05:07:40Z
+ugh,,,,4,0,0.0,,,,,,,,2026-03-26T05:07:40Z
