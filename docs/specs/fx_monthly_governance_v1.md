@@ -3,6 +3,7 @@
 **Status**: Draft
 **Depends on**: fx_monthly_review_v1, fx_observability_artifacts_v1
 **Scope**: Monthly governance layer — uses existing artifacts to make keep/change/version decisions
+**Pipeline**: Part of the FX Analysis Pipeline (weekly → monthly → governance), automated via `fx-analysis-pipeline.yml`
 
 ---
 
@@ -18,6 +19,10 @@ This protocol defines how the monthly review outputs are consumed to make govern
 **This is a governance protocol, not an analysis protocol.** The analysis is performed by `fx_monthly_review_v1`. This protocol defines what to do with those results.
 
 **The role of this protocol is not to improve predictions, but to ensure that improvement decisions are recorded in an auditable form.**
+
+### Automation boundary
+
+Governance **outputs** (decision log, change candidate list, version decision record) are **auto-generated** as part of the analysis pipeline. Only the resulting **logic modifications** (code changes, version bumps) require human decision. The pipeline generates the data; humans decide what to do with it.
 
 ---
 
@@ -141,7 +146,7 @@ Confirm the review flags produced by `fx_monthly_review_v1`:
 
 Source: `monthly_review_flags.csv`
 
-**Flags are material for recommendations but are not automatically adopted. Monthly judgment is human-reviewed governance.**
+**Flags are material for recommendations but are not automatically adopted. Governance outputs are auto-generated; logic modifications based on those outputs require human decision.**
 
 ---
 
@@ -323,6 +328,62 @@ A monthly governance cycle is complete when all of the following are satisfied:
 
 ---
 
-## 11. One-Sentence Definition
+## 11. Pipeline Integration
+
+This protocol is implemented as the final stage of the **FX Analysis Pipeline**, which runs as a single GitHub Actions workflow (`fx-analysis-pipeline.yml`) separate from the daily data collection workflow.
+
+### Pipeline architecture (2 Actions)
+
+| Action | Schedule | Purpose |
+|---|---|---|
+| `fx-daily-protocol.yml` | Mon-Fri 08:00/12:00/16:00 JST | Data collection: fetch → forecast → outcome → evaluation → CSV |
+| `fx-analysis-pipeline.yml` | Weekly: Mon 10:00 JST / Monthly: 1st 10:00 JST | Analysis: weekly aggregation → monthly review → governance outputs |
+
+### Monthly pipeline flow
+
+```
+Step 1: Generate weekly reports for each week in the month
+        (rebuild annotation analytics → run_weekly_report_v2 → export)
+            ↓
+Step 2: Generate monthly review
+        (rebuild_monthly_review → strategy metrics, baseline comparisons,
+         slice metrics, review flags, recommendation)
+            ↓
+Step 3: Load weekly report artifacts as governance input
+        (read weekly_report.json for each week → extract weekly trends)
+            ↓
+Step 4: Generate governance outputs
+        (run_monthly_governance → decision log, change candidates,
+         version decision record, governance summary)
+```
+
+### Module layout
+
+| File | Purpose |
+|---|---|
+| `fx_protocol/monthly_governance.py` | Pure functions: judgment classification, trend extraction, output generation |
+| `fx_protocol/monthly_governance_exports.py` | File I/O: JSON, MD export + orchestrator |
+| `scripts/run_fx_analysis_pipeline.py` | CLI entrypoint for both weekly and monthly modes |
+| `.github/workflows/fx-analysis-pipeline.yml` | Analysis pipeline GitHub Actions workflow |
+| `tests/fx_protocol/test_monthly_governance.py` | Tests for pure governance functions |
+
+### Output layout
+
+```
+{csv_output_dir}/analytics/monthly/{YYYYMM}/
+├── monthly_review.json              (from monthly review)
+├── monthly_review.md                (from monthly review)
+├── monthly_strategy_metrics.csv     (from monthly review)
+├── monthly_slice_metrics.csv        (from monthly review)
+├── monthly_review_flags.csv         (from monthly review)
+├── governance_decision_log.json     (from governance)
+├── governance_change_candidates.json (from governance)
+├── governance_version_decision.json (from governance)
+└── governance_summary.md            (from governance)
+```
+
+---
+
+## 12. One-Sentence Definition
 
 **FX Monthly Review / Feedback / Logic Audit Protocol v1** is a governance protocol that uses monthly aggregated artifacts to compare UGH against baselines, diagnose state / event / provider / annotation conditions, classify change candidates, and determine version update eligibility — all in an auditable sequence and record format.
