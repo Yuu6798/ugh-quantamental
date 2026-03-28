@@ -81,7 +81,7 @@ Evaluate UGH and each baseline (`baseline_random_walk`, `baseline_prev_day_direc
 
 - `forecast_count`
 - `direction_hit_rate`
-- `range_hit_rate`
+- `range_hit_rate` (UGH only — baselines do not produce range-hit metrics; treat as N/A)
 - `mean_abs_close_error_bp`
 - `mean_abs_magnitude_error_bp`
 

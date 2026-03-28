@@ -1,10 +1,9 @@
 name: FX Weekly Report v2
 
 on:
-  schedule:
-    # Weekly: Monday 10:00 JST = Monday 01:00 UTC
-    # Generates the previous week's report after all daily runs are complete.
-    - cron: '0 1 * * 1'
+  # Schedule disabled — weekly analysis is now handled by fx-analysis-pipeline.yml
+  # to avoid duplicate cron runs and push races on the fx-daily-data branch.
+  # Retained for manual dispatch only.
   workflow_dispatch:
 
 permissions:

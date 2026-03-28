@@ -157,19 +157,27 @@ def run_monthly_pipeline(
                 except (json.JSONDecodeError, OSError) as exc:
                     print(f"  [WARN] Failed to load {report_json}: {exc}")
 
-    # Filter weekly reports to the monthly window
+    # Filter weekly reports to the monthly window and deduplicate by week_window
     from ugh_quantamental.fx_protocol.monthly_review import _resolve_month_window
 
     month_start, month_end = _resolve_month_window(review_date_jst, month_days)
+    seen_windows: set[tuple[str, str]] = set()
     relevant_reports: list[dict] = []
     for wr in weekly_reports:
         ww = wr.get("week_window", {})
         w_start = ww.get("start", "")
         w_end = ww.get("end", "")
+        if not w_start or not w_end:
+            continue
         # Include if the weekly window overlaps with the monthly window
-        if w_start and w_end and w_end >= month_start and w_start <= month_end:
-            relevant_reports.append(wr)
+        if w_end >= month_start and w_start <= month_end:
+            window_key = (w_start, w_end)
+            if window_key not in seen_windows:
+                seen_windows.add(window_key)
+                relevant_reports.append(wr)
 
+    # Sort chronologically by week start
+    relevant_reports.sort(key=lambda r: r.get("week_window", {}).get("start", ""))
     print(f"  Found {len(relevant_reports)} weekly reports for this month")
 
     # Step 4: Generate governance outputs
