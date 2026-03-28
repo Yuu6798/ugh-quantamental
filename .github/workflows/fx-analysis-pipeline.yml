@@ -91,7 +91,7 @@ jobs:
           exit 1
 
       - name: Set up Python 3.11
-        if: steps.checkout-data.outputs.skip != 'true'
+        if: steps.detect-mode.outputs.mode != 'skip' && steps.checkout-data.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -99,14 +99,14 @@ jobs:
           cache-dependency-path: code/pyproject.toml
 
       - name: Install project
-        if: steps.checkout-data.outputs.skip != 'true'
+        if: steps.detect-mode.outputs.mode != 'skip' && steps.checkout-data.outputs.skip != 'true'
         working-directory: code
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
 
       - name: Run analysis pipeline
-        if: steps.checkout-data.outputs.skip != 'true'
+        if: steps.detect-mode.outputs.mode != 'skip' && steps.checkout-data.outputs.skip != 'true'
         working-directory: code
         env:
           FX_PIPELINE_MODE: ${{ steps.detect-mode.outputs.mode }}
@@ -115,7 +115,7 @@ jobs:
           python scripts/run_fx_analysis_pipeline.py
 
       - name: Commit and push data branch if changed
-        if: steps.checkout-data.outputs.skip != 'true'
+        if: steps.detect-mode.outputs.mode != 'skip' && steps.checkout-data.outputs.skip != 'true'
         working-directory: data
         run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"

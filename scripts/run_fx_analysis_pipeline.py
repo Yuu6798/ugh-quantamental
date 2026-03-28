@@ -121,11 +121,21 @@ def run_monthly_pipeline(
     )
     print(f"  Generating {len(weekly_report_dates)} weekly reports...")
 
+    weekly_failures: list[str] = []
     for wdate in weekly_report_dates:
         try:
             run_weekly_pipeline(csv_output_dir, wdate, week_days, generated_at_utc)
         except Exception as exc:
-            print(f"  [WARN] Weekly report for {wdate.strftime('%Y-%m-%d')} failed: {exc}")
+            msg = f"Weekly report for {wdate.strftime('%Y-%m-%d')} failed: {exc}"
+            print(f"  [ERROR] {msg}")
+            weekly_failures.append(msg)
+
+    if weekly_failures:
+        raise RuntimeError(
+            f"{len(weekly_failures)} weekly report(s) failed — "
+            f"aborting monthly pipeline to prevent incomplete governance outputs. "
+            f"Failures: {'; '.join(weekly_failures)}"
+        )
 
     # Step 2: Monthly review
     print("\n=== Step 2: Monthly Review ===")
