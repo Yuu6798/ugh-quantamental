@@ -1,6 +1,6 @@
 # ugh-quantamental
 
-Minimal Python 3.11+ library implementing deterministic quantamental engines with persistence, workflow composition, read-only query inspection, deterministic replay, multi-run batch replay, regression suite execution, baseline / golden snapshot management, FX daily prediction protocol with weekly reporting. All core logic is synchronous, typed, schema-first, and connector-free.
+Minimal Python 3.11+ library implementing deterministic quantamental engines with persistence, workflow composition, read-only query inspection, deterministic replay, multi-run batch replay, regression suite execution, baseline / golden snapshot management, FX daily prediction protocol with automated daily→weekly→monthly analysis pipeline. All core logic is synchronous, typed, schema-first, and connector-free.
 
 ## Features
 
@@ -15,6 +15,9 @@ Minimal Python 3.11+ library implementing deterministic quantamental engines wit
 - **Baseline / golden snapshot** — persist a named suite result; compare future reruns against the pinned baseline; per-`(group, name)` case deltas with exact-match and aggregate-diff reporting
 - **FX daily protocol** — frozen contracts (`ForecastRecord`, `OutcomeRecord`, `EvaluationRecord`), deterministic calendar helpers (`resolve_completed_window_ends`), deterministic ID generation, daily forecast/outcome/evaluation workflows, and GitHub Actions automation
 - **Weekly FX report** — read-only `run_weekly_report` aggregates a configurable number of completed protocol windows into strategy metrics, baseline comparisons, state/GRV/mismatch summaries, and curated case examples; `WeeklyReportRequest` / `WeeklyReportResult` frozen models with JST-canonical timestamp normalization
+- **Monthly FX review** — aggregates one month of daily observations into strategy metrics, baseline comparison deltas, annotation-aware slicing (regime/volatility/intervention/event-tag), provider health summary, and rule-based review flags with recommendation summary
+- **Monthly governance** — auto-generates governance outputs (decision log, change candidate list, version decision record) from monthly review and weekly trends; judgment classification follows a fixed priority order; only logic modifications require human decision
+- **FX analysis pipeline** — single GitHub Actions workflow chaining weekly aggregation → monthly review → governance output generation, separate from the daily data collection workflow
 - **Review-audit engine** — pure functions for extracting and auditing PR review text
 - **Frozen schema contracts** — all data models use `ConfigDict(extra="forbid", frozen=True)`; invariants enforced at construction time
 - **Pure engine functions** — same inputs always produce the same output; no globals, no mutation, no I/O
@@ -87,13 +90,31 @@ src/ugh_quantamental/
 │   ├── automation_models.py  # FxDailyAutomationConfig, FxDailyAutomationResult
 │   ├── automation.py      # run_fx_daily_protocol_once
 │   ├── report_models.py   # WeeklyReportRequest/Result, StrategyWeeklyMetrics, …
-│   └── reporting.py       # run_weekly_report (read-only)
+│   ├── reporting.py       # run_weekly_report (read-only, v1 DB-driven)
+│   ├── weekly_reports_v2.py      # annotation-aware weekly analytics (CSV-driven)
+│   ├── weekly_report_exports.py  # weekly v2 JSON/MD/CSV export
+│   ├── monthly_review.py         # monthly aggregation, review flags, recommendation
+│   ├── monthly_review_exports.py # monthly JSON/MD/CSV export + orchestrator
+│   ├── monthly_governance.py     # governance: judgment classification, trend extraction, outputs
+│   ├── monthly_governance_exports.py  # governance JSON/MD export
+│   ├── analytics_rebuild.py      # rebuild annotation analytics + weekly reports
+│   ├── analytics_annotations.py  # labeled observations, scoreboards, annotation templates
+│   └── observability.py   # daily observability artifacts (input snapshot, run summary, etc.)
 └── domain/               # domain abstractions
 
 alembic/versions/         # 0001 initial → 0002 baselines → 0003–0004 fx → 0005 review_audit
 docs/specs/               # formal v1 specifications per milestone
-scripts/                  # run_fx_daily_protocol.py — CLI entry point for automation
-.github/workflows/        # ci.yml, fx-daily-protocol.yml
+scripts/
+├── run_fx_daily_protocol.py    # CLI entry point for daily data collection
+├── run_fx_analysis_pipeline.py # CLI entry point for weekly/monthly analysis pipeline
+├── run_fx_weekly_report.py     # standalone weekly report (manual dispatch)
+└── run_fx_monthly_review.py    # standalone monthly review (manual dispatch)
+.github/workflows/
+├── ci.yml                      # lint + tests on PR/push
+├── fx-daily-protocol.yml       # daily data collection (08:00/12:00/16:00 JST)
+├── fx-analysis-pipeline.yml    # weekly (Mon 10:00 JST) + monthly (1st 10:30 JST) analysis
+├── fx-weekly-report.yml        # legacy weekly (manual dispatch only)
+└── fx-monthly-review.yml       # legacy monthly (manual dispatch only)
 tests/                    # mirrors src layout
 ```
 
@@ -314,13 +335,20 @@ Formal v1 specs live in `docs/specs/`:
 | `fx_daily_automation_v1.md` | GitHub Actions automation and durable SQLite data branch (Milestone 16) |
 | `fx_weekly_report_v1.md` | Read-only weekly report: window selection, metrics, baseline comparison, case examples (Milestone 17) |
 | `ugh_review_audit_v1.md` | Review-audit engine: extraction, classification, verdict, and replay policy |
+| `fx_observability_artifacts_v1.md` | Daily observability artifacts: input snapshot, run summary, daily report, scoreboard, provider health |
+| `fx_monthly_review_v1.md` | Monthly review: aggregation, baseline comparison, annotation-aware slicing, review flags |
+| `fx_monthly_governance_v1.md` | Monthly governance protocol: judgment classification, change candidates, version decisions, analysis pipeline |
 
-## FX Daily Protocol automation (Milestone 16)
+## FX Automation (2 Actions)
 
-A GitHub Actions workflow runs the FX daily protocol automatically every business
-day at **08:00 JST** (23:00 UTC the previous day, Mon–Fri).
+The FX protocol runs on two separate GitHub Actions workflows:
 
-### How it works
+| Action | Schedule | Purpose |
+|---|---|---|
+| `fx-daily-protocol.yml` | Mon–Fri 08:00/12:00/16:00 JST | Data collection: fetch market data → forecast → outcome → evaluation → CSV |
+| `fx-analysis-pipeline.yml` | Weekly Mon 10:00 JST / Monthly 1st 10:30 JST | Analysis: weekly aggregation → monthly review → governance outputs |
+
+### Action 1: Daily data collection
 
 1. The workflow checks out the code branch and a separate `fx-daily-data` branch
    (created automatically on first run).
@@ -330,6 +358,19 @@ day at **08:00 JST** (23:00 UTC the previous day, Mon–Fri).
    available — records the outcome and per-forecast evaluations.
 4. If any data changed, the SQLite file is committed and pushed back to the
    `fx-daily-data` branch only (never to `main`).
+
+### Action 2: Analysis pipeline
+
+1. **Weekly mode** (every Monday): rebuilds annotation analytics, generates
+   weekly v2 report (strategy metrics, annotation-aware slices, provider health).
+2. **Monthly mode** (1st of each month): generates weekly reports for each week
+   in the month → monthly review (baseline comparisons, review flags) →
+   governance outputs (decision log, change candidates, version decision record).
+3. All artifacts are committed to the `fx-daily-data` branch.
+
+The monthly pipeline is fatal on weekly rebuild failures to prevent incomplete
+governance outputs. Governance outputs are auto-generated; only resulting logic
+modifications require human decision.
 
 ### Data source
 
@@ -375,7 +416,6 @@ the code branch; data commits do not trigger CI.
 
 ### What is still out of scope (v1)
 
-- Monthly reporting (next milestone)
 - Multi-pair support beyond USDJPY
 - Intraday or high-frequency data
 - External broker integration
@@ -390,5 +430,4 @@ The following are intentionally not implemented:
 - REST/gRPC service layer
 - Async execution or background jobs
 - Intra-day or high-frequency signal handling
-- Monthly reporting (next milestone)
 
