@@ -193,12 +193,17 @@ def run_monthly_pipeline(
     # Step 4: Generate governance outputs
     governance = run_monthly_governance(review, relevant_reports)
 
-    # Determine month string
-    if review_date_jst.tzinfo is not None:
-        rg_jst = review_date_jst.astimezone(_JST)
-    else:
-        rg_jst = review_date_jst.replace(tzinfo=_JST)
-    month_str = rg_jst.strftime("%Y%m")
+    # Use review_month from governance decision log so that the artifact directory
+    # matches the reviewed data window (e.g. 202603), not the run date (e.g. 202604).
+    dl = governance.get("monthly_decision_log", {})
+    month_str = dl.get("review_month", "")
+    if not month_str:
+        # Fallback: derive from review_date_jst
+        if review_date_jst.tzinfo is not None:
+            rg_jst = review_date_jst.astimezone(_JST)
+        else:
+            rg_jst = review_date_jst.replace(tzinfo=_JST)
+        month_str = rg_jst.strftime("%Y%m")
 
     # Export governance artifacts
     paths = export_governance_artifacts(governance, csv_output_dir, month_str)

@@ -53,12 +53,15 @@ jobs:
             exit 0
           fi
 
-          # Weekly cron — but skip if today is 1st (monthly run will cover it)
-          DAY_OF_MONTH=$(date -u +%d)
-          if [ "$DAY_OF_MONTH" = "01" ]; then
-            echo "mode=skip" >> "$GITHUB_OUTPUT"
-            echo "Skipping weekly: 1st of month will be handled by monthly cron"
-            exit 0
+          # Weekly cron on 1st of month: skip (monthly cron at 01:30 will cover it).
+          # Only applies to scheduled events; workflow_dispatch always proceeds.
+          if [ -n "$CRON" ]; then
+            DAY_OF_MONTH=$(date -u +%d)
+            if [ "$DAY_OF_MONTH" = "01" ]; then
+              echo "mode=skip" >> "$GITHUB_OUTPUT"
+              echo "Skipping weekly: 1st of month will be handled by monthly cron"
+              exit 0
+            fi
           fi
 
           echo "mode=weekly" >> "$GITHUB_OUTPUT"
