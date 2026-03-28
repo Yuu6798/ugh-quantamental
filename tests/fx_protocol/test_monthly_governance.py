@@ -6,6 +6,7 @@ from ugh_quantamental.fx_protocol.monthly_governance import (
     JUDGMENT_DATA_PROVIDER_REMEDIATION,
     JUDGMENT_KEEP,
     JUDGMENT_LOGIC_AUDIT,
+    _resolve_review_month,
     build_change_candidate_list,
     build_monthly_decision_log,
     build_version_decision_record,
@@ -143,6 +144,42 @@ class TestExtractWeeklyTrends:
 
 
 # ---------------------------------------------------------------------------
+# _resolve_review_month
+# ---------------------------------------------------------------------------
+
+
+class TestResolveReviewMonth:
+    """Test that review_month is derived from the observation window, not generation date."""
+
+    def test_april_1_review_resolves_to_march(self) -> None:
+        """Review generated 2026-04-01 with 20-day window should label as 202603."""
+        review = {
+            "review_generated_at_jst": "2026-04-01T08:00:00+09:00",
+            "requested_window_count": 20,
+        }
+        assert _resolve_review_month(review) == "202603"
+
+    def test_march_1_review_resolves_to_february(self) -> None:
+        review = {
+            "review_generated_at_jst": "2026-03-01T08:00:00+09:00",
+            "requested_window_count": 20,
+        }
+        assert _resolve_review_month(review) == "202602"
+
+    def test_mid_month_review_stays_in_same_month(self) -> None:
+        """Review generated mid-month with small window stays in same month."""
+        review = {
+            "review_generated_at_jst": "2026-03-20T08:00:00+09:00",
+            "requested_window_count": 5,
+        }
+        assert _resolve_review_month(review) == "202603"
+
+    def test_empty_generated_at(self) -> None:
+        review = {"review_generated_at_jst": "", "requested_window_count": 20}
+        assert _resolve_review_month(review) == ""
+
+
+# ---------------------------------------------------------------------------
 # build_monthly_decision_log
 # ---------------------------------------------------------------------------
 
@@ -157,6 +194,7 @@ class TestBuildMonthlyDecisionLog:
     ) -> dict:
         return {
             "review_generated_at_jst": "2026-04-01T08:00:00+09:00",
+            "requested_window_count": 20,
             "review_flags": flags or [{"flag": "keep_current_logic", "reason": "All OK"}],
             "monthly_baseline_comparisons": comparisons or [],
             "recommendation_summary": "All good",
@@ -165,7 +203,8 @@ class TestBuildMonthlyDecisionLog:
     def test_basic_structure(self) -> None:
         review = self._make_review()
         result = build_monthly_decision_log(review, JUDGMENT_KEEP, [])
-        assert result["review_month"] == "202604"
+        # Generated on 2026-04-01, window=20 business days → midpoint is in March
+        assert result["review_month"] == "202603"
         assert result["overall_judgment"] == JUDGMENT_KEEP
         assert result["key_flags"] == ["keep_current_logic"]
         assert result["logic_audit_candidates"] == []
@@ -316,7 +355,7 @@ class TestRunMonthlyGovernance:
         result = run_monthly_governance(review, [])
         assert result["governance_version"] == "v1"
         assert result["overall_judgment"] == JUDGMENT_KEEP
-        assert result["monthly_decision_log"]["review_month"] == "202604"
+        assert result["monthly_decision_log"]["review_month"] == "202603"
         assert result["change_candidate_list"] == []
         assert result["version_decision_record"]["update_performed"] is False
 

@@ -27,6 +27,42 @@ _JST = ZoneInfo("Asia/Tokyo")
 
 
 # ---------------------------------------------------------------------------
+# Review month resolution
+# ---------------------------------------------------------------------------
+
+
+def _resolve_review_month(review: dict[str, Any]) -> str:
+    """Derive the review month (YYYYMM) from the observation window.
+
+    The review_generated_at_jst is typically the 1st of the *next* month,
+    so using it directly would label March's data as April.  Instead, walk
+    backwards from the generation date by the requested window to find the
+    month that the observations actually belong to.
+    """
+    from datetime import datetime, timedelta
+
+    generated_at = review.get("review_generated_at_jst", "")
+    window_count = review.get("requested_window_count", 20)
+
+    if not generated_at:
+        return ""
+
+    # Parse the generation timestamp (ISO format)
+    try:
+        if "+" in generated_at or generated_at.endswith("Z"):
+            dt = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        else:
+            dt = datetime.fromisoformat(generated_at)
+    except (ValueError, TypeError):
+        return generated_at[:7].replace("-", "")[:6] if len(generated_at) >= 7 else ""
+
+    # Walk backwards to find the midpoint of the observation window
+    # (approximately half the window count in calendar days)
+    midpoint = dt - timedelta(days=max(window_count // 2, 1))
+    return midpoint.strftime("%Y%m")
+
+
+# ---------------------------------------------------------------------------
 # Judgment classification
 # ---------------------------------------------------------------------------
 
@@ -186,11 +222,12 @@ def build_monthly_decision_log(
         elif fid == "low_annotation_coverage":
             provider_concerns.append(f["reason"])
 
-    # Review month from review_generated_at_jst
-    generated_at = review.get("review_generated_at_jst", "")
-    review_month = ""
-    if generated_at and len(generated_at) >= 7:
-        review_month = generated_at[:7].replace("-", "")[:6]
+    # Review month: derive from the reviewed data window, not the generation date.
+    # When run on e.g. 2026-04-01, the review covers the prior month (March).
+    # Use the review's requested_window_count and review_generated_at_jst to
+    # determine which month the observations belong to.  Prefer the mid-point
+    # of the observation window for robustness.
+    review_month = _resolve_review_month(review)
 
     return {
         "review_month": review_month,

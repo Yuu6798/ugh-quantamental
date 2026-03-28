@@ -2,12 +2,12 @@ name: FX Analysis Pipeline
 
 on:
   schedule:
-    # Weekly: Monday 10:00 JST = Monday 01:00 UTC
-    # Generates weekly aggregation from daily CSV artifacts.
+    # Weekly: Monday 10:00 JST = Monday 01:00 UTC (skip 1st of month — handled by monthly)
     - cron: '0 1 * * 1'
-    # Monthly: 1st of each month at 10:00 JST = 01:00 UTC
-    # Chains: weekly reports → monthly review → governance outputs.
-    - cron: '0 1 1 * *'
+    # Monthly: 1st of each month at 10:30 JST = 01:30 UTC
+    # Offset by 30 min to avoid collision when 1st falls on Monday.
+    # The monthly pipeline also generates weekly reports, so weekly is redundant on that day.
+    - cron: '30 1 1 * *'
   workflow_dispatch:
     inputs:
       pipeline_mode:
@@ -47,20 +47,31 @@ jobs:
 
           # Auto-detect from schedule
           CRON="${{ github.event.schedule }}"
-          if [ "$CRON" = "0 1 1 * *" ]; then
+          if [ "$CRON" = "30 1 1 * *" ]; then
             echo "mode=monthly" >> "$GITHUB_OUTPUT"
             echo "Pipeline mode (auto): monthly (1st of month)"
-          else
-            echo "mode=weekly" >> "$GITHUB_OUTPUT"
-            echo "Pipeline mode (auto): weekly"
+            exit 0
           fi
 
+          # Weekly cron — but skip if today is 1st (monthly run will cover it)
+          DAY_OF_MONTH=$(date -u +%d)
+          if [ "$DAY_OF_MONTH" = "01" ]; then
+            echo "mode=skip" >> "$GITHUB_OUTPUT"
+            echo "Skipping weekly: 1st of month will be handled by monthly cron"
+            exit 0
+          fi
+
+          echo "mode=weekly" >> "$GITHUB_OUTPUT"
+          echo "Pipeline mode (auto): weekly"
+
       - name: Check out code branch
+        if: steps.detect-mode.outputs.mode != 'skip'
         uses: actions/checkout@v4
         with:
           path: code
 
       - name: Check out data branch
+        if: steps.detect-mode.outputs.mode != 'skip'
         id: checkout-data
         run: |
           clone_output=$(git clone \
