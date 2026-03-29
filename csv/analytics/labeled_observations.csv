@@ -19,3 +19,7 @@ as_of_jst,forecast_batch_id,outcome_id,strategy_kind,forecast_direction,expected
 2026-03-27T08:00:00+09:00,fb_USDJPY_20260327T080000_v1_fdf4fbba0704a0d5,,baseline_random_walk,flat,0.0,up,20.693547375682734,,,,,,,,,,
 2026-03-27T08:00:00+09:00,fb_USDJPY_20260327T080000_v1_fdf4fbba0704a0d5,,baseline_simple_technical,up,40.324217111408714,up,20.693547375682734,,,,,,,,,,
 2026-03-27T08:00:00+09:00,fb_USDJPY_20260327T080000_v1_fdf4fbba0704a0d5,,ugh,up,0.233875,up,20.693547375682734,,,,,,,,,,
+2026-03-30T08:00:00+09:00,fb_USDJPY_20260330T080000_v1_e791de588f933c9d,,baseline_prev_day_direction,up,40.71151196292156,up,40.71151196292156,,,,,,,,,,
+2026-03-30T08:00:00+09:00,fb_USDJPY_20260330T080000_v1_e791de588f933c9d,,baseline_random_walk,flat,0.0,up,40.71151196292156,,,,,,,,,,
+2026-03-30T08:00:00+09:00,fb_USDJPY_20260330T080000_v1_e791de588f933c9d,,baseline_simple_technical,up,42.167620523275865,up,40.71151196292156,,,,,,,,,,
+2026-03-30T08:00:00+09:00,fb_USDJPY_20260330T080000_v1_e791de588f933c9d,,ugh,up,0.233875,up,40.71151196292156,,,,,,,,,,
