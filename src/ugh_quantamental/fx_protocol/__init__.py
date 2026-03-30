@@ -51,6 +51,10 @@ from ugh_quantamental.fx_protocol.data_models import (
     FxCompletedWindow,
     FxProtocolMarketSnapshot,
 )
+from ugh_quantamental.fx_protocol.market_ugh_builder import (
+    build_ugh_request_from_snapshot,
+    compute_snapshot_statistics,
+)
 from ugh_quantamental.fx_protocol.observability import (
     PROVIDER_HEALTH_FIELDNAMES,
     SCOREBOARD_FIELDNAMES,
@@ -140,6 +144,9 @@ __all__ = [
     "FxDailyAutomationResult",
     "FxCompletedWindow",
     "FxProtocolMarketSnapshot",
+    # market_ugh_builder
+    "build_ugh_request_from_snapshot",
+    "compute_snapshot_statistics",
     "BaselineWeeklyComparison",
     "StateWeeklyMetrics",
     "StrategyWeeklyMetrics",

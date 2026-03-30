@@ -13,7 +13,7 @@ Minimal Python 3.11+ library implementing deterministic quantamental engines wit
 - **Batch replay** — multi-run replay in one call: per-run isolation, aggregate mismatch / error / missing counts, optional deduplication
 - **Regression suite** — named suite runner over batch replay cases: deterministic pass/fail per case, zero-run guard prevents false-positive green results
 - **Baseline / golden snapshot** — persist a named suite result; compare future reruns against the pinned baseline; per-`(group, name)` case deltas with exact-match and aggregate-diff reporting
-- **FX daily protocol** — frozen contracts (`ForecastRecord`, `OutcomeRecord`, `EvaluationRecord`), deterministic calendar helpers (`resolve_completed_window_ends`), deterministic ID generation, daily forecast/outcome/evaluation workflows, and GitHub Actions automation
+- **FX daily protocol** — frozen contracts (`ForecastRecord`, `OutcomeRecord`, `EvaluationRecord`), deterministic calendar helpers (`resolve_completed_window_ends`), deterministic ID generation, market-derived UGH input builder, daily forecast/outcome/evaluation workflows, and GitHub Actions automation
 - **Weekly FX report** — read-only `run_weekly_report` aggregates a configurable number of completed protocol windows into strategy metrics, baseline comparisons, state/GRV/mismatch summaries, and curated case examples; `WeeklyReportRequest` / `WeeklyReportResult` frozen models with JST-canonical timestamp normalization
 - **Monthly FX review** — aggregates one month of daily observations into strategy metrics, baseline comparison deltas, annotation-aware slicing (regime/volatility/intervention/event-tag), provider health summary, and rule-based review flags with recommendation summary
 - **Monthly governance** — auto-generates governance outputs (decision log, change candidate list, version decision record) from monthly review and weekly trends; judgment classification follows a fixed priority order; only logic modifications require human decision
@@ -82,6 +82,7 @@ src/ugh_quantamental/
 │   ├── data_models.py     # FxCompletedWindow, FxProtocolMarketSnapshot
 │   ├── data_sources.py    # HTTP data-source abstraction (Yahoo Finance, AlphaVantage)
 │   ├── request_builders.py  # deterministic request builders for forecast/outcome workflows
+│   ├── market_ugh_builder.py  # deterministic snapshot→UGH feature derivation
 │   ├── forecast_models.py # DailyForecastWorkflowRequest, DailyForecastBatch, …
 │   ├── forecasting.py     # run_daily_forecast_workflow
 │   ├── outcome_models.py  # DailyOutcomeWorkflowRequest, PersistedOutcomeEvaluationBatch
@@ -353,9 +354,11 @@ The FX protocol runs on two separate GitHub Actions workflows:
 1. The workflow checks out the code branch and a separate `fx-daily-data` branch
    (created automatically on first run).
 2. Alembic migrations are applied to a SQLite database file in `fx-daily-data`.
-3. `scripts/run_fx_daily_protocol.py` fetches USDJPY market data, creates the
-   daily forecast batch (UGH + 3 baselines), and — when the prior window is
-   available — records the outcome and per-forecast evaluations.
+3. `scripts/run_fx_daily_protocol.py` fetches USDJPY market data, derives UGH
+   engine inputs deterministically from the market snapshot (via
+   `market_ugh_builder`), creates the daily forecast batch (UGH + 3 baselines),
+   and — when the prior window is available — records the outcome and
+   per-forecast evaluations.
 4. If any data changed, the SQLite file is committed and pushed back to the
    `fx-daily-data` branch only (never to `main`).
 
