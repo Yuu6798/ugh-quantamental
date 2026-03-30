@@ -306,8 +306,11 @@ def build_slice_metrics(
     - strategy_kind x intervention_risk
     - strategy_kind x event_tag (expanded)
 
-    Only confirmed annotations are used for labeled slices.
-    Non-confirmed rows go into an 'unlabeled' slice.
+    When confirmed annotations exist, they are used for labeled slices and
+    non-confirmed rows go into an 'unlabeled' bucket.  When no confirmed
+    annotations exist at all, all observations are sliced directly by their
+    AI-suggested or empty labels so that the weekly report still provides
+    useful per-strategy metrics without manual annotation.
     """
     result: list[dict[str, Any]] = []
 
@@ -315,62 +318,82 @@ def build_slice_metrics(
         r for r in observations
         if r.get("annotation_status", "").strip().lower() == "confirmed"
     ]
-    non_confirmed = [
-        r for r in observations
-        if r.get("annotation_status", "").strip().lower() != "confirmed"
-    ]
+    has_confirmed = len(confirmed) > 0
 
-    # Dimension slices for confirmed observations
+    # Dimension slices
     dimensions = [
         ("regime_label", "regime_label"),
         ("volatility_label", "volatility_label"),
         ("intervention_risk", "intervention_risk"),
     ]
 
-    for dim_name, field in dimensions:
-        groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
+    if has_confirmed:
+        # Annotation-aware mode: confirmed rows use their labels,
+        # non-confirmed rows go into 'unlabeled' bucket.
+        non_confirmed = [
+            r for r in observations
+            if r.get("annotation_status", "").strip().lower() != "confirmed"
+        ]
+
+        for dim_name, field in dimensions:
+            groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
+            for row in confirmed:
+                sk = row.get("strategy_kind", "")
+                label = row.get(field, "") or "unknown"
+                groups[(sk, label)].append(row)
+
+            unlabeled_by_sk: dict[str, list[dict[str, str]]] = defaultdict(list)
+            for row in non_confirmed:
+                sk = row.get("strategy_kind", "")
+                unlabeled_by_sk[sk].append(row)
+            for sk, rows in unlabeled_by_sk.items():
+                groups[(sk, "unlabeled")].extend(rows)
+
+            for (sk, label), rows in sorted(groups.items()):
+                if not rows:
+                    continue
+                metrics = _compute_metrics_for_rows(rows)
+                metrics["slice_dimension"] = dim_name
+                metrics["strategy_kind"] = sk
+                metrics["label"] = label
+                result.append(metrics)
+
+        # Event tag slice (expanded, confirmed only)
+        tag_groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
         for row in confirmed:
+            tags_str = row.get("event_tags", "")
+            if not tags_str:
+                continue
             sk = row.get("strategy_kind", "")
-            label = row.get(field, "") or "unknown"
-            groups[(sk, label)].append(row)
+            for tag in tags_str.split("|"):
+                tag = tag.strip()
+                if tag:
+                    tag_groups[(sk, tag)].append(row)
 
-        # Add unlabeled group per strategy
-        unlabeled_by_sk: dict[str, list[dict[str, str]]] = defaultdict(list)
-        for row in non_confirmed:
-            sk = row.get("strategy_kind", "")
-            unlabeled_by_sk[sk].append(row)
-        for sk, rows in unlabeled_by_sk.items():
-            groups[(sk, "unlabeled")].extend(rows)
-
-        for (sk, label), rows in sorted(groups.items()):
+        for (sk, tag), rows in sorted(tag_groups.items()):
             if not rows:
                 continue
             metrics = _compute_metrics_for_rows(rows)
-            metrics["slice_dimension"] = dim_name
+            metrics["slice_dimension"] = "event_tag"
             metrics["strategy_kind"] = sk
-            metrics["label"] = label
+            metrics["label"] = tag
             result.append(metrics)
-
-    # Event tag slice (expanded, confirmed only)
-    tag_groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
-    for row in confirmed:
-        tags_str = row.get("event_tags", "")
-        if not tags_str:
-            continue
-        sk = row.get("strategy_kind", "")
-        for tag in tags_str.split("|"):
-            tag = tag.strip()
-            if tag:
-                tag_groups[(sk, tag)].append(row)
-
-    for (sk, tag), rows in sorted(tag_groups.items()):
-        if not rows:
-            continue
-        metrics = _compute_metrics_for_rows(rows)
-        metrics["slice_dimension"] = "event_tag"
-        metrics["strategy_kind"] = sk
-        metrics["label"] = tag
-        result.append(metrics)
+    else:
+        # No confirmed annotations: slice all observations by strategy_kind
+        # using a single "all" label per dimension so that the weekly report
+        # still shows meaningful aggregate metrics.
+        for dim_name, _field in dimensions:
+            groups_all: dict[str, list[dict[str, str]]] = defaultdict(list)
+            for row in observations:
+                sk = row.get("strategy_kind", "")
+                groups_all[sk].append(row)
+            for sk in sorted(groups_all.keys()):
+                rows = groups_all[sk]
+                metrics = _compute_metrics_for_rows(rows)
+                metrics["slice_dimension"] = dim_name
+                metrics["strategy_kind"] = sk
+                metrics["label"] = "all"
+                result.append(metrics)
 
     return result
 

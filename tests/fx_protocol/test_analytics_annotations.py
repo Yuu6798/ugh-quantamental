@@ -382,6 +382,56 @@ class TestLabeledObservations:
             assert row["annotation_status"] == "confirmed"
             assert row["intervention_risk"] == "medium"
 
+    def test_cross_batch_evaluation_join(self, tmp_path: str) -> None:
+        """Evaluations in a later batch that reference an earlier batch's forecast_ids
+        must be joined correctly (production layout: evaluation.csv in day N+1 batch
+        evaluates day N forecasts)."""
+        tmpdir = str(tmp_path)
+        # Day 1 batch: forecasts only (no evaluation yet)
+        day1_batch = os.path.join(tmpdir, "history", "20260313", "batch-day1")
+        os.makedirs(day1_batch, exist_ok=True)
+        forecasts_day1 = [
+            _make_forecast_row(
+                as_of_jst="2026-03-13T08:00:00+09:00",
+                strategy="ugh", forecast_id="fc-day1-ugh", batch_id="batch-day1",
+            ),
+        ]
+        _write_csv(
+            os.path.join(day1_batch, "forecast.csv"), FORECAST_FIELDNAMES, forecasts_day1
+        )
+
+        # Day 2 batch: forecast for day 2 + evaluation of day 1's forecast
+        day2_batch = os.path.join(tmpdir, "history", "20260314", "batch-day2")
+        os.makedirs(day2_batch, exist_ok=True)
+        forecasts_day2 = [
+            _make_forecast_row(
+                as_of_jst="2026-03-14T08:00:00+09:00",
+                strategy="ugh", forecast_id="fc-day2-ugh", batch_id="batch-day2",
+            ),
+        ]
+        _write_csv(
+            os.path.join(day2_batch, "forecast.csv"), FORECAST_FIELDNAMES, forecasts_day2
+        )
+        _write_csv(
+            os.path.join(day2_batch, "outcome.csv"), OUTCOME_FIELDNAMES, [_make_outcome_row()]
+        )
+        evals_day2 = [
+            _make_eval_row(forecast_id="fc-day1-ugh", strategy="ugh", direction_hit="True"),
+        ]
+        _write_csv(
+            os.path.join(day2_batch, "evaluation.csv"), EVALUATION_FIELDNAMES, evals_day2
+        )
+
+        path = build_labeled_observations(tmpdir, _NOW)
+        assert path is not None
+        with open(path, newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        assert len(rows) == 2  # one per day
+        day1_row = next(r for r in rows if r["as_of_jst"] == "2026-03-13T08:00:00+09:00")
+        # Day 1's forecast should have evaluation data from day 2's batch
+        assert day1_row["direction_hit"] == "True"
+        assert day1_row["close_error_bp"] == "2.5"
+
     def test_no_history_returns_none(self, tmp_path: str) -> None:
         result = build_labeled_observations(str(tmp_path), _NOW)
         assert result is None

@@ -249,6 +249,37 @@ class TestSliceMetrics:
         assert len(ir_slices) >= 1
         assert ir_slices[0]["label"] == "high"
 
+    def test_no_annotations_still_produces_slices(self) -> None:
+        """Without any confirmed annotations, slice metrics should still be
+        generated using an 'all' label per strategy so that weekly reports
+        always contain actionable data."""
+        obs = [
+            _make_observation(
+                strategy_kind="ugh", direction_hit="True", annotation_status=""
+            ),
+            _make_observation(
+                strategy_kind="ugh", direction_hit="False", annotation_status=""
+            ),
+            _make_observation(
+                strategy_kind="baseline_random_walk", direction_hit="True",
+                annotation_status="",
+            ),
+        ]
+        slices = build_slice_metrics(obs)
+        assert len(slices) > 0
+        # Each dimension should have entries with label='all'
+        for dim in ("regime_label", "volatility_label", "intervention_risk"):
+            dim_slices = [s for s in slices if s["slice_dimension"] == dim]
+            assert len(dim_slices) >= 1
+            for s in dim_slices:
+                assert s["label"] == "all"
+        ugh_regime = [
+            s for s in slices
+            if s["slice_dimension"] == "regime_label" and s["strategy_kind"] == "ugh"
+        ]
+        assert ugh_regime[0]["observation_count"] == 2
+        assert ugh_regime[0]["direction_hit_count"] == 1
+
 
 # ---------------------------------------------------------------------------
 # Tests: provider health summary

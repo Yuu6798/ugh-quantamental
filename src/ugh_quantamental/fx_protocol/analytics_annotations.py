@@ -380,7 +380,44 @@ def _collect_labeled_observation_rows(
     history_dir: str,
     annotations: dict[str, dict[str, str]],
 ) -> list[dict[str, str]]:
-    """Scan history/ and build labeled observation rows."""
+    """Scan history/ and build labeled observation rows.
+
+    Evaluations live in the *next* day's batch (they evaluate the previous
+    day's forecasts against that day's outcome).  To join correctly we first
+    build a global ``forecast_id → evaluation`` index across all batches,
+    then iterate over forecasts and look up evaluations from that index.
+
+    Outcome data is similarly indexed by the evaluated forecast_id so that
+    realized direction/change are attached to the correct forecast row.
+    """
+    # Pass 1: build global evaluation and outcome indexes across all batches.
+    global_eval_by_forecast: dict[str, dict[str, str]] = {}
+    global_outcome_by_forecast: dict[str, dict[str, str]] = {}
+
+    for date_dir in sorted(os.listdir(history_dir)):
+        date_path = os.path.join(history_dir, date_dir)
+        if not os.path.isdir(date_path):
+            continue
+        for batch_dir in sorted(os.listdir(date_path)):
+            batch_path = os.path.join(date_path, batch_dir)
+            eval_csv = os.path.join(batch_path, "evaluation.csv")
+            outcome_csv = os.path.join(batch_path, "outcome.csv")
+
+            if os.path.isfile(eval_csv):
+                evals = _read_csv_rows(eval_csv)
+                outcome_row: dict[str, str] | None = None
+                if os.path.isfile(outcome_csv):
+                    outcome_rows = _read_csv_rows(outcome_csv)
+                    if outcome_rows:
+                        outcome_row = outcome_rows[0]
+                for ev in evals:
+                    fid = ev.get("forecast_id", "")
+                    if fid:
+                        global_eval_by_forecast[fid] = ev
+                        if outcome_row is not None:
+                            global_outcome_by_forecast[fid] = outcome_row
+
+    # Pass 2: iterate over forecasts and join with global indexes.
     rows: list[dict[str, str]] = []
 
     for date_dir in sorted(os.listdir(history_dir)):
@@ -390,32 +427,17 @@ def _collect_labeled_observation_rows(
         for batch_dir in sorted(os.listdir(date_path)):
             batch_path = os.path.join(date_path, batch_dir)
             forecast_csv = os.path.join(batch_path, "forecast.csv")
-            outcome_csv = os.path.join(batch_path, "outcome.csv")
-            eval_csv = os.path.join(batch_path, "evaluation.csv")
 
-            if not os.path.isfile(forecast_csv) or not os.path.isfile(eval_csv):
+            if not os.path.isfile(forecast_csv):
                 continue
 
             forecasts = _read_csv_rows(forecast_csv)
-            evals = _read_csv_rows(eval_csv)
-
-            outcome_row: dict[str, str] | None = None
-            if os.path.isfile(outcome_csv):
-                outcome_rows = _read_csv_rows(outcome_csv)
-                if outcome_rows:
-                    outcome_row = outcome_rows[0]
-
-            # Index evaluations by forecast_id
-            eval_by_forecast: dict[str, dict[str, str]] = {}
-            for ev in evals:
-                fid = ev.get("forecast_id", "")
-                if fid:
-                    eval_by_forecast[fid] = ev
 
             for fc in forecasts:
                 as_of_jst = fc.get("as_of_jst", "")
                 forecast_id = fc.get("forecast_id", "")
-                ev = eval_by_forecast.get(forecast_id, {})
+                ev = global_eval_by_forecast.get(forecast_id, {})
+                outcome_row = global_outcome_by_forecast.get(forecast_id)
 
                 # Lookup annotation by as_of_jst
                 ann = annotations.get(as_of_jst, {})
@@ -428,7 +450,9 @@ def _collect_labeled_observation_rows(
                     "forecast_direction": fc.get("forecast_direction", ""),
                     "expected_close_change_bp": fc.get("expected_close_change_bp", ""),
                     "realized_direction": (
-                        outcome_row.get("realized_direction", "") if outcome_row else ""
+                        outcome_row.get("realized_direction", "")
+                        if outcome_row
+                        else ""
                     ),
                     "realized_close_change_bp": (
                         outcome_row.get("realized_close_change_bp", "")
