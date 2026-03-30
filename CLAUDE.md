@@ -14,7 +14,7 @@ Guidelines for AI assistants working in this repository.
 | `workflows` | Synchronous composition layer: run engine → persist → reload → return result |
 | `query` | Read-only inspection layer: summaries, filtering, and full bundle rehydration from persisted records |
 | `replay` | Deterministic replay / regression checker (single-run, batch, suites, baselines) |
-| `fx_protocol` | FX daily prediction protocol: forecasting, outcomes, evaluation, CSV exports, weekly reports, automation |
+| `fx_protocol` | FX daily prediction protocol: market-derived UGH input builder, forecasting, outcomes, evaluation, CSV exports, weekly reports, automation |
 
 Milestones 1–17 are complete across two phases. Phase 1 (M1–12): core engine, persistence, workflows, query, replay. Phase 2 (M13–17): `fx_protocol` daily prediction cycle. See `docs/specs/` for formal specifications per milestone.
 
@@ -44,6 +44,7 @@ src/ugh_quantamental/
 ├── query/            # models.py (SQLAlchemy-free), readers.py (DB-dependent; includes review-audit)
 ├── replay/           # models, runners (includes review-audit), batch, suites, baselines (read-only except baseline writes)
 ├── fx_protocol/      # calendar, ids, data_models, data_sources, request_builders (contracts);
+│                     #   market_ugh_builder (snapshot→UGH feature derivation, pure);
 │                     #   models, forecast_models, outcome_models, report_models (schemas);
 │                     #   forecasting, outcomes, csv_exports, reporting, automation (application)
 alembic/versions/     # 0001 initial → 0002 baselines → 0003–0004 fx → 0005 review_audit

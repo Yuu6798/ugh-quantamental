@@ -149,15 +149,45 @@ Derives `BaselineContext` from the last 20+ completed windows:
 - `sma20` = mean of close prices over last 20 completed windows
 - `warmup_window_count` = `len(completed_windows)`
 
-### `build_daily_forecast_request(snapshot, *, theory_version, engine_version, schema_version, protocol_version) -> DailyForecastWorkflowRequest`
+### `build_daily_forecast_request(snapshot, *, ugh_request, ...) -> DailyForecastWorkflowRequest`
 
 Builds a complete `DailyForecastWorkflowRequest` from a market snapshot.
 Uses `build_baseline_context` for the baseline context field.
-The `ugh_request` field must be constructed by the caller or injected; this function raises `NotImplementedError` for UGH-specific inputs and documents the required caller contract.
+The `ugh_request` parameter is a pre-built `FullWorkflowRequest` constructed by the caller; in the default automation path this is produced by `build_ugh_request_from_snapshot` (see below).
 
 ### `build_daily_outcome_request(snapshot, *, schema_version, protocol_version) -> DailyOutcomeWorkflowRequest`
 
 Builds a `DailyOutcomeWorkflowRequest` from the most recent completed window (newest in `completed_windows`).
+
+---
+
+## Market-derived UGH builder (`market_ugh_builder.py`)
+
+### `build_ugh_request_from_snapshot(snapshot, *, snapshot_ref) -> FullWorkflowRequest`
+
+Deterministic pure function that derives all UGH engine inputs from a `FxProtocolMarketSnapshot`.
+Called by `run_fx_daily_protocol_once` to build the UGH forecast request without placeholder constants.
+
+**Intermediate statistics** (from `completed_windows`, last 20):
+
+| Statistic | Formula |
+|---|---|
+| `momentum_5d` | `(SMA5 − SMA20) / SMA20` |
+| `directional_consistency` | Fraction of last 5 windows with same sign as 5-window net change |
+| `range_expansion` | `recent_mean_range_5 / trailing_mean_range_20` |
+| `spot_vs_sma20` | `(current_spot − SMA20) / SMA20` |
+| `trailing_mean_abs_change_bp` | Mean of `|close_change_bp|` over last 20 windows |
+
+**Derived feature blocks:**
+
+- **QuestionFeatures**: direction from momentum sign (±5 bp threshold), strength from |momentum|, consistency from directional_consistency
+- **SignalFeatures**: fundamental from spot_vs_sma20, technical from momentum, price_implied from prev_close/trailing, context from range_expansion
+- **AlignmentInputs**: pairwise `|score_a − score_b| / 2` for all (Q, F, T, P) combinations
+- **StateEventFeatures**: catalyst from |prev_change|/trailing, follow_through from consistency, saturation from range_expansion, disconfirmation from opposing momentum/close signs
+
+All values are clamped to their declared Pydantic field bounds. The same snapshot always produces the same request.
+
+**Tie-break rule**: When lifecycle state probabilities tie after rounding, the first state in canonical `LifecycleState` order wins (deterministic).
 
 ---
 
@@ -202,8 +232,9 @@ Orchestration function in `automation.py`:
 1. Determine canonical `as_of_jst` (08:00 JST today or previous business day)
 2. Fetch one USDJPY snapshot via `provider.fetch_snapshot(as_of_jst)`
 3. **Freshness guard** (orchestration layer): validate that the newest completed window in the snapshot is at most **1 business-day behind** `as_of_jst`; raises `ValueError` if the data is staler than that.  This check lives in `run_fx_daily_protocol_once`, not in the provider itself — direct callers of `fetch_snapshot` bypass this guard.
-4. Build `DailyForecastWorkflowRequest` using request builders
-5. If `config.run_forecast_generation`: call `run_daily_forecast_workflow`; idempotent
+4. Build `FullWorkflowRequest` (UGH inputs) from the snapshot via `build_ugh_request_from_snapshot`
+5. Build `DailyForecastWorkflowRequest` using request builders (injects UGH request + baseline context)
+6. If `config.run_forecast_generation`: call `run_daily_forecast_workflow`; idempotent
 6. If `config.run_outcome_evaluation` and prior window data is available in snapshot: call `run_daily_outcome_evaluation_workflow`; idempotent
 7. If `config.write_csv_exports`: write forecast / outcome / evaluation CSVs under `config.csv_output_dir`; skipped gracefully when the relevant batch or outcome ID is `None`
 8. If `config.write_csv_exports` and forecast CSV was written: **publish to `latest/` and `history/` layout** via `publish_csv_to_layout`; absent outcome/evaluation files are **deleted** from `latest/`; **write `latest/manifest.json`** via `write_latest_manifest`
