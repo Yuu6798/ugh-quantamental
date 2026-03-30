@@ -1,0 +1,13 @@
+slice_dimension,strategy_kind,label,observation_count,direction_hit_count,direction_hit_rate,range_hit_count,range_hit_rate,state_proxy_hit_count,state_proxy_hit_rate,mean_close_error_bp,median_close_error_bp,mean_magnitude_error_bp
+regime_label,baseline_prev_day_direction,unlabeled,5,0,0.0,,,,,,,
+regime_label,baseline_random_walk,unlabeled,5,0,0.0,,,,,,,
+regime_label,baseline_simple_technical,unlabeled,5,0,0.0,,,,,,,
+regime_label,ugh,unlabeled,5,0,0.0,,,,,,,
+volatility_label,baseline_prev_day_direction,unlabeled,5,0,0.0,,,,,,,
+volatility_label,baseline_random_walk,unlabeled,5,0,0.0,,,,,,,
+volatility_label,baseline_simple_technical,unlabeled,5,0,0.0,,,,,,,
+volatility_label,ugh,unlabeled,5,0,0.0,,,,,,,
+intervention_risk,baseline_prev_day_direction,unlabeled,5,0,0.0,,,,,,,
+intervention_risk,baseline_random_walk,unlabeled,5,0,0.0,,,,,,,
+intervention_risk,baseline_simple_technical,unlabeled,5,0,0.0,,,,,,,
+intervention_risk,ugh,unlabeled,5,0,0.0,,,,,,,
