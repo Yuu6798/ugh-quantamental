@@ -370,11 +370,15 @@ def build_annotation_field_coverage(
 def build_event_tag_source_summary(
     observations: list[dict[str, str]],
 ) -> dict[str, int]:
-    """Count observations by annotation_source."""
+    """Count observations by event_tag_source (not row-level annotation_source).
+
+    This preserves event-tag specific provenance so the report's event-tag
+    source note accurately reflects where tags came from.
+    """
     from ugh_quantamental.fx_protocol.annotation_sources import ANNOTATION_SOURCE_VALUES
     counts: dict[str, int] = {s: 0 for s in ANNOTATION_SOURCE_VALUES}
     for row in observations:
-        source = row.get("annotation_source", "none").strip()
+        source = row.get("event_tag_source", "none").strip()
         if source in counts:
             counts[source] += 1
         else:

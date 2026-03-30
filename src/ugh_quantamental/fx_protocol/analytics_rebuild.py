@@ -68,6 +68,28 @@ def rebuild_annotation_analytics(
     except Exception:
         logger.warning("Manual annotation template rebuild failed.", exc_info=True)
 
+    # Step 1b: Generate AI annotations if not provided externally.
+    # Uses the deterministic adapter to ensure AI-first analysis is active
+    # in the default rebuild path (CLI, GitHub Actions).
+    if ai_annotations is None:
+        try:
+            from ugh_quantamental.fx_protocol.ai_annotations import (
+                ai_batch_to_lookup,
+                run_ai_annotation_pass,
+            )
+            # Build a quick observation list from history for the adapter
+            _history = os.path.join(os.path.abspath(csv_output_dir), "history")
+            if os.path.isdir(_history):
+                _obs_for_ai = _collect_eval_rows_for_ai(_history)
+                if _obs_for_ai:
+                    _batch = run_ai_annotation_pass(
+                        _obs_for_ai, generated_at_utc=generated_at_utc,
+                    )
+                    if _batch:
+                        ai_annotations = ai_batch_to_lookup(_batch)
+        except Exception:
+            logger.warning("Default AI annotation pass failed (non-fatal).", exc_info=True)
+
     # Step 2: Rebuild labeled observations (must run before scoreboards)
     try:
         result["labeled_observations_path"] = build_labeled_observations(
@@ -160,3 +182,49 @@ def rebuild_weekly_report(
     export_weekly_report_artifacts(report, csv_output_dir, date_str)
 
     return report
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _collect_eval_rows_for_ai(history_dir: str) -> list[dict[str, str]]:
+    """Collect evaluated forecast rows from history for the AI annotation adapter.
+
+    Returns flat dicts with forecast_id, as_of_jst, strategy_kind, and
+    evaluation fields needed by the deterministic adapter.
+    """
+    import csv as _csv
+
+    rows: list[dict[str, str]] = []
+    for date_dir in sorted(os.listdir(history_dir)):
+        date_path = os.path.join(history_dir, date_dir)
+        if not os.path.isdir(date_path):
+            continue
+        for batch_dir in sorted(os.listdir(date_path)):
+            batch_path = os.path.join(date_path, batch_dir)
+            eval_csv = os.path.join(batch_path, "evaluation.csv")
+            forecast_csv = os.path.join(batch_path, "forecast.csv")
+            if not os.path.isfile(eval_csv) or not os.path.isfile(forecast_csv):
+                continue
+            # Read evaluations keyed by forecast_id
+            with open(eval_csv, newline="", encoding="utf-8") as fh:
+                evals = {
+                    r["forecast_id"]: r
+                    for r in _csv.DictReader(fh)
+                    if r.get("forecast_id")
+                }
+            # Read forecasts and merge with their evaluations
+            with open(forecast_csv, newline="", encoding="utf-8") as fh:
+                for fc in _csv.DictReader(fh):
+                    fid = fc.get("forecast_id", "")
+                    if not fid:
+                        continue
+                    ev = evals.get(fid)
+                    if not ev:
+                        continue
+                    merged = dict(fc)
+                    merged.update(ev)
+                    rows.append(merged)
+    return rows

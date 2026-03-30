@@ -526,11 +526,11 @@ class TestAnnotationFieldCoverage:
 class TestEventTagSourceSummary:
     def test_counts_sources(self) -> None:
         obs = [
-            {"annotation_source": "ai"},
-            {"annotation_source": "auto_only"},
-            {"annotation_source": "auto_only"},
-            {"annotation_source": "ai_plus_auto"},
-            {"annotation_source": "none"},
+            {"event_tag_source": "ai"},
+            {"event_tag_source": "auto_only"},
+            {"event_tag_source": "auto_only"},
+            {"event_tag_source": "ai_plus_auto"},
+            {"event_tag_source": "none"},
         ]
         summary = build_event_tag_source_summary(obs)
         assert summary["ai"] == 1
@@ -539,7 +539,7 @@ class TestEventTagSourceSummary:
         assert summary["none"] == 1
 
     def test_empty_defaults_to_none(self) -> None:
-        obs = [{"annotation_source": ""}, {}]
+        obs = [{"event_tag_source": ""}, {}]
         summary = build_event_tag_source_summary(obs)
         assert summary["none"] == 2
 
