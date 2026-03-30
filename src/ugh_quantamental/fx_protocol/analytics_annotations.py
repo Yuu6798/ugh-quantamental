@@ -507,6 +507,11 @@ def _collect_labeled_observation_rows(
     then iterate over forecasts and look up evaluations from that index.
     """
     from ugh_quantamental.fx_protocol.annotation_sources import (
+        SOURCE_AI,
+        SOURCE_AI_PLUS_AUTO,
+        SOURCE_AUTO_ONLY,
+        SOURCE_MANUAL_COMPAT,
+        SOURCE_NONE,
         resolve_effective_event_tags,
         resolve_effective_label,
     )
@@ -605,8 +610,26 @@ def _collect_labeled_observation_rows(
                     manual_value=manual.get("intervention_risk", ""),
                 )
 
-                # Determine overall annotation_source
-                annotation_source = et_source if et_source != "none" else regime_src
+                # Determine overall annotation_source from all effective fields.
+                # Any AI-populated field makes the row AI-annotated.
+                has_ai = bool(
+                    ai.get("ai_regime_label", "")
+                    or ai.get("ai_volatility_label", "")
+                    or ai.get("ai_intervention_risk", "")
+                    or ai.get("ai_event_tags", "")
+                    or ai.get("ai_failure_reason", "")
+                )
+                has_auto = bool(auto_tags)
+                if has_ai and has_auto:
+                    annotation_source = SOURCE_AI_PLUS_AUTO
+                elif has_ai:
+                    annotation_source = SOURCE_AI
+                elif has_auto:
+                    annotation_source = SOURCE_AUTO_ONLY
+                elif manual.get("annotation_status", ""):
+                    annotation_source = SOURCE_MANUAL_COMPAT
+                else:
+                    annotation_source = SOURCE_NONE
 
                 manual_et = "|".join(sorted(manual_tag_list)) if manual_tag_list else ""
                 auto_et = "|".join(auto_tags) if auto_tags else ""

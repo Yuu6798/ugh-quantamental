@@ -69,9 +69,12 @@ def make_deterministic_adapter(
         ts = generated_at_utc or datetime.now(timezone.utc)
         records: list[AiAnnotationRecord] = []
 
-        # Group by (as_of_jst, forecast_id) to produce one record per observation
+        # One record per observation, keyed by forecast_id.
+        # Skip rows without a distinct forecast_id to avoid key collisions.
         for obs in observations:
-            forecast_id = obs.get("forecast_id", obs.get("forecast_batch_id", ""))
+            forecast_id = obs.get("forecast_id", "")
+            if not forecast_id:
+                continue
             as_of_str = obs.get("as_of_jst", "")
             try:
                 as_of = datetime.fromisoformat(as_of_str)

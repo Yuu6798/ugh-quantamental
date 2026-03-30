@@ -321,16 +321,39 @@ def build_annotation_field_coverage(
         eff_col = effective_field_map.get(field, field)
 
         ai_pop = sum(1 for r in observations if r.get(ai_col, "").strip()) if ai_col else 0
-        auto_pop = sum(
-            1 for r in observations
-            if r.get("annotation_source", "").strip() in ("auto_only", "ai_plus_auto")
-            and r.get(eff_col, "").strip()
-        )
-        manual_pop = sum(
-            1 for r in observations
-            if r.get("annotation_source", "").strip() == "manual_compat"
-            and r.get(eff_col, "").strip()
-        )
+
+        # Auto-populated is field-specific: only event_tags has an auto source
+        # (auto_event_tags from outcome/calendar). Other fields have no auto source.
+        if field == "event_tags":
+            auto_pop = sum(
+                1 for r in observations if r.get("auto_event_tags", "").strip()
+            )
+        else:
+            auto_pop = 0
+
+        # Manual-populated: check the manual-specific column for the field
+        manual_col_map = {
+            "regime_label": "regime_label",
+            "event_tags": "manual_event_tags",
+            "volatility_label": "volatility_label",
+            "intervention_risk": "intervention_risk",
+            "failure_reason": "",
+        }
+        manual_col = manual_col_map.get(field, "")
+        if manual_col and field != "event_tags":
+            # For non-tag fields, manual source is when annotation_source is
+            # manual_compat and the field is populated
+            manual_pop = sum(
+                1 for r in observations
+                if r.get("annotation_source", "").strip() == "manual_compat"
+                and r.get(eff_col, "").strip()
+            )
+        elif field == "event_tags":
+            manual_pop = sum(
+                1 for r in observations if r.get("manual_event_tags", "").strip()
+            )
+        else:
+            manual_pop = 0
         eff_pop = sum(1 for r in observations if r.get(eff_col, "").strip())
         missing = total - eff_pop
 
