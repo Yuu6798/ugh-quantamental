@@ -308,6 +308,18 @@ class TestEdgeCases:
 
         assert req.projection.question_features.question_direction == QuestionDirectionSign.neutral
 
+    def test_tied_probabilities_do_not_raise(self) -> None:
+        """When activity/trend produce tied state probabilities, Phi must not raise."""
+        # Flat market: step=0, range_width=0.5 → activity≈0, trend≈0 → dormant≈setup
+        snap = _snapshot(20, current_spot=150.0, step=0.0, range_width=0.5)
+        req = build_ugh_request_from_snapshot(snap, snapshot_ref="tie")
+        # Must succeed without ValueError; dominant_state must be unique.
+        phi = req.state.snapshot.phi
+        probs = phi.probabilities.model_dump()
+        max_prob = max(probs.values())
+        highest = [k for k, v in probs.items() if abs(v - max_prob) < 1e-12]
+        assert len(highest) == 1, f"Tie not broken: {probs}"
+
     def test_extreme_range_expansion_bounded(self) -> None:
         """Very wide ranges should not produce out-of-bounds features."""
         snap = _snapshot(25, current_spot=150.0, step=0.0, range_width=20.0)

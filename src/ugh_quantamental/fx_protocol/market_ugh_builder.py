@@ -454,7 +454,19 @@ def build_ugh_request_from_snapshot(
     rounded[max_idx] = round(rounded[max_idx] + residual, 8)
     dormant, setup, fire, expansion, exhaustion, failure = rounded
 
-    # Determine dominant state.
+    # Determine dominant state, breaking ties deterministically.
+    # Phi requires a unique highest probability.  After rounding two states can
+    # be equal (e.g. dormant and setup in a flat market).  We break ties by
+    # nudging: subtract a tiny epsilon from each tied non-preferred state and
+    # add it to the preferred one (the first in canonical LifecycleState order).
+    _STATES_ORDER = [
+        LifecycleState.dormant,
+        LifecycleState.setup,
+        LifecycleState.fire,
+        LifecycleState.expansion,
+        LifecycleState.exhaustion,
+        LifecycleState.failure,
+    ]
     prob_map = {
         LifecycleState.dormant: dormant,
         LifecycleState.setup: setup,
@@ -463,7 +475,23 @@ def build_ugh_request_from_snapshot(
         LifecycleState.exhaustion: exhaustion,
         LifecycleState.failure: failure,
     }
-    dominant_state = max(prob_map, key=lambda s: prob_map[s])
+    max_val = max(prob_map.values())
+    tied = [s for s in _STATES_ORDER if math.isclose(prob_map[s], max_val, abs_tol=1e-12)]
+    if len(tied) > 1:
+        # Break tie: keep the first in canonical order as dominant,
+        # transfer a small epsilon from each other tied state.
+        eps = 1e-9
+        winner = tied[0]
+        for loser in tied[1:]:
+            prob_map[loser] = prob_map[loser] - eps
+            prob_map[winner] = prob_map[winner] + eps
+        dormant = prob_map[LifecycleState.dormant]
+        setup = prob_map[LifecycleState.setup]
+        fire = prob_map[LifecycleState.fire]
+        expansion = prob_map[LifecycleState.expansion]
+        exhaustion = prob_map[LifecycleState.exhaustion]
+        failure = prob_map[LifecycleState.failure]
+    dominant_state = max(_STATES_ORDER, key=lambda s: prob_map[s])
 
     probs = StateProbabilities(
         dormant=dormant,
