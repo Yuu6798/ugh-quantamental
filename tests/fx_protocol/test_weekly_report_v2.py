@@ -80,8 +80,15 @@ def _labeled_observation_fieldnames() -> list[str]:
         "as_of_jst", "forecast_batch_id", "outcome_id", "strategy_kind",
         "forecast_direction", "expected_close_change_bp", "realized_direction",
         "realized_close_change_bp", "direction_hit", "range_hit", "state_proxy_hit",
-        "close_error_bp", "magnitude_error_bp", "regime_label", "event_tags",
-        "volatility_label", "intervention_risk", "annotation_status",
+        "close_error_bp", "magnitude_error_bp",
+        "ai_regime_label", "ai_volatility_label", "ai_intervention_risk",
+        "ai_event_tags", "ai_failure_reason", "ai_annotation_confidence",
+        "ai_annotation_model_version", "ai_annotation_prompt_version",
+        "ai_evidence_refs", "ai_annotation_status",
+        "regime_label", "event_tags", "manual_event_tags", "auto_event_tags",
+        "effective_event_tags", "event_tag_source",
+        "volatility_label", "intervention_risk", "failure_reason",
+        "annotation_source", "annotation_status",
     ]
 
 
@@ -190,12 +197,17 @@ class TestSliceMetrics:
     def test_regime_label_slice(self) -> None:
         obs = [
             _make_observation(
-                strategy_kind="ugh", regime_label="trending", annotation_status="confirmed"
+                strategy_kind="ugh", regime_label="trending",
+                annotation_status="confirmed",
             ),
             _make_observation(
-                strategy_kind="ugh", regime_label="choppy", annotation_status="confirmed"
+                strategy_kind="ugh", regime_label="choppy",
+                annotation_status="confirmed",
             ),
         ]
+        # Add annotation_source so the AI-first gate sees them as annotated
+        for o in obs:
+            o["annotation_source"] = "ai"
         slices = build_slice_metrics(obs)
         regime_slices = [s for s in slices if s["slice_dimension"] == "regime_label"]
         labels = {s["label"] for s in regime_slices}
@@ -205,12 +217,15 @@ class TestSliceMetrics:
     def test_unlabeled_observations_separate(self) -> None:
         obs = [
             _make_observation(
-                strategy_kind="ugh", regime_label="trending", annotation_status="confirmed"
+                strategy_kind="ugh", regime_label="trending",
+                annotation_status="confirmed",
             ),
             _make_observation(
                 strategy_kind="ugh", regime_label="", annotation_status=""
             ),
         ]
+        obs[0]["annotation_source"] = "ai"
+        obs[1]["annotation_source"] = "none"
         slices = build_slice_metrics(obs)
         regime_slices = [s for s in slices if s["slice_dimension"] == "regime_label"]
         unlabeled = [s for s in regime_slices if s["label"] == "unlabeled"]
@@ -220,9 +235,12 @@ class TestSliceMetrics:
     def test_event_tag_expansion(self) -> None:
         obs = [
             _make_observation(
-                strategy_kind="ugh", event_tags="fomc|cpi_us", annotation_status="confirmed"
+                strategy_kind="ugh", event_tags="fomc|cpi_us",
+                annotation_status="confirmed",
             ),
         ]
+        obs[0]["annotation_source"] = "ai"
+        obs[0]["effective_event_tags"] = "cpi_us|fomc"
         slices = build_slice_metrics(obs)
         tag_slices = [s for s in slices if s["slice_dimension"] == "event_tag"]
         tags = {s["label"] for s in tag_slices}
@@ -232,9 +250,11 @@ class TestSliceMetrics:
     def test_volatility_slice(self) -> None:
         obs = [
             _make_observation(
-                strategy_kind="ugh", volatility_label="high", annotation_status="confirmed"
+                strategy_kind="ugh", volatility_label="high",
+                annotation_status="confirmed",
             ),
         ]
+        obs[0]["annotation_source"] = "ai"
         slices = build_slice_metrics(obs)
         vol_slices = [s for s in slices if s["slice_dimension"] == "volatility_label"]
         assert len(vol_slices) >= 1
@@ -243,18 +263,19 @@ class TestSliceMetrics:
     def test_intervention_risk_slice(self) -> None:
         obs = [
             _make_observation(
-                strategy_kind="ugh", intervention_risk="high", annotation_status="confirmed"
+                strategy_kind="ugh", intervention_risk="high",
+                annotation_status="confirmed",
             ),
         ]
+        obs[0]["annotation_source"] = "ai"
         slices = build_slice_metrics(obs)
         ir_slices = [s for s in slices if s["slice_dimension"] == "intervention_risk"]
         assert len(ir_slices) >= 1
         assert ir_slices[0]["label"] == "high"
 
     def test_no_annotations_still_produces_slices(self) -> None:
-        """Without any confirmed annotations, slice metrics should still be
-        generated using an 'all' label per strategy so that weekly reports
-        always contain actionable data."""
+        """Without any annotations (AI or manual), slice metrics should still be
+        generated using an 'all' label per strategy."""
         obs = [
             _make_observation(
                 strategy_kind="ugh", direction_hit="True", annotation_status=""
@@ -267,9 +288,10 @@ class TestSliceMetrics:
                 annotation_status="",
             ),
         ]
+        for o in obs:
+            o["annotation_source"] = "none"
         slices = build_slice_metrics(obs)
         assert len(slices) > 0
-        # Each dimension should have entries with label='all'
         for dim in ("regime_label", "volatility_label", "intervention_risk"):
             dim_slices = [s for s in slices if s["slice_dimension"] == dim]
             assert len(dim_slices) >= 1
@@ -438,9 +460,11 @@ class TestRunWeeklyReportV2:
         assert report["core_analysis_ready"] is True
         assert report["annotated_analysis_ready"] is False
 
-    def test_annotated_analysis_ready_with_confirmed(self, tmp_path: str) -> None:
+    def test_annotated_analysis_ready_with_ai_source(self, tmp_path: str) -> None:
+        """annotated_analysis_ready is True when AI annotations exist."""
         tmpdir = str(tmp_path)
-        obs = [_make_observation(annotation_status="confirmed")]
+        obs = [_make_observation(annotation_status="")]
+        obs[0]["annotation_source"] = "ai"
         _setup_labeled_observations(tmpdir, obs)
         report = run_weekly_report_v2(tmpdir, _REPORT_DATE, generated_at_utc=_NOW)
         assert report["annotated_analysis_ready"] is True
@@ -458,7 +482,7 @@ class TestRunWeeklyReportV2:
 
 
 class TestAnnotationFieldCoverage:
-    def test_all_unlabeled(self) -> None:
+    def test_all_unannotated(self) -> None:
         obs = [
             _make_observation(
                 regime_label="", event_tags="", volatility_label="",
@@ -469,35 +493,28 @@ class TestAnnotationFieldCoverage:
                 intervention_risk="", annotation_status="",
             ),
         ]
+        for o in obs:
+            o["annotation_source"] = "none"
         fc = build_annotation_field_coverage(obs)
         assert fc["regime_label"]["total_observations"] == 2
-        assert fc["regime_label"]["populated_count"] == 0
-        assert fc["regime_label"]["confirmed_count"] == 0
-        assert fc["regime_label"]["unlabeled_count"] == 2
+        assert fc["regime_label"]["effective_populated_count"] == 0
+        assert fc["regime_label"]["missing_count"] == 2
 
-    def test_mixed_confirmed_pending_unlabeled(self) -> None:
+    def test_ai_populated(self) -> None:
         obs = [
-            _make_observation(
-                regime_label="trending", annotation_status="confirmed",
-            ),
-            _make_observation(
-                regime_label="choppy", annotation_status="pending",
-            ),
-            _make_observation(
-                regime_label="", annotation_status="",
-            ),
+            _make_observation(regime_label="trending"),
         ]
+        obs[0]["annotation_source"] = "ai"
+        obs[0]["ai_regime_label"] = "trending"
         fc = build_annotation_field_coverage(obs)
-        assert fc["regime_label"]["total_observations"] == 3
-        assert fc["regime_label"]["populated_count"] == 2
-        assert fc["regime_label"]["confirmed_count"] == 1
-        assert fc["regime_label"]["pending_count"] == 1
-        assert fc["regime_label"]["unlabeled_count"] == 1
+        assert fc["regime_label"]["ai_populated_count"] == 1
+        assert fc["regime_label"]["effective_populated_count"] == 1
+        assert fc["regime_label"]["missing_count"] == 0
 
     def test_empty_observations(self) -> None:
         fc = build_annotation_field_coverage([])
         for field in ("regime_label", "event_tags", "volatility_label",
-                      "intervention_risk"):
+                      "intervention_risk", "failure_reason"):
             assert fc[field]["total_observations"] == 0
 
 
@@ -509,14 +526,17 @@ class TestAnnotationFieldCoverage:
 class TestEventTagSourceSummary:
     def test_counts_sources(self) -> None:
         obs = [
-            {"event_tag_source": "manual"},
-            {"event_tag_source": "auto"},
-            {"event_tag_source": "auto"},
-            {"event_tag_source": "mixed"},
+            {"event_tag_source": "ai"},
+            {"event_tag_source": "auto_only"},
+            {"event_tag_source": "auto_only"},
+            {"event_tag_source": "ai_plus_auto"},
             {"event_tag_source": "none"},
         ]
         summary = build_event_tag_source_summary(obs)
-        assert summary == {"manual": 1, "auto": 2, "mixed": 1, "none": 1}
+        assert summary["ai"] == 1
+        assert summary["auto_only"] == 2
+        assert summary["ai_plus_auto"] == 1
+        assert summary["none"] == 1
 
     def test_empty_defaults_to_none(self) -> None:
         obs = [{"event_tag_source": ""}, {}]
@@ -532,7 +552,7 @@ class TestEventTagSourceSummary:
 class TestEventTagSlicesWithoutAnnotations:
     def test_event_tag_slices_from_auto_tags(self) -> None:
         """Event-tag slices should appear from effective_event_tags even when
-        confirmed annotation coverage is zero."""
+        manual annotation coverage is zero."""
         obs = [
             _make_observation(
                 strategy_kind="ugh",
@@ -547,10 +567,9 @@ class TestEventTagSlicesWithoutAnnotations:
                 event_tags="fomc|month_end",
             ),
         ]
-        # Simulate effective_event_tags field
         for o in obs:
             o["effective_event_tags"] = o["event_tags"]
-            o["event_tag_source"] = "auto"
+            o["annotation_source"] = "auto_only"
 
         slices = build_slice_metrics(obs)
         tag_slices = [s for s in slices if s["slice_dimension"] == "event_tag"]

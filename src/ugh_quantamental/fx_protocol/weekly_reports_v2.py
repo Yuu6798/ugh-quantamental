@@ -280,62 +280,88 @@ def build_annotation_coverage(
 def build_annotation_field_coverage(
     observations: list[dict[str, str]],
 ) -> dict[str, dict[str, Any]]:
-    """Compute per-field annotation coverage for annotation-dependent fields.
+    """Compute per-field annotation coverage with AI-first source breakdown.
 
-    Returns a dict keyed by field name, each containing coverage metrics.
+    For each field reports AI, auto, manual, and effective populated counts.
     """
-    fields = ("regime_label", "event_tags", "volatility_label", "intervention_risk")
+    fields = (
+        "regime_label", "event_tags", "volatility_label",
+        "intervention_risk", "failure_reason",
+    )
+    # Map effective field → AI field → auto field fallback
+    ai_field_map = {
+        "regime_label": "ai_regime_label",
+        "event_tags": "ai_event_tags",
+        "volatility_label": "ai_volatility_label",
+        "intervention_risk": "ai_intervention_risk",
+        "failure_reason": "ai_failure_reason",
+    }
+    effective_field_map = {
+        "event_tags": "effective_event_tags",
+    }
+
     total = len(observations)
     result: dict[str, dict[str, Any]] = {}
 
+    _empty: dict[str, Any] = {
+        "total_observations": 0,
+        "ai_populated_count": 0, "ai_populated_rate": 0.0,
+        "auto_populated_count": 0, "auto_populated_rate": 0.0,
+        "manual_populated_count": 0, "manual_populated_rate": 0.0,
+        "effective_populated_count": 0, "effective_populated_rate": 0.0,
+        "missing_count": 0, "missing_rate": 0.0,
+    }
+
     for field in fields:
         if total == 0:
-            result[field] = {
-                "total_observations": 0,
-                "populated_count": 0,
-                "populated_rate": 0.0,
-                "confirmed_count": 0,
-                "confirmed_rate": 0.0,
-                "pending_count": 0,
-                "pending_rate": 0.0,
-                "unlabeled_count": 0,
-                "unlabeled_rate": 0.0,
-            }
+            result[field] = dict(_empty)
             continue
 
-        # For event_tags, prefer effective_event_tags but fall back to
-        # event_tags for backward compatibility with pre-provenance CSVs.
+        ai_col = ai_field_map.get(field, "")
+        eff_col = effective_field_map.get(field, field)
+
+        ai_pop = sum(1 for r in observations if r.get(ai_col, "").strip()) if ai_col else 0
+
+        # Auto-populated is field-specific: only event_tags has an auto source
+        # (auto_event_tags from outcome/calendar). Other fields have no auto source.
         if field == "event_tags":
-            effective_field = (
-                "effective_event_tags"
-                if any(r.get("effective_event_tags") is not None for r in observations)
-                else "event_tags"
+            auto_pop = sum(
+                1 for r in observations if r.get("auto_event_tags", "").strip()
             )
         else:
-            effective_field = field
-        populated = sum(1 for r in observations if r.get(effective_field, "").strip())
-        confirmed_pop = sum(
-            1 for r in observations
-            if r.get("annotation_status", "").strip().lower() == "confirmed"
-            and r.get(effective_field, "").strip()
-        )
-        pending_pop = sum(
-            1 for r in observations
-            if r.get("annotation_status", "").strip().lower() == "pending"
-            and r.get(effective_field, "").strip()
-        )
-        unlabeled_pop = total - confirmed_pop - pending_pop
+            auto_pop = 0
+
+        # Manual-populated: field-level detection.
+        # For non-tag fields: effective is populated but AI column is empty
+        # → the value came from manual fallback regardless of row-level source.
+        # For event_tags: directly check manual_event_tags column.
+        if field == "event_tags":
+            manual_pop = sum(
+                1 for r in observations if r.get("manual_event_tags", "").strip()
+            )
+        elif ai_col:
+            manual_pop = sum(
+                1 for r in observations
+                if not r.get(ai_col, "").strip()
+                and r.get(eff_col, "").strip()
+            )
+        else:
+            manual_pop = 0
+        eff_pop = sum(1 for r in observations if r.get(eff_col, "").strip())
+        missing = total - eff_pop
 
         result[field] = {
             "total_observations": total,
-            "populated_count": populated,
-            "populated_rate": round(populated / total, 4),
-            "confirmed_count": confirmed_pop,
-            "confirmed_rate": round(confirmed_pop / total, 4),
-            "pending_count": pending_pop,
-            "pending_rate": round(pending_pop / total, 4),
-            "unlabeled_count": unlabeled_pop,
-            "unlabeled_rate": round(unlabeled_pop / total, 4),
+            "ai_populated_count": ai_pop,
+            "ai_populated_rate": round(ai_pop / total, 4),
+            "auto_populated_count": auto_pop,
+            "auto_populated_rate": round(auto_pop / total, 4),
+            "manual_populated_count": manual_pop,
+            "manual_populated_rate": round(manual_pop / total, 4),
+            "effective_populated_count": eff_pop,
+            "effective_populated_rate": round(eff_pop / total, 4),
+            "missing_count": missing,
+            "missing_rate": round(missing / total, 4),
         }
 
     return result
@@ -344,10 +370,15 @@ def build_annotation_field_coverage(
 def build_event_tag_source_summary(
     observations: list[dict[str, str]],
 ) -> dict[str, int]:
-    """Count observations by event_tag_source (manual/auto/mixed/none)."""
-    counts: dict[str, int] = {"manual": 0, "auto": 0, "mixed": 0, "none": 0}
+    """Count observations by event_tag_source (not row-level annotation_source).
+
+    This preserves event-tag specific provenance so the report's event-tag
+    source note accurately reflects where tags came from.
+    """
+    from ugh_quantamental.fx_protocol.annotation_sources import ANNOTATION_SOURCE_VALUES
+    counts: dict[str, int] = {s: 0 for s in ANNOTATION_SOURCE_VALUES}
     for row in observations:
-        source = row.get("event_tag_source", "none").strip().lower()
+        source = row.get("event_tag_source", "none").strip()
         if source in counts:
             counts[source] += 1
         else:
@@ -390,13 +421,18 @@ def build_slice_metrics(
     AI-suggested or empty labels so that the weekly report still provides
     useful per-strategy metrics without manual annotation.
     """
+    from ugh_quantamental.fx_protocol.annotation_sources import SOURCE_NONE
+
     result: list[dict[str, Any]] = []
 
-    confirmed = [
+    # AI-first: annotated rows are those with any non-none annotation_source
+    # (AI, AI+auto, auto, or manual_compat).  This replaces the old
+    # confirmed-manual-only gate.
+    annotated = [
         r for r in observations
-        if r.get("annotation_status", "").strip().lower() == "confirmed"
+        if r.get("annotation_source", SOURCE_NONE).strip() != SOURCE_NONE
     ]
-    has_confirmed = len(confirmed) > 0
+    has_annotated = len(annotated) > 0
 
     # Dimension slices
     dimensions = [
@@ -405,23 +441,21 @@ def build_slice_metrics(
         ("intervention_risk", "intervention_risk"),
     ]
 
-    if has_confirmed:
-        # Annotation-aware mode: confirmed rows use their labels,
-        # non-confirmed rows go into 'unlabeled' bucket.
-        non_confirmed = [
+    if has_annotated:
+        unannotated = [
             r for r in observations
-            if r.get("annotation_status", "").strip().lower() != "confirmed"
+            if r.get("annotation_source", SOURCE_NONE).strip() == SOURCE_NONE
         ]
 
         for dim_name, field in dimensions:
             groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
-            for row in confirmed:
+            for row in annotated:
                 sk = row.get("strategy_kind", "")
                 label = row.get(field, "") or "unknown"
                 groups[(sk, label)].append(row)
 
             unlabeled_by_sk: dict[str, list[dict[str, str]]] = defaultdict(list)
-            for row in non_confirmed:
+            for row in unannotated:
                 sk = row.get("strategy_kind", "")
                 unlabeled_by_sk[sk].append(row)
             for sk, rows in unlabeled_by_sk.items():
@@ -436,9 +470,6 @@ def build_slice_metrics(
                 metrics["label"] = label
                 result.append(metrics)
     else:
-        # No confirmed annotations: slice all observations by strategy_kind
-        # using a single "all" label per dimension so that the weekly report
-        # still shows meaningful aggregate metrics.
         for dim_name, _field in dimensions:
             groups_all: dict[str, list[dict[str, str]]] = defaultdict(list)
             for row in observations:
@@ -452,10 +483,9 @@ def build_slice_metrics(
                 metrics["label"] = "all"
                 result.append(metrics)
 
-    # Event-tag slices use effective_event_tags (available from auto-derivation
-    # even when manual annotations are absent).  When confirmed annotations
-    # exist, only confirmed rows are used; otherwise all observations.
-    tag_source_rows = confirmed if has_confirmed else observations
+    # Event-tag slices use effective_event_tags.  When annotations exist
+    # (AI, auto, or manual), only annotated rows are used; otherwise all.
+    tag_source_rows = annotated if has_annotated else observations
     tag_groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
     for row in tag_source_rows:
         tags_str = row.get("effective_event_tags", "") or row.get("event_tags", "")
@@ -586,10 +616,23 @@ def run_weekly_report_v2(
     strategy_metrics = build_strategy_metrics(observations)
     slice_metrics = build_slice_metrics(observations)
     provider_health = build_provider_health_summary(week_health_rows)
+
+    from ugh_quantamental.fx_protocol.annotation_sources import (
+        build_annotation_source_summary,
+    )
+    source_summary = build_annotation_source_summary(observations)
     et_source_summary = build_event_tag_source_summary(observations)
 
     obs_count = len(observations)
-    confirmed_count = coverage.get("confirmed_annotation_count", 0)
+    # AI-first: annotated_analysis_ready when AI or auto annotations exist
+    ai_or_auto_count = (
+        source_summary.get("ai_annotated_count", 0)
+        + source_summary.get("auto_annotated_count", 0)
+    )
+
+    # Collect model/prompt versions from source summary
+    model_versions = source_summary.get("model_versions", [])
+    prompt_versions = source_summary.get("prompt_versions", [])
 
     # Collect generated artifact paths placeholder (filled by export layer)
     return {
@@ -599,10 +642,13 @@ def run_weekly_report_v2(
         "week_window": {"start": week_start, "end": week_end},
         "business_day_count": business_day_count,
         "core_analysis_ready": obs_count > 0,
-        "annotated_analysis_ready": confirmed_count > 0,
+        "annotated_analysis_ready": ai_or_auto_count > 0,
         "annotation_coverage": coverage,
         "annotation_field_coverage": field_coverage,
+        "annotation_source_summary": source_summary,
         "event_tag_slice_source_summary": et_source_summary,
+        "ai_annotation_model_versions": model_versions,
+        "ai_annotation_prompt_versions": prompt_versions,
         "strategy_metrics": strategy_metrics,
         "slice_metrics": slice_metrics,
         "provider_health_summary": provider_health,
