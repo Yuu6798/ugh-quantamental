@@ -429,8 +429,11 @@ class TestLabeledObservations:
         assert path is not None
         with open(path, newline="", encoding="utf-8") as fh:
             rows = list(csv.DictReader(fh))
-        assert len(rows) == 2  # one per day
-        day1_row = next(r for r in rows if r["as_of_jst"] == "2026-03-13T08:00:00+09:00")
+        # Day 2's forecast has no evaluation yet → excluded.
+        # Only day 1's forecast (evaluated in day 2's batch) should appear.
+        assert len(rows) == 1
+        day1_row = rows[0]
+        assert day1_row["as_of_jst"] == "2026-03-13T08:00:00+09:00"
         # Day 1's forecast should have evaluation data from day 2's batch
         assert day1_row["direction_hit"] == "True"
         assert day1_row["close_error_bp"] == "2.5"

@@ -528,6 +528,12 @@ def _collect_labeled_observation_rows(
                 as_of_jst = fc.get("as_of_jst", "")
                 forecast_id = fc.get("forecast_id", "")
                 ev = global_eval_by_forecast.get(forecast_id, {})
+
+                # Skip forecasts without a matched evaluation to avoid
+                # counting unevaluated rows as misses in weekly metrics.
+                if not ev:
+                    continue
+
                 outcome_row = global_outcome_by_forecast.get(forecast_id)
 
                 # Lookup annotation by as_of_jst
