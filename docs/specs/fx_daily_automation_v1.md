@@ -180,10 +180,12 @@ Called by `run_fx_daily_protocol_once` to build the UGH forecast request without
 
 **Derived feature blocks:**
 
-- **QuestionFeatures**: direction from momentum sign (±5 bp threshold), strength from |momentum|, consistency from directional_consistency
-- **SignalFeatures**: fundamental from spot_vs_sma20, technical from momentum, price_implied from prev_close/trailing, context from range_expansion
+- **QuestionFeatures**: direction from momentum sign (±5 bp threshold), `q_strength = clamp(|momentum_5d| × 100, 0, 1)`, `s_q` = directional_consistency
+- **SignalFeatures**: `fundamental_score = clamp(spot_vs_sma20 × 100, -1, 1)`, `technical_score = clamp(momentum_5d × 100, -1, 1)`, `price_implied_score = clamp(prev_close_change_bp / trailing_mean_abs_change_bp, -1, 1)`, context from range_expansion
 - **AlignmentInputs**: pairwise `|score_a − score_b| / 2` for all (Q, F, T, P) combinations
 - **StateEventFeatures**: catalyst from |prev_change|/trailing, follow_through from consistency, saturation from range_expansion, disconfirmation from opposing momentum/close signs
+
+Note: `momentum_5d` and `spot_vs_sma20` are small ratios (typically ±0.001–0.01); the `× 100` scaling converts them to a [0, 1] or [-1, 1] range before clamping.
 
 All values are clamped to their declared Pydantic field bounds. The same snapshot always produces the same request.
 
