@@ -13,6 +13,9 @@ from ugh_quantamental.fx_protocol.analytics_annotations import (
     MANUAL_ANNOTATION_FIELDNAMES,
     SLICE_SCOREBOARD_FIELDNAMES,
     TAG_SCOREBOARD_FIELDNAMES,
+    _build_event_tag_fields,
+    _derive_auto_event_tags,
+    _is_last_business_day_of_month,
     build_labeled_observations,
     build_slice_scoreboard,
     build_tag_scoreboard,
@@ -666,3 +669,169 @@ class TestRunAnnotationAnalytics:
 def _read_file(path: str) -> str:
     with open(path, encoding="utf-8") as fh:
         return fh.read()
+
+
+# ---------------------------------------------------------------------------
+# Test: Auto event-tag derivation
+# ---------------------------------------------------------------------------
+
+
+class TestIsLastBusinessDayOfMonth:
+    def test_last_weekday_friday(self) -> None:
+        # 2026-01-30 is a Friday, last business day of Jan 2026
+        assert _is_last_business_day_of_month(datetime(2026, 1, 30))
+
+    def test_last_weekday_not_last_day(self) -> None:
+        # 2026-01-31 is a Saturday — last business day is 30th
+        assert not _is_last_business_day_of_month(datetime(2026, 1, 31))
+        assert not _is_last_business_day_of_month(datetime(2026, 1, 29))
+
+    def test_march_end_quarter(self) -> None:
+        # 2026-03-31 is a Tuesday — last business day
+        assert _is_last_business_day_of_month(datetime(2026, 3, 31))
+
+    def test_mid_month(self) -> None:
+        assert not _is_last_business_day_of_month(datetime(2026, 3, 15))
+
+
+class TestDeriveAutoEventTags:
+    def test_outcome_tags_included(self) -> None:
+        outcome = {"event_tags": "fomc|cpi_us"}
+        tags = _derive_auto_event_tags("2026-03-18T08:00:00+09:00", outcome)
+        assert "fomc" in tags
+        assert "cpi_us" in tags
+
+    def test_month_end_tag(self) -> None:
+        # 2026-03-31 is last business day of March (quarter end too)
+        tags = _derive_auto_event_tags("2026-03-31T08:00:00+09:00", None)
+        assert "month_end" in tags
+        assert "quarter_end" in tags
+
+    def test_month_end_non_quarter(self) -> None:
+        # 2026-01-30 is last business day of Jan (not quarter end)
+        tags = _derive_auto_event_tags("2026-01-30T08:00:00+09:00", None)
+        assert "month_end" in tags
+        assert "quarter_end" not in tags
+
+    def test_no_tags(self) -> None:
+        tags = _derive_auto_event_tags("2026-03-18T08:00:00+09:00", None)
+        assert tags == []
+
+    def test_outcome_empty_tags(self) -> None:
+        tags = _derive_auto_event_tags("2026-03-18T08:00:00+09:00", {"event_tags": ""})
+        assert tags == []
+
+    def test_deduplication_and_sort(self) -> None:
+        outcome = {"event_tags": "fomc|boj|fomc"}
+        tags = _derive_auto_event_tags("2026-03-18T08:00:00+09:00", outcome)
+        assert tags == ["boj", "fomc"]  # sorted and deduplicated
+
+
+class TestBuildEventTagFields:
+    def test_manual_only(self) -> None:
+        m, a, e, src = _build_event_tag_fields("fomc|cpi_us", [])
+        assert m == "cpi_us|fomc"  # sorted
+        assert a == ""
+        assert e == "cpi_us|fomc"
+        assert src == "manual"
+
+    def test_auto_only(self) -> None:
+        m, a, e, src = _build_event_tag_fields("", ["month_end"])
+        assert m == ""
+        assert a == "month_end"
+        assert e == "month_end"
+        assert src == "auto"
+
+    def test_mixed(self) -> None:
+        m, a, e, src = _build_event_tag_fields("fomc", ["month_end"])
+        assert "fomc" in e
+        assert "month_end" in e
+        assert src == "mixed"
+
+    def test_none(self) -> None:
+        m, a, e, src = _build_event_tag_fields("", [])
+        assert m == ""
+        assert a == ""
+        assert e == ""
+        assert src == "none"
+
+    def test_overlapping_manual_auto(self) -> None:
+        """When manual tags are a subset of auto tags, source is still 'manual'."""
+        m, a, e, src = _build_event_tag_fields("fomc", ["fomc"])
+        assert e == "fomc"
+        assert src == "manual"
+
+
+# ---------------------------------------------------------------------------
+# Test: Labeled observation event-tag provenance
+# ---------------------------------------------------------------------------
+
+
+class TestLabeledObservationEventTagProvenance:
+    def test_auto_event_tags_from_outcome(self, tmp_path: str) -> None:
+        """Auto event tags should be derived from outcome event_tags."""
+        tmpdir = str(tmp_path)
+        _setup_history(tmpdir)  # outcome has event_tags="fomc|cpi_us"
+        path = build_labeled_observations(tmpdir, _NOW)
+        assert path is not None
+        with open(path, newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        for row in rows:
+            assert "fomc" in row.get("auto_event_tags", "")
+            assert "cpi_us" in row.get("auto_event_tags", "")
+            assert row["event_tag_source"] == "auto"
+            assert row["effective_event_tags"] == row["event_tags"]
+
+    def test_manual_event_tags_from_annotations(self, tmp_path: str) -> None:
+        """Manual event tags should come from annotation file."""
+        tmpdir = str(tmp_path)
+        _setup_history(tmpdir)
+        ann_dir = os.path.join(tmpdir, "annotations")
+        os.makedirs(ann_dir, exist_ok=True)
+        _write_csv(
+            os.path.join(ann_dir, "manual_annotations.csv"),
+            MANUAL_ANNOTATION_FIELDNAMES,
+            [{
+                "as_of_jst": "2026-03-13T08:00:00+09:00",
+                "regime_label": "trending",
+                "event_tags": "boj",
+                "volatility_label": "high",
+                "intervention_risk": "low",
+                "notes": "",
+                "annotation_status": "confirmed",
+            }],
+        )
+        path = build_labeled_observations(tmpdir, _NOW)
+        assert path is not None
+        with open(path, newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        for row in rows:
+            assert "boj" in row["manual_event_tags"]
+            # Auto tags should also have outcome tags
+            assert "fomc" in row["auto_event_tags"]
+            # Effective should have both
+            assert "boj" in row["effective_event_tags"]
+            assert "fomc" in row["effective_event_tags"]
+            assert row["event_tag_source"] == "mixed"
+
+    def test_no_event_tags(self, tmp_path: str) -> None:
+        """When no tags exist at all, source should be 'none'."""
+        tmpdir = str(tmp_path)
+        batch_path = os.path.join(tmpdir, "history", "20260313", "batch-001")
+        os.makedirs(batch_path, exist_ok=True)
+        fc = _make_forecast_row()
+        _write_csv(os.path.join(batch_path, "forecast.csv"), FORECAST_FIELDNAMES, [fc])
+        outcome = _make_outcome_row()
+        outcome["event_tags"] = ""
+        outcome["event_happened"] = "False"
+        _write_csv(os.path.join(batch_path, "outcome.csv"), OUTCOME_FIELDNAMES, [outcome])
+        ev = _make_eval_row()
+        _write_csv(os.path.join(batch_path, "evaluation.csv"), EVALUATION_FIELDNAMES, [ev])
+
+        path = build_labeled_observations(tmpdir, _NOW)
+        assert path is not None
+        with open(path, newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        for row in rows:
+            assert row["event_tag_source"] == "none"
+            assert row["effective_event_tags"] == ""

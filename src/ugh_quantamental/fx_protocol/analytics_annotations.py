@@ -14,11 +14,12 @@ Importable without SQLAlchemy.
 
 from __future__ import annotations
 
+import calendar
 import csv
 import logging
 import os
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any
 
@@ -65,6 +66,10 @@ LABELED_OBSERVATION_FIELDNAMES: tuple[str, ...] = (
     "magnitude_error_bp",
     "regime_label",
     "event_tags",
+    "manual_event_tags",
+    "auto_event_tags",
+    "effective_event_tags",
+    "event_tag_source",
     "volatility_label",
     "intervention_risk",
     "annotation_status",
@@ -337,6 +342,92 @@ def load_manual_annotations(csv_output_dir: str) -> dict[str, dict[str, str]]:
 
 
 # ---------------------------------------------------------------------------
+# 3b. Deterministic auto event-tag derivation
+# ---------------------------------------------------------------------------
+
+
+def _is_last_business_day_of_month(dt: datetime) -> bool:
+    """Return True if *dt* is the last Mon-Fri day in its calendar month."""
+    year, month = dt.year, dt.month
+    last_day = calendar.monthrange(year, month)[1]
+    candidate = datetime(year, month, last_day)
+    while candidate.isoweekday() > 5:
+        candidate -= timedelta(days=1)
+    return dt.day == candidate.day
+
+
+def _derive_auto_event_tags(
+    as_of_jst: str,
+    outcome_row: dict[str, str] | None,
+) -> list[str]:
+    """Derive deterministic auto event tags from available data.
+
+    Rules:
+    1. Outcome event tags from the evaluation window are included verbatim.
+    2. ``month_end`` is added when ``as_of_jst`` falls on the last protocol
+       business day (Mon-Fri) of its calendar month.
+    3. ``quarter_end`` is added when ``as_of_jst`` falls on the last protocol
+       business day of Mar, Jun, Sep, or Dec.
+
+    Returns a sorted, deduplicated list of tag strings.
+    """
+    tags: set[str] = set()
+
+    # Outcome-derived tags
+    if outcome_row:
+        raw = outcome_row.get("event_tags", "")
+        if raw:
+            for t in raw.split("|"):
+                t = t.strip()
+                if t:
+                    tags.add(t)
+
+    # Calendar-derived tags
+    try:
+        date_str = as_of_jst[:10]  # "YYYY-MM-DD"
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+    except (ValueError, IndexError):
+        return sorted(tags)
+
+    if _is_last_business_day_of_month(dt):
+        tags.add("month_end")
+        if dt.month in (3, 6, 9, 12):
+            tags.add("quarter_end")
+
+    return sorted(tags)
+
+
+def _build_event_tag_fields(
+    manual_tags_raw: str,
+    auto_tags: list[str],
+) -> tuple[str, str, str, str]:
+    """Compute (manual_event_tags, auto_event_tags, effective_event_tags, event_tag_source).
+
+    ``effective_event_tags`` is the deduplicated union of manual and auto tags.
+    ``event_tag_source`` is one of: manual, auto, mixed, none.
+    """
+    manual_list = [t.strip() for t in manual_tags_raw.split("|") if t.strip()] if manual_tags_raw else []
+    manual_set = set(manual_list)
+    auto_set = set(auto_tags)
+    effective = sorted(manual_set | auto_set)
+
+    manual_str = "|".join(sorted(manual_set)) if manual_set else ""
+    auto_str = "|".join(auto_tags) if auto_tags else ""
+    effective_str = "|".join(effective) if effective else ""
+
+    if manual_set and auto_set:
+        source = "mixed" if (auto_set - manual_set) else "manual"
+    elif manual_set:
+        source = "manual"
+    elif auto_set:
+        source = "auto"
+    else:
+        source = "none"
+
+    return manual_str, auto_str, effective_str, source
+
+
+# ---------------------------------------------------------------------------
 # 4. Labeled observations generation
 # ---------------------------------------------------------------------------
 
@@ -442,6 +533,13 @@ def _collect_labeled_observation_rows(
                 # Lookup annotation by as_of_jst
                 ann = annotations.get(as_of_jst, {})
 
+                # Event-tag provenance
+                manual_tags_raw = ann.get("event_tags", "")
+                auto_tags = _derive_auto_event_tags(as_of_jst, outcome_row)
+                manual_et, auto_et, effective_et, et_source = _build_event_tag_fields(
+                    manual_tags_raw, auto_tags,
+                )
+
                 row: dict[str, str] = {
                     "as_of_jst": as_of_jst,
                     "forecast_batch_id": fc.get("forecast_batch_id", ""),
@@ -465,7 +563,11 @@ def _collect_labeled_observation_rows(
                     "close_error_bp": ev.get("close_error_bp", ""),
                     "magnitude_error_bp": ev.get("magnitude_error_bp", ""),
                     "regime_label": ann.get("regime_label", ""),
-                    "event_tags": ann.get("event_tags", ""),
+                    "event_tags": effective_et,
+                    "manual_event_tags": manual_et,
+                    "auto_event_tags": auto_et,
+                    "effective_event_tags": effective_et,
+                    "event_tag_source": et_source,
                     "volatility_label": ann.get("volatility_label", ""),
                     "intervention_risk": ann.get("intervention_risk", ""),
                     "annotation_status": ann.get("annotation_status", ""),

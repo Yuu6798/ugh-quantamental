@@ -9,7 +9,9 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from ugh_quantamental.fx_protocol.weekly_report_exports import (
+    WEEKLY_ANNOTATION_COVERAGE_FIELDNAMES,
     build_weekly_report_md,
+    export_weekly_annotation_coverage_csv,
     export_weekly_report_artifacts,
     export_weekly_report_json,
     export_weekly_report_md,
@@ -33,12 +35,47 @@ def _sample_report() -> dict:
         "report_date_jst": "2026-03-20T08:00:00+09:00",
         "week_window": {"start": "20260316", "end": "20260320"},
         "business_day_count": 5,
+        "core_analysis_ready": True,
+        "annotated_analysis_ready": True,
         "annotation_coverage": {
             "total_observations": 10,
             "confirmed_annotation_count": 7,
             "pending_annotation_count": 2,
             "unlabeled_count": 1,
             "annotation_coverage_rate": 0.7,
+        },
+        "annotation_field_coverage": {
+            "regime_label": {
+                "total_observations": 10, "populated_count": 7,
+                "populated_rate": 0.7, "confirmed_count": 7,
+                "confirmed_rate": 0.7, "pending_count": 0,
+                "pending_rate": 0.0, "unlabeled_count": 3,
+                "unlabeled_rate": 0.3,
+            },
+            "event_tags": {
+                "total_observations": 10, "populated_count": 5,
+                "populated_rate": 0.5, "confirmed_count": 3,
+                "confirmed_rate": 0.3, "pending_count": 0,
+                "pending_rate": 0.0, "unlabeled_count": 7,
+                "unlabeled_rate": 0.7,
+            },
+            "volatility_label": {
+                "total_observations": 10, "populated_count": 7,
+                "populated_rate": 0.7, "confirmed_count": 7,
+                "confirmed_rate": 0.7, "pending_count": 0,
+                "pending_rate": 0.0, "unlabeled_count": 3,
+                "unlabeled_rate": 0.3,
+            },
+            "intervention_risk": {
+                "total_observations": 10, "populated_count": 7,
+                "populated_rate": 0.7, "confirmed_count": 7,
+                "confirmed_rate": 0.7, "pending_count": 0,
+                "pending_rate": 0.0, "unlabeled_count": 3,
+                "unlabeled_rate": 0.3,
+            },
+        },
+        "event_tag_slice_source_summary": {
+            "manual": 3, "auto": 2, "mixed": 0, "none": 5,
         },
         "strategy_metrics": [
             {
@@ -117,9 +154,10 @@ class TestBuildWeeklyReportMd:
         report = _sample_report()
         md = build_weekly_report_md(report)
         assert "## Annotation Coverage" in md
-        assert "## Strategy Performance" in md
+        assert "### Strategy Performance" in md
         assert "## Provider Health Summary" in md
-        assert "## Annotation-Aware Slice Analysis" in md
+        assert "## Annotation-Dependent Analysis" in md
+        assert "## Core Analysis" in md
         assert "## Notes" in md
 
     def test_empty_report(self) -> None:
@@ -159,6 +197,24 @@ class TestExportSliceCsv:
             assert col in rows[0]
 
 
+class TestExportAnnotationCoverageCsv:
+    def test_writes_valid_csv(self, tmp_path: str) -> None:
+        report = _sample_report()
+        out_dir = str(tmp_path)
+        path = export_weekly_annotation_coverage_csv(report, out_dir)
+        assert os.path.isfile(path)
+        with open(path, newline="", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh)
+            rows = list(reader)
+        assert len(rows) == 4
+        fields_seen = {r["field"] for r in rows}
+        assert fields_seen == {
+            "regime_label", "event_tags", "volatility_label", "intervention_risk",
+        }
+        for col in WEEKLY_ANNOTATION_COVERAGE_FIELDNAMES:
+            assert col in rows[0]
+
+
 class TestExportWeeklyReportArtifacts:
     def test_full_export(self, tmp_path: str) -> None:
         report = _sample_report()
@@ -169,6 +225,7 @@ class TestExportWeeklyReportArtifacts:
         assert "weekly_report_md" in paths
         assert "weekly_strategy_metrics_csv" in paths
         assert "weekly_slice_metrics_csv" in paths
+        assert "weekly_annotation_coverage_csv" in paths
 
         # Verify dated directory
         dated_dir = os.path.join(tmpdir, "analytics", "weekly", "20260320")
@@ -176,11 +233,13 @@ class TestExportWeeklyReportArtifacts:
         assert os.path.isfile(os.path.join(dated_dir, "weekly_report.md"))
         assert os.path.isfile(os.path.join(dated_dir, "weekly_strategy_metrics.csv"))
         assert os.path.isfile(os.path.join(dated_dir, "weekly_slice_metrics.csv"))
+        assert os.path.isfile(os.path.join(dated_dir, "weekly_annotation_coverage.csv"))
 
         # Verify latest directory
         latest_dir = os.path.join(tmpdir, "analytics", "weekly", "latest")
         assert os.path.isfile(os.path.join(latest_dir, "weekly_report.json"))
         assert os.path.isfile(os.path.join(latest_dir, "weekly_report.md"))
+        assert os.path.isfile(os.path.join(latest_dir, "weekly_annotation_coverage.csv"))
 
         # Verify JSON has artifact paths
         with open(os.path.join(dated_dir, "weekly_report.json"), encoding="utf-8") as fh:

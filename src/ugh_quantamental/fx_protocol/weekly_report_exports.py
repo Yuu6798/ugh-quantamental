@@ -76,23 +76,22 @@ def build_weekly_report_md(report: dict[str, Any]) -> str:
     lines.append(f"Report date (JST): {report.get('report_date_jst', 'N/A')}")
     lines.append(f"Business days: {report.get('business_day_count', 'N/A')}")
     lines.append(f"Total observations: {report.get('observation_count', 0)}")
+    lines.append(
+        f"Core analysis ready: {'Yes' if report.get('core_analysis_ready') else 'No'}"
+    )
+    lines.append(
+        f"Annotated analysis ready: "
+        f"{'Yes' if report.get('annotated_analysis_ready') else 'No'}"
+    )
     lines.append("")
 
-    # Annotation coverage
-    cov = report.get("annotation_coverage", {})
-    lines.append("## Annotation Coverage")
-    lines.append("")
-    lines.append(f"- **Total observations**: {cov.get('total_observations', 0)}")
-    lines.append(f"- **Confirmed**: {cov.get('confirmed_annotation_count', 0)}")
-    lines.append(f"- **Pending**: {cov.get('pending_annotation_count', 0)}")
-    lines.append(f"- **Unlabeled**: {cov.get('unlabeled_count', 0)}")
-    rate = cov.get("annotation_coverage_rate", 0)
-    lines.append(f"- **Coverage rate**: {_fmt_pct(rate)}")
+    # --- Core Analysis (always available) ---
+    lines.append("## Core Analysis")
     lines.append("")
 
     # Strategy metrics
     strats = report.get("strategy_metrics", [])
-    lines.append("## Strategy Performance")
+    lines.append("### Strategy Performance")
     lines.append("")
     if strats:
         lines.append(
@@ -116,15 +115,109 @@ def build_weekly_report_md(report: dict[str, Any]) -> str:
         lines.append("No strategy metrics available.")
         lines.append("")
 
-    # Slice metrics summary
+    # Event-tag analysis (uses effective_event_tags, available without annotations)
     slices = report.get("slice_metrics", [])
-    if slices:
-        lines.append("## Annotation-Aware Slice Analysis")
+    event_tag_slices = [s for s in slices if s.get("slice_dimension") == "event_tag"]
+    if event_tag_slices:
+        et_summary = report.get("event_tag_slice_source_summary", {})
+        source_parts = [
+            f"{k}: {v}" for k, v in sorted(et_summary.items()) if v > 0
+        ]
+        source_note = f" (sources: {', '.join(source_parts)})" if source_parts else ""
+        lines.append(f"### Event-Tag Analysis{source_note}")
+        lines.append("")
+        lines.append(
+            "| Strategy | Tag | Obs | Dir Rate | Range Rate | Mean Err (bp) |"
+        )
+        lines.append("|---|---|---|---|---|---|")
+        for s in event_tag_slices:
+            lines.append(
+                f"| {s.get('strategy_kind', '')} "
+                f"| {s.get('label', '')} "
+                f"| {s.get('observation_count', 0)} "
+                f"| {_fmt_pct(s.get('direction_hit_rate', ''))} "
+                f"| {_fmt_pct(s.get('range_hit_rate', ''))} "
+                f"| {_fmt_bp(s.get('mean_close_error_bp', ''))} |"
+            )
+        lines.append("")
+
+    # --- Annotation Coverage ---
+    cov = report.get("annotation_coverage", {})
+    lines.append("## Annotation Coverage")
+    lines.append("")
+    lines.append(f"- **Total observations**: {cov.get('total_observations', 0)}")
+    lines.append(f"- **Confirmed**: {cov.get('confirmed_annotation_count', 0)}")
+    lines.append(f"- **Pending**: {cov.get('pending_annotation_count', 0)}")
+    lines.append(f"- **Unlabeled**: {cov.get('unlabeled_count', 0)}")
+    rate = cov.get("annotation_coverage_rate", 0)
+    lines.append(f"- **Coverage rate**: {_fmt_pct(rate)}")
+    lines.append("")
+
+    # Field-level coverage table
+    field_cov = report.get("annotation_field_coverage", {})
+    if field_cov:
+        lines.append("### Field-Level Coverage")
+        lines.append("")
+        lines.append("| Field | Populated | Rate | Confirmed | Pending | Unlabeled |")
+        lines.append("|---|---|---|---|---|---|")
+        for field_name in ("regime_label", "event_tags", "volatility_label",
+                           "intervention_risk"):
+            fc = field_cov.get(field_name, {})
+            lines.append(
+                f"| {field_name} "
+                f"| {fc.get('populated_count', 0)} "
+                f"| {_fmt_pct(fc.get('populated_rate', 0))} "
+                f"| {fc.get('confirmed_count', 0)} "
+                f"| {fc.get('pending_count', 0)} "
+                f"| {fc.get('unlabeled_count', 0)} |"
+            )
+        lines.append("")
+
+    # --- Annotation-Dependent Analysis ---
+    annotated_slices = [
+        s for s in slices if s.get("slice_dimension") != "event_tag"
+    ]
+    if report.get("annotated_analysis_ready"):
+        lines.append("## Annotation-Dependent Analysis")
         lines.append("")
 
         # Group by dimension
         dims: dict[str, list[dict[str, Any]]] = {}
-        for s in slices:
+        for s in annotated_slices:
+            dim = s.get("slice_dimension", "unknown")
+            dims.setdefault(dim, []).append(s)
+
+        for dim in sorted(dims.keys()):
+            dim_label = dim.replace("_", " ").title()
+            lines.append(f"### {dim_label}")
+            lines.append("")
+            lines.append(
+                "| Strategy | Label | Obs | Dir Rate | Range Rate | Mean Err (bp) |"
+            )
+            lines.append("|---|---|---|---|---|---|")
+            for s in dims[dim]:
+                lines.append(
+                    f"| {s.get('strategy_kind', '')} "
+                    f"| {s.get('label', '')} "
+                    f"| {s.get('observation_count', 0)} "
+                    f"| {_fmt_pct(s.get('direction_hit_rate', ''))} "
+                    f"| {_fmt_pct(s.get('range_hit_rate', ''))} "
+                    f"| {_fmt_bp(s.get('mean_close_error_bp', ''))} |"
+                )
+            lines.append("")
+    elif annotated_slices:
+        lines.append("## Annotation-Dependent Analysis")
+        lines.append("")
+        lines.append(
+            "> No confirmed annotations available. "
+            "Regime, volatility, and intervention-risk slices show aggregate "
+            "metrics per strategy (label='all'). Add confirmed annotations "
+            "for labeled breakdown."
+        )
+        lines.append("")
+
+        dims = {}
+        for s in annotated_slices:
             dim = s.get("slice_dimension", "unknown")
             dims.setdefault(dim, []).append(s)
 
@@ -159,7 +252,10 @@ def build_weekly_report_md(report: dict[str, Any]) -> str:
     lines.append(f"- **Lag occurrences**: {ph.get('lag_count', 0)}")
     providers = ph.get("providers", {})
     if providers:
-        lines.append(f"- **Providers used**: {', '.join(f'{k} ({v})' for k, v in providers.items())}")
+        lines.append(
+            f"- **Providers used**: "
+            f"{', '.join(f'{k} ({v})' for k, v in providers.items())}"
+        )
     lines.append("")
 
     # Notes
@@ -167,8 +263,14 @@ def build_weekly_report_md(report: dict[str, Any]) -> str:
     lines.append("")
     lines.append("- This report is generated from persisted CSV artifacts only.")
     lines.append("- No forecast logic was re-executed.")
-    lines.append("- Confirmed manual annotations are used for labeled analysis.")
-    lines.append("- Unlabeled observations are shown separately in slice metrics.")
+    lines.append("- Core analysis (strategy performance) is always available.")
+    lines.append(
+        "- Event-tag slices use effective_event_tags "
+        "(auto-derived + manual when available)."
+    )
+    lines.append(
+        "- Regime/volatility/intervention slices require confirmed annotations."
+    )
     lines.append("")
 
     return "\n".join(lines)
@@ -226,6 +328,37 @@ def export_weekly_slice_metrics_csv(
     return _write_csv(path, rows, WEEKLY_SLICE_METRICS_FIELDNAMES)
 
 
+WEEKLY_ANNOTATION_COVERAGE_FIELDNAMES: tuple[str, ...] = (
+    "field",
+    "total_observations",
+    "populated_count",
+    "populated_rate",
+    "confirmed_count",
+    "confirmed_rate",
+    "pending_count",
+    "pending_rate",
+    "unlabeled_count",
+    "unlabeled_rate",
+)
+
+
+def export_weekly_annotation_coverage_csv(
+    report: dict[str, Any],
+    output_dir: str,
+) -> str:
+    """Write ``weekly_annotation_coverage.csv`` and return the absolute path."""
+    field_cov = report.get("annotation_field_coverage", {})
+    rows: list[dict[str, Any]] = []
+    for field_name in ("regime_label", "event_tags", "volatility_label",
+                       "intervention_risk"):
+        fc = field_cov.get(field_name, {})
+        row = {"field": field_name}
+        row.update(fc)
+        rows.append(row)
+    path = os.path.join(output_dir, "weekly_annotation_coverage.csv")
+    return _write_csv(path, rows, WEEKLY_ANNOTATION_COVERAGE_FIELDNAMES)
+
+
 # ---------------------------------------------------------------------------
 # Full export orchestrator
 # ---------------------------------------------------------------------------
@@ -256,8 +389,15 @@ def export_weekly_report_artifacts(
     # Export to dated directory
     paths["weekly_report_json"] = export_weekly_report_json(report, dated_dir)
     paths["weekly_report_md"] = export_weekly_report_md(report, dated_dir)
-    paths["weekly_strategy_metrics_csv"] = export_weekly_strategy_metrics_csv(report, dated_dir)
-    paths["weekly_slice_metrics_csv"] = export_weekly_slice_metrics_csv(report, dated_dir)
+    paths["weekly_strategy_metrics_csv"] = export_weekly_strategy_metrics_csv(
+        report, dated_dir,
+    )
+    paths["weekly_slice_metrics_csv"] = export_weekly_slice_metrics_csv(
+        report, dated_dir,
+    )
+    paths["weekly_annotation_coverage_csv"] = export_weekly_annotation_coverage_csv(
+        report, dated_dir,
+    )
 
     # Update report with artifact paths
     report["generated_artifact_paths"] = list(paths.values())
@@ -267,8 +407,11 @@ def export_weekly_report_artifacts(
 
     # Mirror to latest/
     os.makedirs(latest_dir, exist_ok=True)
-    for filename in ["weekly_report.json", "weekly_report.md",
-                     "weekly_strategy_metrics.csv", "weekly_slice_metrics.csv"]:
+    for filename in [
+        "weekly_report.json", "weekly_report.md",
+        "weekly_strategy_metrics.csv", "weekly_slice_metrics.csv",
+        "weekly_annotation_coverage.csv",
+    ]:
         src = os.path.join(dated_dir, filename)
         dst = os.path.join(latest_dir, filename)
         if os.path.isfile(src):
