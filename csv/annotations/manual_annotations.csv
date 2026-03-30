@@ -1,0 +1,6 @@
+as_of_jst,regime_label,event_tags,volatility_label,intervention_risk,notes,annotation_status
+2026-03-23T08:00:00+09:00,mixed,us_iran|geopolitical_shock,high,medium,Trump postponed Iran strikes; geopolitical risk premium unwound sharply; all models missed the down move (-49.6bp),confirmed
+2026-03-24T08:00:00+09:00,trending,us_iran|oil_retreat,normal,medium,Oil prices retreated on ceasefire hopes; modest recovery +17bp; shock fading,confirmed
+2026-03-25T08:00:00+09:00,trending,us_iran|hawkish_fed|ppi_us,high,medium,Strong US PPI (+0.7% vs 0.3% expected); Iran rejected ceasefire; dollar buying resumed +48.5bp,confirmed
+2026-03-26T08:00:00+09:00,trending,intervention_warning|boj_pm_rift,normal,high,Finance Minister warned of bold FX action; BOJ-PM disagreement on rate hikes; 160 resistance approached +20.7bp,confirmed
+2026-03-27T08:00:00+09:00,trending,intervention_warning|us_iran,normal,high,Held near 160; intervention risk zone (159.45-161.95); structural USD strength from wide yield differentials,confirmed

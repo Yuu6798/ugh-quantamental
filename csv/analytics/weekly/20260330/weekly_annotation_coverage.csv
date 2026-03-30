@@ -1,5 +1,5 @@
 field,total_observations,populated_count,populated_rate,confirmed_count,confirmed_rate,pending_count,pending_rate,unlabeled_count,unlabeled_rate
-regime_label,20,0,0.0,0,0.0,0,0.0,20,1.0
-event_tags,20,0,0.0,0,0.0,0,0.0,20,1.0
-volatility_label,20,0,0.0,0,0.0,0,0.0,20,1.0
-intervention_risk,20,0,0.0,0,0.0,0,0.0,20,1.0
+regime_label,20,20,1.0,20,1.0,0,0.0,0,0.0
+event_tags,20,20,1.0,20,1.0,0,0.0,0,0.0
+volatility_label,20,20,1.0,20,1.0,0,0.0,0,0.0
+intervention_risk,20,20,1.0,20,1.0,0,0.0,0,0.0
