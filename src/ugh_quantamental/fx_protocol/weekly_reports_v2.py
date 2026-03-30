@@ -303,8 +303,16 @@ def build_annotation_field_coverage(
             }
             continue
 
-        # For event_tags, use effective_event_tags if available
-        effective_field = "effective_event_tags" if field == "event_tags" else field
+        # For event_tags, prefer effective_event_tags but fall back to
+        # event_tags for backward compatibility with pre-provenance CSVs.
+        if field == "event_tags":
+            effective_field = (
+                "effective_event_tags"
+                if any(r.get("effective_event_tags") is not None for r in observations)
+                else "event_tags"
+            )
+        else:
+            effective_field = field
         populated = sum(1 for r in observations if r.get(effective_field, "").strip())
         confirmed_pop = sum(
             1 for r in observations
