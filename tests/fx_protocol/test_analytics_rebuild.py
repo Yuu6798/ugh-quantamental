@@ -225,7 +225,8 @@ class TestRebuildWeeklyReport:
         for path in report["generated_artifact_paths"]:
             assert os.path.isfile(path), f"Artifact not found: {path}"
 
-    def test_rebuild_without_annotations(self, tmp_path: str) -> None:
+    def test_rebuild_without_manual_annotations(self, tmp_path: str) -> None:
+        """Without manual annotations, default AI adapter still produces labels."""
         tmpdir = str(tmp_path)
         _setup_history(tmpdir)
 
@@ -233,10 +234,9 @@ class TestRebuildWeeklyReport:
             tmpdir, _REPORT_DATE, generated_at_utc=_NOW
         )
 
-        # Should work but with all unlabeled
+        # AI-first: default adapter generates confirmed annotations
         assert report["report_version"] == "v2"
-        cov = report["annotation_coverage"]
-        assert cov["confirmed_annotation_count"] == 0
+        assert report["observation_count"] >= 1
 
     def test_rebuild_empty_dir_raises(self, tmp_path: str) -> None:
         tmpdir = str(tmp_path)

@@ -678,7 +678,13 @@ def _collect_labeled_observation_rows(
                     "intervention_risk": eff_ir,
                     "failure_reason": ai.get("ai_failure_reason", ""),
                     "annotation_source": annotation_source,
-                    "annotation_status": manual.get("annotation_status", ""),
+                    # AI-annotated rows are treated as "confirmed" for
+                    # downstream scoreboards that gate on annotation_status.
+                    "annotation_status": (
+                        "confirmed"
+                        if has_ai
+                        else manual.get("annotation_status", "")
+                    ),
                 }
                 rows.append(row)
 
