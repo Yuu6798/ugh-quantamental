@@ -270,7 +270,13 @@ def run_fx_daily_protocol_once(
     forecast_created = False
 
     if config.run_forecast_generation:
-        ugh_request = _make_default_ugh_request(config.input_snapshot_ref)
+        from ugh_quantamental.fx_protocol.market_ugh_builder import (
+            build_ugh_request_from_snapshot,
+        )
+
+        ugh_request = build_ugh_request_from_snapshot(
+            snapshot, snapshot_ref=config.input_snapshot_ref
+        )
         forecast_request = build_daily_forecast_request(
             snapshot,
             ugh_request=ugh_request,
