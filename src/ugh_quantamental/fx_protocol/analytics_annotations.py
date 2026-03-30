@@ -64,6 +64,18 @@ LABELED_OBSERVATION_FIELDNAMES: tuple[str, ...] = (
     "state_proxy_hit",
     "close_error_bp",
     "magnitude_error_bp",
+    # AI annotation fields (primary source for analysis)
+    "ai_regime_label",
+    "ai_volatility_label",
+    "ai_intervention_risk",
+    "ai_event_tags",
+    "ai_failure_reason",
+    "ai_annotation_confidence",
+    "ai_annotation_model_version",
+    "ai_annotation_prompt_version",
+    "ai_evidence_refs",
+    "ai_annotation_status",
+    # Effective labels (resolved via AI > auto > manual precedence)
     "regime_label",
     "event_tags",
     "manual_event_tags",
@@ -72,6 +84,8 @@ LABELED_OBSERVATION_FIELDNAMES: tuple[str, ...] = (
     "event_tag_source",
     "volatility_label",
     "intervention_risk",
+    "failure_reason",
+    "annotation_source",
     "annotation_status",
 )
 
@@ -435,13 +449,19 @@ def _build_event_tag_fields(
 def build_labeled_observations(
     csv_output_dir: str,
     generated_at_utc: datetime,
+    ai_annotations: dict[str, dict[str, str]] | None = None,
 ) -> str | None:
-    """Build ``labeled_observations.csv`` by joining history CSVs with manual annotations.
+    """Build ``labeled_observations.csv`` joining history CSVs with annotations.
 
-    Scans all history/ directories for forecast, outcome, and evaluation CSVs,
-    joins them by as_of_jst/date, and left-joins manual annotations.
+    AI annotations are the primary annotation source.  Manual annotations
+    are optional compatibility inputs with lowest precedence.
 
-    AI suggestion columns are intentionally excluded from this main analysis CSV.
+    Parameters
+    ----------
+    ai_annotations:
+        Optional dict keyed by forecast_id containing AI annotation fields.
+        When provided, these become the primary source for regime/volatility/
+        intervention/event-tag labels.
 
     Returns the absolute path to the written file, or ``None`` on failure.
     """
@@ -451,8 +471,10 @@ def build_labeled_observations(
         if not os.path.isdir(history_dir):
             return None
 
-        annotations = load_manual_annotations(csv_output_dir)
-        rows = _collect_labeled_observation_rows(history_dir, annotations)
+        manual_annotations = load_manual_annotations(csv_output_dir)
+        rows = _collect_labeled_observation_rows(
+            history_dir, manual_annotations, ai_annotations or {},
+        )
 
         if not rows:
             return None
@@ -469,18 +491,26 @@ def build_labeled_observations(
 
 def _collect_labeled_observation_rows(
     history_dir: str,
-    annotations: dict[str, dict[str, str]],
+    manual_annotations: dict[str, dict[str, str]],
+    ai_annotations: dict[str, dict[str, str]],
 ) -> list[dict[str, str]]:
     """Scan history/ and build labeled observation rows.
+
+    Uses AI-first annotation precedence:
+      1. AI annotation labels (primary)
+      2. Deterministic auto-derived labels
+      3. Manual compatibility labels (lowest priority)
 
     Evaluations live in the *next* day's batch (they evaluate the previous
     day's forecasts against that day's outcome).  To join correctly we first
     build a global ``forecast_id → evaluation`` index across all batches,
     then iterate over forecasts and look up evaluations from that index.
-
-    Outcome data is similarly indexed by the evaluated forecast_id so that
-    realized direction/change are attached to the correct forecast row.
     """
+    from ugh_quantamental.fx_protocol.annotation_sources import (
+        resolve_effective_event_tags,
+        resolve_effective_label,
+    )
+
     # Pass 1: build global evaluation and outcome indexes across all batches.
     global_eval_by_forecast: dict[str, dict[str, str]] = {}
     global_outcome_by_forecast: dict[str, dict[str, str]] = {}
@@ -536,15 +566,50 @@ def _collect_labeled_observation_rows(
 
                 outcome_row = global_outcome_by_forecast.get(forecast_id)
 
-                # Lookup annotation by as_of_jst
-                ann = annotations.get(as_of_jst, {})
+                # AI annotation lookup (primary source)
+                ai = ai_annotations.get(forecast_id, {})
 
-                # Event-tag provenance
-                manual_tags_raw = ann.get("event_tags", "")
+                # Manual annotation lookup (compatibility)
+                manual = manual_annotations.get(as_of_jst, {})
+
+                # Auto-derived event tags
                 auto_tags = _derive_auto_event_tags(as_of_jst, outcome_row)
-                manual_et, auto_et, effective_et, et_source = _build_event_tag_fields(
-                    manual_tags_raw, auto_tags,
+
+                # AI event tags
+                ai_tags_raw = ai.get("ai_event_tags", "")
+                ai_tag_list = [t.strip() for t in ai_tags_raw.split("|") if t.strip()] if ai_tags_raw else []
+
+                # Manual event tags
+                manual_tags_raw = manual.get("event_tags", "")
+                manual_tag_list = [t.strip() for t in manual_tags_raw.split("|") if t.strip()] if manual_tags_raw else []
+
+                # Resolve effective event tags (AI > auto > manual)
+                effective_et, et_source = resolve_effective_event_tags(
+                    ai_tags=ai_tag_list, auto_tags=auto_tags, manual_tags=manual_tag_list,
                 )
+
+                # Resolve effective labels (AI > auto > manual)
+                eff_regime, regime_src = resolve_effective_label(
+                    ai_value=ai.get("ai_regime_label", ""),
+                    auto_value="",
+                    manual_value=manual.get("regime_label", ""),
+                )
+                eff_vol, _ = resolve_effective_label(
+                    ai_value=ai.get("ai_volatility_label", ""),
+                    auto_value="",
+                    manual_value=manual.get("volatility_label", ""),
+                )
+                eff_ir, _ = resolve_effective_label(
+                    ai_value=ai.get("ai_intervention_risk", ""),
+                    auto_value="",
+                    manual_value=manual.get("intervention_risk", ""),
+                )
+
+                # Determine overall annotation_source
+                annotation_source = et_source if et_source != "none" else regime_src
+
+                manual_et = "|".join(sorted(manual_tag_list)) if manual_tag_list else ""
+                auto_et = "|".join(auto_tags) if auto_tags else ""
 
                 row: dict[str, str] = {
                     "as_of_jst": as_of_jst,
@@ -568,15 +633,29 @@ def _collect_labeled_observation_rows(
                     "state_proxy_hit": ev.get("state_proxy_hit", ""),
                     "close_error_bp": ev.get("close_error_bp", ""),
                     "magnitude_error_bp": ev.get("magnitude_error_bp", ""),
-                    "regime_label": ann.get("regime_label", ""),
+                    # AI annotation fields
+                    "ai_regime_label": ai.get("ai_regime_label", ""),
+                    "ai_volatility_label": ai.get("ai_volatility_label", ""),
+                    "ai_intervention_risk": ai.get("ai_intervention_risk", ""),
+                    "ai_event_tags": ai.get("ai_event_tags", ""),
+                    "ai_failure_reason": ai.get("ai_failure_reason", ""),
+                    "ai_annotation_confidence": ai.get("ai_annotation_confidence", ""),
+                    "ai_annotation_model_version": ai.get("ai_annotation_model_version", ""),
+                    "ai_annotation_prompt_version": ai.get("ai_annotation_prompt_version", ""),
+                    "ai_evidence_refs": ai.get("ai_evidence_refs", ""),
+                    "ai_annotation_status": ai.get("ai_annotation_status", ""),
+                    # Effective labels (resolved via AI > auto > manual)
+                    "regime_label": eff_regime,
                     "event_tags": effective_et,
                     "manual_event_tags": manual_et,
                     "auto_event_tags": auto_et,
                     "effective_event_tags": effective_et,
                     "event_tag_source": et_source,
-                    "volatility_label": ann.get("volatility_label", ""),
-                    "intervention_risk": ann.get("intervention_risk", ""),
-                    "annotation_status": ann.get("annotation_status", ""),
+                    "volatility_label": eff_vol,
+                    "intervention_risk": eff_ir,
+                    "failure_reason": ai.get("ai_failure_reason", ""),
+                    "annotation_source": annotation_source,
+                    "annotation_status": manual.get("annotation_status", ""),
                 }
                 rows.append(row)
 

@@ -442,17 +442,18 @@ class TestLabeledObservations:
         result = build_labeled_observations(str(tmp_path), _NOW)
         assert result is None
 
-    def test_ai_suggestions_not_in_labeled(self, tmp_path: str) -> None:
-        """AI suggestion columns must NOT appear in labeled_observations.csv."""
+    def test_ai_annotation_columns_in_labeled(self, tmp_path: str) -> None:
+        """AI annotation columns should be present in labeled_observations.csv."""
         tmpdir = str(tmp_path)
         _setup_history(tmpdir)
         path = build_labeled_observations(tmpdir, _NOW)
         assert path is not None
         with open(path, newline="", encoding="utf-8") as fh:
             reader = csv.DictReader(fh)
-            headers = reader.fieldnames
-        ai_cols = [c for c in (headers or []) if c.startswith("ai_")]
-        assert ai_cols == []
+            headers = reader.fieldnames or []
+        assert "ai_regime_label" in headers
+        assert "ai_annotation_status" in headers
+        assert "annotation_source" in headers
 
 
 # ---------------------------------------------------------------------------
@@ -782,7 +783,7 @@ class TestLabeledObservationEventTagProvenance:
         for row in rows:
             assert "fomc" in row.get("auto_event_tags", "")
             assert "cpi_us" in row.get("auto_event_tags", "")
-            assert row["event_tag_source"] == "auto"
+            assert row["event_tag_source"] == "auto_only"
             assert row["effective_event_tags"] == row["event_tags"]
 
     def test_manual_event_tags_from_annotations(self, tmp_path: str) -> None:
@@ -812,10 +813,10 @@ class TestLabeledObservationEventTagProvenance:
             assert "boj" in row["manual_event_tags"]
             # Auto tags should also have outcome tags
             assert "fomc" in row["auto_event_tags"]
-            # Effective should have both
-            assert "boj" in row["effective_event_tags"]
+            # With AI-first precedence (no AI tags here), auto takes priority
+            # over manual. Effective contains auto tags.
             assert "fomc" in row["effective_event_tags"]
-            assert row["event_tag_source"] == "mixed"
+            assert row["event_tag_source"] == "auto_only"
 
     def test_no_event_tags(self, tmp_path: str) -> None:
         """When no tags exist at all, source should be 'none'."""
@@ -836,5 +837,5 @@ class TestLabeledObservationEventTagProvenance:
         with open(path, newline="", encoding="utf-8") as fh:
             rows = list(csv.DictReader(fh))
         for row in rows:
-            assert row["event_tag_source"] == "none"
+            assert row["annotation_source"] == "none"
             assert row["effective_event_tags"] == ""

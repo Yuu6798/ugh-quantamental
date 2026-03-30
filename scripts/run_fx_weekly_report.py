@@ -82,22 +82,25 @@ def main() -> None:
         return
 
     # Print summary
-    cov = report.get("annotation_coverage", {})
+    src = report.get("annotation_source_summary", {})
     print("=== Weekly Report v2 Summary ===")
     print(f"  observations       : {report.get('observation_count', 0)}")
     print(f"  core_ready         : {report.get('core_analysis_ready', False)}")
     print(f"  annotated_ready    : {report.get('annotated_analysis_ready', False)}")
-    print(f"  confirmed          : {cov.get('confirmed_annotation_count', 0)}")
-    print(f"  pending            : {cov.get('pending_annotation_count', 0)}")
-    print(f"  unlabeled          : {cov.get('unlabeled_count', 0)}")
-    print(f"  coverage_rate      : {cov.get('annotation_coverage_rate', 0):.1%}")
+    print(f"  ai_annotated       : {src.get('ai_annotated_count', 0)}")
+    print(f"  auto_annotated     : {src.get('auto_annotated_count', 0)}")
+    print(f"  manual_compat      : {src.get('manual_annotated_count', 0)}")
+    print(f"  unannotated        : {src.get('unannotated_count', 0)}")
     print(f"  strategy_metrics   : {len(report.get('strategy_metrics', []))} strategies")
     print(f"  slice_metrics      : {len(report.get('slice_metrics', []))} slices")
 
+    model_vs = report.get("ai_annotation_model_versions", [])
+    if model_vs:
+        print(f"  ai_model_versions  : {', '.join(model_vs)}")
     et_summary = report.get("event_tag_slice_source_summary", {})
     et_parts = [f"{k}={v}" for k, v in sorted(et_summary.items()) if v > 0]
     if et_parts:
-        print(f"  event_tag_sources  : {', '.join(et_parts)}")
+        print(f"  annotation_sources : {', '.join(et_parts)}")
 
     artifacts = report.get("generated_artifact_paths", [])
     if artifacts:

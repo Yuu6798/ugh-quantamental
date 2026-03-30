@@ -32,6 +32,7 @@ def rebuild_annotation_analytics(
     csv_output_dir: str,
     *,
     generated_at_utc: datetime | None = None,
+    ai_annotations: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, str | None]:
     """Rebuild all annotation analytics from history and annotation files.
 
@@ -41,8 +42,11 @@ def rebuild_annotation_analytics(
     - tag_scoreboard.csv
     - manual_annotations.template.csv
 
-    AI annotation suggestions are intentionally skipped during rebuild
-    since they require a specific ``as_of_jst`` context.
+    Parameters
+    ----------
+    ai_annotations:
+        Optional dict keyed by forecast_id with AI annotation fields.
+        When provided, AI annotations become the primary source for labels.
 
     Returns a dict of artifact keys to absolute paths (or None on failure).
     """
@@ -67,7 +71,7 @@ def rebuild_annotation_analytics(
     # Step 2: Rebuild labeled observations (must run before scoreboards)
     try:
         result["labeled_observations_path"] = build_labeled_observations(
-            csv_output_dir, generated_at_utc
+            csv_output_dir, generated_at_utc, ai_annotations=ai_annotations
         )
     except Exception:
         logger.warning("Labeled observations rebuild failed.", exc_info=True)
@@ -97,6 +101,7 @@ def rebuild_weekly_report(
     *,
     business_day_count: int = 5,
     generated_at_utc: datetime | None = None,
+    ai_annotations: dict[str, dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Rebuild weekly v2 report and export artifacts.
 
@@ -122,7 +127,8 @@ def rebuild_weekly_report(
 
     # Step 1: Rebuild analytics first
     analytics_result = rebuild_annotation_analytics(
-        csv_output_dir, generated_at_utc=generated_at_utc
+        csv_output_dir, generated_at_utc=generated_at_utc,
+        ai_annotations=ai_annotations,
     )
 
     # Guard: if labeled observations were not regenerated, raise to prevent

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from ugh_quantamental.fx_protocol.weekly_report_exports import (
     WEEKLY_ANNOTATION_COVERAGE_FIELDNAMES,
     build_weekly_report_md,
+    export_weekly_ai_annotation_summary_csv,
     export_weekly_annotation_coverage_csv,
     export_weekly_report_artifacts,
     export_weekly_report_json,
@@ -46,37 +47,62 @@ def _sample_report() -> dict:
         },
         "annotation_field_coverage": {
             "regime_label": {
-                "total_observations": 10, "populated_count": 7,
-                "populated_rate": 0.7, "confirmed_count": 7,
-                "confirmed_rate": 0.7, "pending_count": 0,
-                "pending_rate": 0.0, "unlabeled_count": 3,
-                "unlabeled_rate": 0.3,
+                "total_observations": 10,
+                "ai_populated_count": 7, "ai_populated_rate": 0.7,
+                "auto_populated_count": 0, "auto_populated_rate": 0.0,
+                "manual_populated_count": 0, "manual_populated_rate": 0.0,
+                "effective_populated_count": 7, "effective_populated_rate": 0.7,
+                "missing_count": 3, "missing_rate": 0.3,
             },
             "event_tags": {
-                "total_observations": 10, "populated_count": 5,
-                "populated_rate": 0.5, "confirmed_count": 3,
-                "confirmed_rate": 0.3, "pending_count": 0,
-                "pending_rate": 0.0, "unlabeled_count": 7,
-                "unlabeled_rate": 0.7,
+                "total_observations": 10,
+                "ai_populated_count": 5, "ai_populated_rate": 0.5,
+                "auto_populated_count": 2, "auto_populated_rate": 0.2,
+                "manual_populated_count": 0, "manual_populated_rate": 0.0,
+                "effective_populated_count": 5, "effective_populated_rate": 0.5,
+                "missing_count": 5, "missing_rate": 0.5,
             },
             "volatility_label": {
-                "total_observations": 10, "populated_count": 7,
-                "populated_rate": 0.7, "confirmed_count": 7,
-                "confirmed_rate": 0.7, "pending_count": 0,
-                "pending_rate": 0.0, "unlabeled_count": 3,
-                "unlabeled_rate": 0.3,
+                "total_observations": 10,
+                "ai_populated_count": 7, "ai_populated_rate": 0.7,
+                "auto_populated_count": 0, "auto_populated_rate": 0.0,
+                "manual_populated_count": 0, "manual_populated_rate": 0.0,
+                "effective_populated_count": 7, "effective_populated_rate": 0.7,
+                "missing_count": 3, "missing_rate": 0.3,
             },
             "intervention_risk": {
-                "total_observations": 10, "populated_count": 7,
-                "populated_rate": 0.7, "confirmed_count": 7,
-                "confirmed_rate": 0.7, "pending_count": 0,
-                "pending_rate": 0.0, "unlabeled_count": 3,
-                "unlabeled_rate": 0.3,
+                "total_observations": 10,
+                "ai_populated_count": 7, "ai_populated_rate": 0.7,
+                "auto_populated_count": 0, "auto_populated_rate": 0.0,
+                "manual_populated_count": 0, "manual_populated_rate": 0.0,
+                "effective_populated_count": 7, "effective_populated_rate": 0.7,
+                "missing_count": 3, "missing_rate": 0.3,
+            },
+            "failure_reason": {
+                "total_observations": 10,
+                "ai_populated_count": 2, "ai_populated_rate": 0.2,
+                "auto_populated_count": 0, "auto_populated_rate": 0.0,
+                "manual_populated_count": 0, "manual_populated_rate": 0.0,
+                "effective_populated_count": 2, "effective_populated_rate": 0.2,
+                "missing_count": 8, "missing_rate": 0.8,
             },
         },
-        "event_tag_slice_source_summary": {
-            "manual": 3, "auto": 2, "mixed": 0, "none": 5,
+        "annotation_source_summary": {
+            "total_observations": 10,
+            "ai_annotated_count": 7,
+            "auto_annotated_count": 2,
+            "manual_annotated_count": 0,
+            "unannotated_count": 1,
+            "model_versions": ["deterministic-v1"],
+            "prompt_versions": ["deterministic-p1"],
+            "evidence_ref_count": 3,
         },
+        "event_tag_slice_source_summary": {
+            "ai": 5, "ai_plus_auto": 2, "auto_only": 0,
+            "manual_compat": 0, "none": 3,
+        },
+        "ai_annotation_model_versions": ["deterministic-v1"],
+        "ai_annotation_prompt_versions": ["deterministic-p1"],
         "strategy_metrics": [
             {
                 "strategy_kind": "ugh",
@@ -144,7 +170,7 @@ class TestExportWeeklyReportMd:
         with open(path, encoding="utf-8") as fh:
             content = fh.read()
         assert "FX Weekly Report v2" in content
-        assert "Annotation Coverage" in content
+        assert "AI Annotation Layer" in content
         assert "Strategy Performance" in content
         assert "Provider Health Summary" in content
 
@@ -153,10 +179,9 @@ class TestBuildWeeklyReportMd:
     def test_contains_sections(self) -> None:
         report = _sample_report()
         md = build_weekly_report_md(report)
-        assert "## Annotation Coverage" in md
+        assert "## AI Annotation Layer" in md
         assert "### Strategy Performance" in md
         assert "## Provider Health Summary" in md
-        assert "## Annotation-Dependent Analysis" in md
         assert "## Core Analysis" in md
         assert "## Notes" in md
 
@@ -206,13 +231,29 @@ class TestExportAnnotationCoverageCsv:
         with open(path, newline="", encoding="utf-8") as fh:
             reader = csv.DictReader(fh)
             rows = list(reader)
-        assert len(rows) == 4
+        assert len(rows) == 5  # regime, event_tags, volatility, intervention, failure
         fields_seen = {r["field"] for r in rows}
         assert fields_seen == {
-            "regime_label", "event_tags", "volatility_label", "intervention_risk",
+            "regime_label", "event_tags", "volatility_label",
+            "intervention_risk", "failure_reason",
         }
         for col in WEEKLY_ANNOTATION_COVERAGE_FIELDNAMES:
             assert col in rows[0]
+
+
+class TestExportAiAnnotationSummaryCsv:
+    def test_writes_valid_csv(self, tmp_path: str) -> None:
+        report = _sample_report()
+        out_dir = str(tmp_path)
+        path = export_weekly_ai_annotation_summary_csv(report, out_dir)
+        assert os.path.isfile(path)
+        with open(path, newline="", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh)
+            rows = list(reader)
+        metrics = {r["metric"] for r in rows}
+        assert "total_observations" in metrics
+        assert "ai_annotated_count" in metrics
+        assert "model_version" in metrics
 
 
 class TestExportWeeklyReportArtifacts:
@@ -226,6 +267,7 @@ class TestExportWeeklyReportArtifacts:
         assert "weekly_strategy_metrics_csv" in paths
         assert "weekly_slice_metrics_csv" in paths
         assert "weekly_annotation_coverage_csv" in paths
+        assert "weekly_ai_annotation_summary_csv" in paths
 
         # Verify dated directory
         dated_dir = os.path.join(tmpdir, "analytics", "weekly", "20260320")

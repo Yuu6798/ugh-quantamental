@@ -141,16 +141,35 @@ def build_weekly_report_md(report: dict[str, Any]) -> str:
             )
         lines.append("")
 
-    # --- Annotation Coverage ---
-    cov = report.get("annotation_coverage", {})
-    lines.append("## Annotation Coverage")
+    # --- AI Annotation Layer ---
+    src_summary = report.get("annotation_source_summary", {})
+    ai_count = src_summary.get("ai_annotated_count", 0)
+    auto_count = src_summary.get("auto_annotated_count", 0)
+    manual_count = src_summary.get("manual_annotated_count", 0)
+    unannotated = src_summary.get("unannotated_count", 0)
+
+    lines.append("## AI Annotation Layer")
     lines.append("")
-    lines.append(f"- **Total observations**: {cov.get('total_observations', 0)}")
-    lines.append(f"- **Confirmed**: {cov.get('confirmed_annotation_count', 0)}")
-    lines.append(f"- **Pending**: {cov.get('pending_annotation_count', 0)}")
-    lines.append(f"- **Unlabeled**: {cov.get('unlabeled_count', 0)}")
-    rate = cov.get("annotation_coverage_rate", 0)
-    lines.append(f"- **Coverage rate**: {_fmt_pct(rate)}")
+    lines.append(f"- **AI annotated**: {ai_count}")
+    lines.append(f"- **Auto annotated**: {auto_count}")
+    lines.append(f"- **Manual compat**: {manual_count}")
+    lines.append(f"- **Unannotated**: {unannotated}")
+
+    model_vs = report.get("ai_annotation_model_versions", [])
+    if model_vs:
+        lines.append(f"- **Model versions**: {', '.join(model_vs)}")
+    prompt_vs = report.get("ai_annotation_prompt_versions", [])
+    if prompt_vs:
+        lines.append(f"- **Prompt versions**: {', '.join(prompt_vs)}")
+
+    ev_refs = src_summary.get("evidence_ref_count", 0)
+    if ev_refs:
+        lines.append(f"- **Evidence references**: {ev_refs}")
+
+    annotated_ready = report.get("annotated_analysis_ready", False)
+    lines.append(
+        f"- **Slices interpretable**: {'Yes' if annotated_ready else 'No'}"
+    )
     lines.append("")
 
     # Field-level coverage table
@@ -158,18 +177,22 @@ def build_weekly_report_md(report: dict[str, Any]) -> str:
     if field_cov:
         lines.append("### Field-Level Coverage")
         lines.append("")
-        lines.append("| Field | Populated | Rate | Confirmed | Pending | Unlabeled |")
+        lines.append(
+            "| Field | AI | Auto | Manual | Effective | Missing |"
+        )
         lines.append("|---|---|---|---|---|---|")
-        for field_name in ("regime_label", "event_tags", "volatility_label",
-                           "intervention_risk"):
+        for field_name in (
+            "regime_label", "event_tags", "volatility_label",
+            "intervention_risk", "failure_reason",
+        ):
             fc = field_cov.get(field_name, {})
             lines.append(
                 f"| {field_name} "
-                f"| {fc.get('populated_count', 0)} "
-                f"| {_fmt_pct(fc.get('populated_rate', 0))} "
-                f"| {fc.get('confirmed_count', 0)} "
-                f"| {fc.get('pending_count', 0)} "
-                f"| {fc.get('unlabeled_count', 0)} |"
+                f"| {fc.get('ai_populated_count', 0)} "
+                f"| {fc.get('auto_populated_count', 0)} "
+                f"| {fc.get('manual_populated_count', 0)} "
+                f"| {fc.get('effective_populated_count', 0)} "
+                f"| {fc.get('missing_count', 0)} |"
             )
         lines.append("")
 
@@ -265,11 +288,10 @@ def build_weekly_report_md(report: dict[str, Any]) -> str:
     lines.append("- No forecast logic was re-executed.")
     lines.append("- Core analysis (strategy performance) is always available.")
     lines.append(
-        "- Event-tag slices use effective_event_tags "
-        "(auto-derived + manual when available)."
+        "- AI annotations are the primary source for slice analysis."
     )
     lines.append(
-        "- Regime/volatility/intervention slices require confirmed annotations."
+        "- Manual annotations are optional compatibility inputs."
     )
     lines.append("")
 
@@ -331,14 +353,16 @@ def export_weekly_slice_metrics_csv(
 WEEKLY_ANNOTATION_COVERAGE_FIELDNAMES: tuple[str, ...] = (
     "field",
     "total_observations",
-    "populated_count",
-    "populated_rate",
-    "confirmed_count",
-    "confirmed_rate",
-    "pending_count",
-    "pending_rate",
-    "unlabeled_count",
-    "unlabeled_rate",
+    "ai_populated_count",
+    "ai_populated_rate",
+    "auto_populated_count",
+    "auto_populated_rate",
+    "manual_populated_count",
+    "manual_populated_rate",
+    "effective_populated_count",
+    "effective_populated_rate",
+    "missing_count",
+    "missing_rate",
 )
 
 
@@ -349,14 +373,44 @@ def export_weekly_annotation_coverage_csv(
     """Write ``weekly_annotation_coverage.csv`` and return the absolute path."""
     field_cov = report.get("annotation_field_coverage", {})
     rows: list[dict[str, Any]] = []
-    for field_name in ("regime_label", "event_tags", "volatility_label",
-                       "intervention_risk"):
+    for field_name in (
+        "regime_label", "event_tags", "volatility_label",
+        "intervention_risk", "failure_reason",
+    ):
         fc = field_cov.get(field_name, {})
         row = {"field": field_name}
         row.update(fc)
         rows.append(row)
     path = os.path.join(output_dir, "weekly_annotation_coverage.csv")
     return _write_csv(path, rows, WEEKLY_ANNOTATION_COVERAGE_FIELDNAMES)
+
+
+WEEKLY_AI_ANNOTATION_SUMMARY_FIELDNAMES: tuple[str, ...] = (
+    "metric",
+    "value",
+)
+
+
+def export_weekly_ai_annotation_summary_csv(
+    report: dict[str, Any],
+    output_dir: str,
+) -> str:
+    """Write ``weekly_ai_annotation_summary.csv`` and return the absolute path."""
+    src = report.get("annotation_source_summary", {})
+    rows: list[dict[str, Any]] = [
+        {"metric": "total_observations", "value": src.get("total_observations", 0)},
+        {"metric": "ai_annotated_count", "value": src.get("ai_annotated_count", 0)},
+        {"metric": "auto_annotated_count", "value": src.get("auto_annotated_count", 0)},
+        {"metric": "manual_annotated_count", "value": src.get("manual_annotated_count", 0)},
+        {"metric": "unannotated_count", "value": src.get("unannotated_count", 0)},
+        {"metric": "evidence_ref_count", "value": src.get("evidence_ref_count", 0)},
+    ]
+    for mv in report.get("ai_annotation_model_versions", []):
+        rows.append({"metric": "model_version", "value": mv})
+    for pv in report.get("ai_annotation_prompt_versions", []):
+        rows.append({"metric": "prompt_version", "value": pv})
+    path = os.path.join(output_dir, "weekly_ai_annotation_summary.csv")
+    return _write_csv(path, rows, WEEKLY_AI_ANNOTATION_SUMMARY_FIELDNAMES)
 
 
 # ---------------------------------------------------------------------------
@@ -398,6 +452,9 @@ def export_weekly_report_artifacts(
     paths["weekly_annotation_coverage_csv"] = export_weekly_annotation_coverage_csv(
         report, dated_dir,
     )
+    paths["weekly_ai_annotation_summary_csv"] = export_weekly_ai_annotation_summary_csv(
+        report, dated_dir,
+    )
 
     # Update report with artifact paths
     report["generated_artifact_paths"] = list(paths.values())
@@ -411,6 +468,7 @@ def export_weekly_report_artifacts(
         "weekly_report.json", "weekly_report.md",
         "weekly_strategy_metrics.csv", "weekly_slice_metrics.csv",
         "weekly_annotation_coverage.csv",
+        "weekly_ai_annotation_summary.csv",
     ]:
         src = os.path.join(dated_dir, filename)
         dst = os.path.join(latest_dir, filename)
