@@ -192,36 +192,44 @@ def rebuild_weekly_report(
 def _collect_eval_rows_for_ai(history_dir: str) -> list[dict[str, str]]:
     """Collect evaluated forecast rows from history for the AI annotation adapter.
 
-    Returns flat dicts with forecast_id, as_of_jst, strategy_kind, and
-    evaluation fields needed by the deterministic adapter.
+    Uses cross-batch join: evaluations live in the *next* day's batch,
+    so we build a global forecast_id → evaluation index first, then
+    iterate over forecasts and merge matched evaluations.
     """
     import csv as _csv
 
+    # Pass 1: global evaluation index across all batches
+    global_evals: dict[str, dict[str, str]] = {}
+    for date_dir in sorted(os.listdir(history_dir)):
+        date_path = os.path.join(history_dir, date_dir)
+        if not os.path.isdir(date_path):
+            continue
+        for batch_dir in sorted(os.listdir(date_path)):
+            eval_csv = os.path.join(date_path, batch_dir, "evaluation.csv")
+            if not os.path.isfile(eval_csv):
+                continue
+            with open(eval_csv, newline="", encoding="utf-8") as fh:
+                for r in _csv.DictReader(fh):
+                    fid = r.get("forecast_id", "")
+                    if fid:
+                        global_evals[fid] = r
+
+    # Pass 2: iterate forecasts, merge with global evaluation index
     rows: list[dict[str, str]] = []
     for date_dir in sorted(os.listdir(history_dir)):
         date_path = os.path.join(history_dir, date_dir)
         if not os.path.isdir(date_path):
             continue
         for batch_dir in sorted(os.listdir(date_path)):
-            batch_path = os.path.join(date_path, batch_dir)
-            eval_csv = os.path.join(batch_path, "evaluation.csv")
-            forecast_csv = os.path.join(batch_path, "forecast.csv")
-            if not os.path.isfile(eval_csv) or not os.path.isfile(forecast_csv):
+            forecast_csv = os.path.join(date_path, batch_dir, "forecast.csv")
+            if not os.path.isfile(forecast_csv):
                 continue
-            # Read evaluations keyed by forecast_id
-            with open(eval_csv, newline="", encoding="utf-8") as fh:
-                evals = {
-                    r["forecast_id"]: r
-                    for r in _csv.DictReader(fh)
-                    if r.get("forecast_id")
-                }
-            # Read forecasts and merge with their evaluations
             with open(forecast_csv, newline="", encoding="utf-8") as fh:
                 for fc in _csv.DictReader(fh):
                     fid = fc.get("forecast_id", "")
                     if not fid:
                         continue
-                    ev = evals.get(fid)
+                    ev = global_evals.get(fid)
                     if not ev:
                         continue
                     merged = dict(fc)
