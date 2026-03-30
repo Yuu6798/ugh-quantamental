@@ -277,6 +277,84 @@ def build_annotation_coverage(
     }
 
 
+def build_annotation_field_coverage(
+    observations: list[dict[str, str]],
+) -> dict[str, dict[str, Any]]:
+    """Compute per-field annotation coverage for annotation-dependent fields.
+
+    Returns a dict keyed by field name, each containing coverage metrics.
+    """
+    fields = ("regime_label", "event_tags", "volatility_label", "intervention_risk")
+    total = len(observations)
+    result: dict[str, dict[str, Any]] = {}
+
+    for field in fields:
+        if total == 0:
+            result[field] = {
+                "total_observations": 0,
+                "populated_count": 0,
+                "populated_rate": 0.0,
+                "confirmed_count": 0,
+                "confirmed_rate": 0.0,
+                "pending_count": 0,
+                "pending_rate": 0.0,
+                "unlabeled_count": 0,
+                "unlabeled_rate": 0.0,
+            }
+            continue
+
+        # For event_tags, prefer effective_event_tags but fall back to
+        # event_tags for backward compatibility with pre-provenance CSVs.
+        if field == "event_tags":
+            effective_field = (
+                "effective_event_tags"
+                if any(r.get("effective_event_tags") is not None for r in observations)
+                else "event_tags"
+            )
+        else:
+            effective_field = field
+        populated = sum(1 for r in observations if r.get(effective_field, "").strip())
+        confirmed_pop = sum(
+            1 for r in observations
+            if r.get("annotation_status", "").strip().lower() == "confirmed"
+            and r.get(effective_field, "").strip()
+        )
+        pending_pop = sum(
+            1 for r in observations
+            if r.get("annotation_status", "").strip().lower() == "pending"
+            and r.get(effective_field, "").strip()
+        )
+        unlabeled_pop = total - confirmed_pop - pending_pop
+
+        result[field] = {
+            "total_observations": total,
+            "populated_count": populated,
+            "populated_rate": round(populated / total, 4),
+            "confirmed_count": confirmed_pop,
+            "confirmed_rate": round(confirmed_pop / total, 4),
+            "pending_count": pending_pop,
+            "pending_rate": round(pending_pop / total, 4),
+            "unlabeled_count": unlabeled_pop,
+            "unlabeled_rate": round(unlabeled_pop / total, 4),
+        }
+
+    return result
+
+
+def build_event_tag_source_summary(
+    observations: list[dict[str, str]],
+) -> dict[str, int]:
+    """Count observations by event_tag_source (manual/auto/mixed/none)."""
+    counts: dict[str, int] = {"manual": 0, "auto": 0, "mixed": 0, "none": 0}
+    for row in observations:
+        source = row.get("event_tag_source", "none").strip().lower()
+        if source in counts:
+            counts[source] += 1
+        else:
+            counts["none"] += 1
+    return counts
+
+
 def build_strategy_metrics(
     observations: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
@@ -306,8 +384,11 @@ def build_slice_metrics(
     - strategy_kind x intervention_risk
     - strategy_kind x event_tag (expanded)
 
-    Only confirmed annotations are used for labeled slices.
-    Non-confirmed rows go into an 'unlabeled' slice.
+    When confirmed annotations exist, they are used for labeled slices and
+    non-confirmed rows go into an 'unlabeled' bucket.  When no confirmed
+    annotations exist at all, all observations are sliced directly by their
+    AI-suggested or empty labels so that the weekly report still provides
+    useful per-strategy metrics without manual annotation.
     """
     result: list[dict[str, Any]] = []
 
@@ -315,46 +396,69 @@ def build_slice_metrics(
         r for r in observations
         if r.get("annotation_status", "").strip().lower() == "confirmed"
     ]
-    non_confirmed = [
-        r for r in observations
-        if r.get("annotation_status", "").strip().lower() != "confirmed"
-    ]
+    has_confirmed = len(confirmed) > 0
 
-    # Dimension slices for confirmed observations
+    # Dimension slices
     dimensions = [
         ("regime_label", "regime_label"),
         ("volatility_label", "volatility_label"),
         ("intervention_risk", "intervention_risk"),
     ]
 
-    for dim_name, field in dimensions:
-        groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
-        for row in confirmed:
-            sk = row.get("strategy_kind", "")
-            label = row.get(field, "") or "unknown"
-            groups[(sk, label)].append(row)
+    if has_confirmed:
+        # Annotation-aware mode: confirmed rows use their labels,
+        # non-confirmed rows go into 'unlabeled' bucket.
+        non_confirmed = [
+            r for r in observations
+            if r.get("annotation_status", "").strip().lower() != "confirmed"
+        ]
 
-        # Add unlabeled group per strategy
-        unlabeled_by_sk: dict[str, list[dict[str, str]]] = defaultdict(list)
-        for row in non_confirmed:
-            sk = row.get("strategy_kind", "")
-            unlabeled_by_sk[sk].append(row)
-        for sk, rows in unlabeled_by_sk.items():
-            groups[(sk, "unlabeled")].extend(rows)
+        for dim_name, field in dimensions:
+            groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
+            for row in confirmed:
+                sk = row.get("strategy_kind", "")
+                label = row.get(field, "") or "unknown"
+                groups[(sk, label)].append(row)
 
-        for (sk, label), rows in sorted(groups.items()):
-            if not rows:
-                continue
-            metrics = _compute_metrics_for_rows(rows)
-            metrics["slice_dimension"] = dim_name
-            metrics["strategy_kind"] = sk
-            metrics["label"] = label
-            result.append(metrics)
+            unlabeled_by_sk: dict[str, list[dict[str, str]]] = defaultdict(list)
+            for row in non_confirmed:
+                sk = row.get("strategy_kind", "")
+                unlabeled_by_sk[sk].append(row)
+            for sk, rows in unlabeled_by_sk.items():
+                groups[(sk, "unlabeled")].extend(rows)
 
-    # Event tag slice (expanded, confirmed only)
+            for (sk, label), rows in sorted(groups.items()):
+                if not rows:
+                    continue
+                metrics = _compute_metrics_for_rows(rows)
+                metrics["slice_dimension"] = dim_name
+                metrics["strategy_kind"] = sk
+                metrics["label"] = label
+                result.append(metrics)
+    else:
+        # No confirmed annotations: slice all observations by strategy_kind
+        # using a single "all" label per dimension so that the weekly report
+        # still shows meaningful aggregate metrics.
+        for dim_name, _field in dimensions:
+            groups_all: dict[str, list[dict[str, str]]] = defaultdict(list)
+            for row in observations:
+                sk = row.get("strategy_kind", "")
+                groups_all[sk].append(row)
+            for sk in sorted(groups_all.keys()):
+                rows = groups_all[sk]
+                metrics = _compute_metrics_for_rows(rows)
+                metrics["slice_dimension"] = dim_name
+                metrics["strategy_kind"] = sk
+                metrics["label"] = "all"
+                result.append(metrics)
+
+    # Event-tag slices use effective_event_tags (available from auto-derivation
+    # even when manual annotations are absent).  When confirmed annotations
+    # exist, only confirmed rows are used; otherwise all observations.
+    tag_source_rows = confirmed if has_confirmed else observations
     tag_groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
-    for row in confirmed:
-        tags_str = row.get("event_tags", "")
+    for row in tag_source_rows:
+        tags_str = row.get("effective_event_tags", "") or row.get("event_tags", "")
         if not tags_str:
             continue
         sk = row.get("strategy_kind", "")
@@ -478,9 +582,14 @@ def run_weekly_report_v2(
 
     # Build report sections
     coverage = build_annotation_coverage(observations)
+    field_coverage = build_annotation_field_coverage(observations)
     strategy_metrics = build_strategy_metrics(observations)
     slice_metrics = build_slice_metrics(observations)
     provider_health = build_provider_health_summary(week_health_rows)
+    et_source_summary = build_event_tag_source_summary(observations)
+
+    obs_count = len(observations)
+    confirmed_count = coverage.get("confirmed_annotation_count", 0)
 
     # Collect generated artifact paths placeholder (filled by export layer)
     return {
@@ -489,10 +598,14 @@ def run_weekly_report_v2(
         "report_date_jst": report_date_jst.isoformat(),
         "week_window": {"start": week_start, "end": week_end},
         "business_day_count": business_day_count,
+        "core_analysis_ready": obs_count > 0,
+        "annotated_analysis_ready": confirmed_count > 0,
         "annotation_coverage": coverage,
+        "annotation_field_coverage": field_coverage,
+        "event_tag_slice_source_summary": et_source_summary,
         "strategy_metrics": strategy_metrics,
         "slice_metrics": slice_metrics,
         "provider_health_summary": provider_health,
-        "observation_count": len(observations),
+        "observation_count": obs_count,
         "generated_artifact_paths": [],
     }
