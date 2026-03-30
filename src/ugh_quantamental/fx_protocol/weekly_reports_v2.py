@@ -331,26 +331,19 @@ def build_annotation_field_coverage(
         else:
             auto_pop = 0
 
-        # Manual-populated: check the manual-specific column for the field
-        manual_col_map = {
-            "regime_label": "regime_label",
-            "event_tags": "manual_event_tags",
-            "volatility_label": "volatility_label",
-            "intervention_risk": "intervention_risk",
-            "failure_reason": "",
-        }
-        manual_col = manual_col_map.get(field, "")
-        if manual_col and field != "event_tags":
-            # For non-tag fields, manual source is when annotation_source is
-            # manual_compat and the field is populated
-            manual_pop = sum(
-                1 for r in observations
-                if r.get("annotation_source", "").strip() == "manual_compat"
-                and r.get(eff_col, "").strip()
-            )
-        elif field == "event_tags":
+        # Manual-populated: field-level detection.
+        # For non-tag fields: effective is populated but AI column is empty
+        # → the value came from manual fallback regardless of row-level source.
+        # For event_tags: directly check manual_event_tags column.
+        if field == "event_tags":
             manual_pop = sum(
                 1 for r in observations if r.get("manual_event_tags", "").strip()
+            )
+        elif ai_col:
+            manual_pop = sum(
+                1 for r in observations
+                if not r.get(ai_col, "").strip()
+                and r.get(eff_col, "").strip()
             )
         else:
             manual_pop = 0
