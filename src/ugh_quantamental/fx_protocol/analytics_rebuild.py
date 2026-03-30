@@ -192,29 +192,42 @@ def rebuild_weekly_report(
 def _collect_eval_rows_for_ai(history_dir: str) -> list[dict[str, str]]:
     """Collect evaluated forecast rows from history for the AI annotation adapter.
 
-    Uses cross-batch join: evaluations live in the *next* day's batch,
-    so we build a global forecast_id → evaluation index first, then
-    iterate over forecasts and merge matched evaluations.
+    Uses cross-batch join: evaluations and outcomes live in the *next* day's
+    batch, so we build global forecast_id → evaluation and forecast_id →
+    outcome indexes first, then iterate over forecasts and merge all three.
+    This ensures the adapter receives outcome-derived fields
+    (realized_close_change_bp, event_tags) needed for accurate label derivation.
     """
     import csv as _csv
 
-    # Pass 1: global evaluation index across all batches
+    # Pass 1: global evaluation and outcome indexes across all batches
     global_evals: dict[str, dict[str, str]] = {}
+    global_outcomes: dict[str, dict[str, str]] = {}
     for date_dir in sorted(os.listdir(history_dir)):
         date_path = os.path.join(history_dir, date_dir)
         if not os.path.isdir(date_path):
             continue
         for batch_dir in sorted(os.listdir(date_path)):
-            eval_csv = os.path.join(date_path, batch_dir, "evaluation.csv")
-            if not os.path.isfile(eval_csv):
-                continue
-            with open(eval_csv, newline="", encoding="utf-8") as fh:
-                for r in _csv.DictReader(fh):
-                    fid = r.get("forecast_id", "")
-                    if fid:
-                        global_evals[fid] = r
+            batch_path = os.path.join(date_path, batch_dir)
+            eval_csv = os.path.join(batch_path, "evaluation.csv")
+            outcome_csv = os.path.join(batch_path, "outcome.csv")
 
-    # Pass 2: iterate forecasts, merge with global evaluation index
+            if os.path.isfile(eval_csv):
+                outcome_row: dict[str, str] | None = None
+                if os.path.isfile(outcome_csv):
+                    with open(outcome_csv, newline="", encoding="utf-8") as fh:
+                        rows = list(_csv.DictReader(fh))
+                        if rows:
+                            outcome_row = rows[0]
+                with open(eval_csv, newline="", encoding="utf-8") as fh:
+                    for r in _csv.DictReader(fh):
+                        fid = r.get("forecast_id", "")
+                        if fid:
+                            global_evals[fid] = r
+                            if outcome_row is not None:
+                                global_outcomes[fid] = outcome_row
+
+    # Pass 2: iterate forecasts, merge with global evaluation + outcome indexes
     rows: list[dict[str, str]] = []
     for date_dir in sorted(os.listdir(history_dir)):
         date_path = os.path.join(history_dir, date_dir)
@@ -234,5 +247,17 @@ def _collect_eval_rows_for_ai(history_dir: str) -> list[dict[str, str]]:
                         continue
                     merged = dict(fc)
                     merged.update(ev)
+                    oc = global_outcomes.get(fid)
+                    if oc:
+                        merged["realized_close_change_bp"] = oc.get(
+                            "realized_close_change_bp", ""
+                        )
+                        merged["realized_direction"] = oc.get(
+                            "realized_direction", ""
+                        )
+                        # Carry outcome event_tags for AI adapter tag derivation
+                        oc_tags = oc.get("event_tags", "")
+                        if oc_tags:
+                            merged["effective_event_tags"] = oc_tags
                     rows.append(merged)
     return rows
