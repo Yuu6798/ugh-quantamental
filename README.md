@@ -346,10 +346,20 @@ The FX protocol runs on two separate GitHub Actions workflows:
 
 | Action | Schedule | Purpose |
 |---|---|---|
-| `fx-daily-protocol.yml` | Mon–Fri 08:00/12:00/16:00 JST | Data collection: fetch market data → forecast → outcome → evaluation → CSV |
+| `fx-daily-protocol.yml` | Mon–Fri 14:00/16:00/20:00 JST | Data collection: fetch market data → forecast → outcome → evaluation → CSV |
 | `fx-analysis-pipeline.yml` | Weekly Mon 10:00 JST / Monthly 1st 10:30 JST | Analysis: weekly aggregation → monthly review → governance outputs |
 
 ### Action 1: Daily data collection
+
+**Schedule (JST, Mon–Fri):**
+
+| Run | Time (JST) | Time (UTC) | Role |
+|---|---|---|---|
+| Primary | 14:00 | 05:00 | First attempt — Alpha Vantage daily bars are typically available by this time |
+| Retry 1 | 16:00 | 07:00 | Idempotent retry if primary missed data |
+| Retry 2 | 20:00 | 11:00 | Final retry — fails hard (`FX_LAST_RETRY=1`) if data still unavailable |
+
+All runs are idempotent: if the forecast batch for the day already exists, subsequent runs are no-ops.
 
 1. The workflow checks out the code branch and a separate `fx-daily-data` branch
    (created automatically on first run).
