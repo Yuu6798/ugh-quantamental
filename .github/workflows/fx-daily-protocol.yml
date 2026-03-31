@@ -2,13 +2,17 @@ name: FX Daily Protocol
 
 on:
   schedule:
-    # Primary: 08:00 JST = 23:00 UTC previous day (Sun-Thu).
-    - cron: '0 23 * * 0-4'
-    # Retry 1: 12:00 JST = 03:00 UTC same day (Mon-Fri).
-    # If the 08:00 run succeeded, this is a no-op (idempotent).
-    - cron: '0 3 * * 1-5'
-    # Retry 2: 16:00 JST = 07:00 UTC same day (Mon-Fri).
+    # Primary: 14:00 JST = 05:00 UTC (Mon-Fri).
+    # Alpha Vantage typically publishes daily bars ~14:00 JST,
+    # so this timing avoids the systematic fallback that occurred
+    # with the previous 08:00 JST schedule.
+    - cron: '0 5 * * 1-5'
+    # Retry 1: 16:00 JST = 07:00 UTC (Mon-Fri).
+    # If the 14:00 run succeeded, this is a no-op (idempotent).
     - cron: '0 7 * * 1-5'
+    # Retry 2 (final): 20:00 JST = 11:00 UTC (Mon-Fri).
+    # FX_LAST_RETRY=1 — fail hard if data still unavailable.
+    - cron: '0 11 * * 1-5'
   workflow_dispatch:
 
 permissions:
@@ -26,9 +30,9 @@ jobs:
       # Set ALPHAVANTAGE_API_KEY as a repository secret (free key from alphavantage.co).
       ALPHAVANTAGE_API_KEY: ${{ secrets.ALPHAVANTAGE_API_KEY }}
       FX_DATA_URL: ${{ secrets.FX_DATA_URL }}
-      # Last retry (16:00 JST / 07:00 UTC) and manual dispatch: fail hard on
+      # Last retry (20:00 JST / 11:00 UTC) and manual dispatch: fail hard on
       # data-fetch errors so CI goes red and the gap is visible.
-      FX_LAST_RETRY: ${{ (github.event.schedule == '0 7 * * 1-5' || github.event_name == 'workflow_dispatch') && '1' || '0' }}
+      FX_LAST_RETRY: ${{ (github.event.schedule == '0 11 * * 1-5' || github.event_name == 'workflow_dispatch') && '1' || '0' }}
       FX_DATA_BRANCH: ${{ vars.FX_DATA_BRANCH || 'fx-daily-data' }}
       FX_SQLITE_FILENAME: ${{ vars.FX_SQLITE_FILENAME || 'fx_protocol.db' }}
       FX_THEORY_VERSION: ${{ vars.FX_THEORY_VERSION || 'v1' }}
