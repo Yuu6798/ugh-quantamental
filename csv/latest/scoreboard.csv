@@ -1,5 +1,5 @@
 strategy_kind,observation_count,direction_hit_count,direction_hit_rate,range_hit_count,range_hit_rate,state_proxy_hit_count,state_proxy_hit_rate,mean_close_error_bp,median_close_error_bp,mean_magnitude_error_bp,last_updated_utc
-baseline_prev_day_direction,8,4,0.5,,,,,78.27,52.28,34.85,2026-04-01T08:15:48Z
-baseline_random_walk,8,0,0.0,,,,,43.43,44.62,43.43,2026-04-01T08:15:48Z
-baseline_simple_technical,8,5,0.625,,,,,44.88,38.98,22.74,2026-04-01T08:15:48Z
-ugh,8,5,0.625,3,0.375,8,1.0,43.4,44.38,43.18,2026-04-01T08:15:48Z
+baseline_prev_day_direction,8,4,0.5,,,,,78.27,52.28,34.85,2026-04-01T11:41:08Z
+baseline_random_walk,8,0,0.0,,,,,43.43,44.62,43.43,2026-04-01T11:41:08Z
+baseline_simple_technical,8,5,0.625,,,,,44.88,38.98,22.74,2026-04-01T11:41:08Z
+ugh,8,5,0.625,3,0.375,8,1.0,43.4,44.38,43.18,2026-04-01T11:41:08Z
