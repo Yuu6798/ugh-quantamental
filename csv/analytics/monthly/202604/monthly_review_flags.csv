@@ -1,0 +1,3 @@
+flag,reason
+inspect_state_mapping,State proxy hit rate (100.0%) is high but magnitude error (40.3 bp) exceeds threshold (30.0 bp). State-to-magnitude mapping may need review.
+missing_windows,Missing window rate (65.0%) exceeds threshold (25%). Missing: 13/20.

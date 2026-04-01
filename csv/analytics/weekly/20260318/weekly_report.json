@@ -1,0 +1,125 @@
+{
+  "report_version": "v2",
+  "generated_at_utc": "2026-04-01T04:28:10Z",
+  "report_date_jst": "2026-03-18T08:00:00+09:00",
+  "week_window": {
+    "start": "20260311",
+    "end": "20260317"
+  },
+  "business_day_count": 5,
+  "core_analysis_ready": false,
+  "annotated_analysis_ready": false,
+  "annotation_coverage": {
+    "total_observations": 0,
+    "confirmed_annotation_count": 0,
+    "pending_annotation_count": 0,
+    "unlabeled_count": 0,
+    "annotation_coverage_rate": 0.0
+  },
+  "annotation_field_coverage": {
+    "regime_label": {
+      "total_observations": 0,
+      "ai_populated_count": 0,
+      "ai_populated_rate": 0.0,
+      "auto_populated_count": 0,
+      "auto_populated_rate": 0.0,
+      "manual_populated_count": 0,
+      "manual_populated_rate": 0.0,
+      "effective_populated_count": 0,
+      "effective_populated_rate": 0.0,
+      "missing_count": 0,
+      "missing_rate": 0.0
+    },
+    "event_tags": {
+      "total_observations": 0,
+      "ai_populated_count": 0,
+      "ai_populated_rate": 0.0,
+      "auto_populated_count": 0,
+      "auto_populated_rate": 0.0,
+      "manual_populated_count": 0,
+      "manual_populated_rate": 0.0,
+      "effective_populated_count": 0,
+      "effective_populated_rate": 0.0,
+      "missing_count": 0,
+      "missing_rate": 0.0
+    },
+    "volatility_label": {
+      "total_observations": 0,
+      "ai_populated_count": 0,
+      "ai_populated_rate": 0.0,
+      "auto_populated_count": 0,
+      "auto_populated_rate": 0.0,
+      "manual_populated_count": 0,
+      "manual_populated_rate": 0.0,
+      "effective_populated_count": 0,
+      "effective_populated_rate": 0.0,
+      "missing_count": 0,
+      "missing_rate": 0.0
+    },
+    "intervention_risk": {
+      "total_observations": 0,
+      "ai_populated_count": 0,
+      "ai_populated_rate": 0.0,
+      "auto_populated_count": 0,
+      "auto_populated_rate": 0.0,
+      "manual_populated_count": 0,
+      "manual_populated_rate": 0.0,
+      "effective_populated_count": 0,
+      "effective_populated_rate": 0.0,
+      "missing_count": 0,
+      "missing_rate": 0.0
+    },
+    "failure_reason": {
+      "total_observations": 0,
+      "ai_populated_count": 0,
+      "ai_populated_rate": 0.0,
+      "auto_populated_count": 0,
+      "auto_populated_rate": 0.0,
+      "manual_populated_count": 0,
+      "manual_populated_rate": 0.0,
+      "effective_populated_count": 0,
+      "effective_populated_rate": 0.0,
+      "missing_count": 0,
+      "missing_rate": 0.0
+    }
+  },
+  "annotation_source_summary": {
+    "total_observations": 0,
+    "ai_annotated_count": 0,
+    "auto_annotated_count": 0,
+    "manual_annotated_count": 0,
+    "unannotated_count": 0,
+    "model_versions": [],
+    "prompt_versions": [],
+    "evidence_ref_count": 0
+  },
+  "event_tag_slice_source_summary": {
+    "ai": 0,
+    "ai_plus_auto": 0,
+    "auto_only": 0,
+    "manual_compat": 0,
+    "none": 0
+  },
+  "ai_annotation_model_versions": [],
+  "ai_annotation_prompt_versions": [],
+  "strategy_metrics": [],
+  "slice_metrics": [],
+  "provider_health_summary": {
+    "total_runs": 0,
+    "providers": {},
+    "fallback_adjustment_count": 0,
+    "lag_count": 0,
+    "success_count": 0,
+    "failed_count": 0,
+    "skipped_count": 0
+  },
+  "observation_count": 0,
+  "generated_artifact_paths": [
+    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20260318/weekly_report.json",
+    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20260318/weekly_report.md",
+    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20260318/weekly_strategy_metrics.csv",
+    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20260318/weekly_slice_metrics.csv",
+    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20260318/weekly_annotation_coverage.csv",
+    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20260318/weekly_ai_annotation_summary.csv"
+  ]
+}

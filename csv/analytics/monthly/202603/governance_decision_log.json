@@ -1,0 +1,92 @@
+{
+  "review_month": "202603",
+  "overall_judgment": "data_provider_remediation",
+  "key_flags": [
+    "inspect_state_mapping",
+    "missing_windows"
+  ],
+  "baseline_comparison_summary": [
+    {
+      "baseline": "baseline_random_walk",
+      "direction_delta": -0.7143,
+      "close_error_delta": 0.11,
+      "magnitude_error_delta": 0.24
+    },
+    {
+      "baseline": "baseline_prev_day_direction",
+      "direction_delta": -0.2857,
+      "close_error_delta": 41.44,
+      "magnitude_error_delta": -8.05
+    },
+    {
+      "baseline": "baseline_simple_technical",
+      "direction_delta": 0.0,
+      "close_error_delta": -3.57,
+      "magnitude_error_delta": -18.1
+    }
+  ],
+  "weekly_trends": [
+    {
+      "week_start": "20260304",
+      "week_end": "20260310",
+      "observation_count": 0,
+      "ugh_direction_hit_rate": "",
+      "ugh_mean_close_error_bp": "",
+      "provider_success_count": 0,
+      "provider_failed_count": 0,
+      "provider_fallback_count": 0,
+      "annotation_coverage_rate": 0.0
+    },
+    {
+      "week_start": "20260311",
+      "week_end": "20260317",
+      "observation_count": 0,
+      "ugh_direction_hit_rate": "",
+      "ugh_mean_close_error_bp": "",
+      "provider_success_count": 0,
+      "provider_failed_count": 0,
+      "provider_fallback_count": 0,
+      "annotation_coverage_rate": 0.0
+    },
+    {
+      "week_start": "20260318",
+      "week_end": "20260324",
+      "observation_count": 12,
+      "ugh_direction_hit_rate": "0.6667",
+      "ugh_mean_close_error_bp": "54.27",
+      "provider_success_count": 0,
+      "provider_failed_count": 0,
+      "provider_fallback_count": 0,
+      "annotation_coverage_rate": 1.0
+    },
+    {
+      "week_start": "20260323",
+      "week_end": "20260327",
+      "observation_count": 20,
+      "ugh_direction_hit_rate": "0.8",
+      "ugh_mean_close_error_bp": "35.18",
+      "provider_success_count": 2,
+      "provider_failed_count": 0,
+      "provider_fallback_count": 0,
+      "annotation_coverage_rate": 1.0
+    },
+    {
+      "week_start": "20260325",
+      "week_end": "20260331",
+      "observation_count": 16,
+      "ugh_direction_hit_rate": "0.75",
+      "ugh_mean_close_error_bp": "30.02",
+      "provider_success_count": 4,
+      "provider_failed_count": 0,
+      "provider_fallback_count": 1,
+      "annotation_coverage_rate": 1.0
+    }
+  ],
+  "logic_audit_candidates": [
+    "state-to-magnitude mapping"
+  ],
+  "provider_annotation_concerns": [
+    "Missing window rate (65.0%) exceeds threshold (25%). Missing: 13/20."
+  ],
+  "final_recommendation": "Review state-to-magnitude mapping — state hits are good but errors high. Investigate missing protocol windows."
+}

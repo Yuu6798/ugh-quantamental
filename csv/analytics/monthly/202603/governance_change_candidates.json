@@ -1,0 +1,20 @@
+[
+  {
+    "candidate_id": "CC-001",
+    "category": "logic_audit",
+    "rationale": "State proxy hit rate (100.0%) is high but magnitude error (40.3 bp) exceeds threshold (30.0 bp). State-to-magnitude mapping may need review.",
+    "expected_benefit": "Better magnitude prediction when state proxy hits",
+    "expected_risk": "State threshold change may affect direction accuracy",
+    "owner": "unassigned",
+    "status": "proposed"
+  },
+  {
+    "candidate_id": "CC-002",
+    "category": "data_provider_remediation",
+    "rationale": "Missing window rate (65.0%) exceeds threshold (25%). Missing: 13/20.",
+    "expected_benefit": "Complete daily coverage improves analysis reliability",
+    "expected_risk": "Root cause investigation may reveal infrastructure issues",
+    "owner": "unassigned",
+    "status": "proposed"
+  }
+]
