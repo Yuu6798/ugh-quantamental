@@ -9,7 +9,7 @@
     "price_type": "mid",
     "resolution": "1d",
     "timezone": "UTC",
-    "retrieved_at_utc": "2026-04-01T06:27:03.316047+00:00"
+    "retrieved_at_utc": "2026-04-01T08:15:48.052852+00:00"
   },
   "completed_windows": [
     {
@@ -815,5 +815,5 @@
   ],
   "completed_window_count": 100,
   "newest_completed_window_end_jst": "2026-04-01T08:00:00+09:00",
-  "generated_at_utc": "2026-04-01T06:27:03Z"
+  "generated_at_utc": "2026-04-01T08:15:48Z"
 }
