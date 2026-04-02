@@ -1,8 +1,8 @@
 {
-  "as_of_jst": "2026-04-01T08:00:00+09:00",
-  "generated_at_utc": "2026-04-01T11:41:08Z",
-  "forecast_batch_id": "fb_USDJPY_20260401T080000_v1_7bd536eef16ba5bb",
-  "outcome_id": "oc_USDJPY_20260331T080000_20260401T080000_v1_2a6399ff8a47206b",
+  "as_of_jst": "2026-04-02T08:00:00+09:00",
+  "generated_at_utc": "2026-04-02T06:13:13Z",
+  "forecast_batch_id": "fb_USDJPY_20260402T080000_v1_f9f7918a01c7e256",
+  "outcome_id": "oc_USDJPY_20260401T080000_20260402T080000_v1_aa55592d61ad60b0",
   "evaluation_count": 4,
   "forecast_csv_path": "latest/forecast.csv",
   "outcome_csv_path": "latest/outcome.csv",
