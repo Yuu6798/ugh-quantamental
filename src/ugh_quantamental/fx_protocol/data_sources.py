@@ -690,6 +690,35 @@ def _parse_snapshot(payload: dict, as_of_jst: datetime) -> FxProtocolMarketSnaps
         raise FxDataFetchError(f"Failed to parse market snapshot: {exc}") from exc
 
 
+class FallbackFxMarketDataProvider:
+    """Composite provider that tries a primary provider first, then falls back.
+
+    Intended usage: Alpha Vantage as primary, Yahoo Finance as fallback.
+    When the primary raises ``FxDataFetchError`` (e.g. rate-limit exhaustion),
+    the fallback is attempted transparently.  If the fallback also fails, its
+    ``FxDataFetchError`` is raised.
+    """
+
+    def __init__(
+        self,
+        primary: FxMarketDataProvider,
+        fallback: FxMarketDataProvider,
+    ) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    def fetch_snapshot(self, as_of_jst: datetime) -> FxProtocolMarketSnapshot:
+        """Try primary provider; on ``FxDataFetchError`` fall back to secondary."""
+        try:
+            return self._primary.fetch_snapshot(as_of_jst)
+        except FxDataFetchError as primary_err:
+            logger.warning(
+                "Primary provider failed (%s); falling back to secondary provider.",
+                primary_err,
+            )
+        return self._fallback.fetch_snapshot(as_of_jst)
+
+
 class HttpJsonFxMarketDataProvider:
     """Optional custom-endpoint provider using stdlib urllib.
 

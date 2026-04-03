@@ -91,9 +91,9 @@ def main() -> None:
     if fx_data_url:
         provider_name = f"custom ({fx_data_url})"
     elif alphavantage_api_key:
-        provider_name = "alpha_vantage"
+        provider_name = "alpha_vantage → yahoo_finance (fallback)"
     else:
-        provider_name = "yahoo_finance (public, fallback)"
+        provider_name = "yahoo_finance (public, no fallback)"
     print(f"[INFO] provider        = {provider_name}")
     print(f"[INFO] sqlite_path     = {sqlite_path}")
     print(f"[INFO] data_branch     = {data_branch}")
@@ -117,6 +117,7 @@ def main() -> None:
         from ugh_quantamental.fx_protocol.automation_models import FxDailyAutomationConfig
         from ugh_quantamental.fx_protocol.data_sources import (
             AlphaVantageXMarketDataProvider,
+            FallbackFxMarketDataProvider,
             HttpJsonFxMarketDataProvider,
             YahooFinanceFxMarketDataProvider,
         )
@@ -160,7 +161,10 @@ def main() -> None:
     if fx_data_url:
         provider = HttpJsonFxMarketDataProvider(url=fx_data_url)
     elif alphavantage_api_key:
-        provider = AlphaVantageXMarketDataProvider(api_key=alphavantage_api_key)
+        provider = FallbackFxMarketDataProvider(
+            primary=AlphaVantageXMarketDataProvider(api_key=alphavantage_api_key),
+            fallback=YahooFinanceFxMarketDataProvider(),
+        )
     else:
         provider = YahooFinanceFxMarketDataProvider()
 
