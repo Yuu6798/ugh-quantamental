@@ -229,27 +229,47 @@ def main() -> None:
                 print(f"  {key}: {val}")
     print("=================================\n")
 
-    # --- Weekly report generation (Friday only) ---
-    # On Friday, auto-generate the weekly report so it is available the same
-    # evening.  If this fails the Monday analysis pipeline acts as fallback.
-    if write_csv_exports and automation_result.as_of_jst.isoweekday() == 5:
+    # --- Weekly report generation (Friday, final attempt only) ---
+    # On Friday's last scheduled run, auto-generate the weekly report so it
+    # is available the same evening instead of waiting for Monday's analysis
+    # pipeline.  Guarded by FX_LAST_RETRY to avoid redundant rebuilds on
+    # earlier retry runs (each would write a different generated_at_utc and
+    # create extra commits).
+    #
+    # Uses run_weekly_report_v2 (read-only) + export_weekly_report_artifacts
+    # rather than rebuild_weekly_report, which destructively deletes
+    # labeled_observations.csv before rebuilding.  This way a failure here
+    # cannot corrupt the analytics state rebuilt in Step 8 above.
+    # The Monday analysis pipeline remains as a safety-net fallback.
+    _is_last_attempt = _env("FX_LAST_RETRY") == "1"
+    if (
+        write_csv_exports
+        and automation_result.as_of_jst.isoweekday() == 5
+        and _is_last_attempt
+    ):
         print("--- Weekly report (Friday auto-trigger) ---")
         try:
             from datetime import datetime, timedelta, timezone
 
-            from ugh_quantamental.fx_protocol.analytics_rebuild import (
-                rebuild_weekly_report,
+            from ugh_quantamental.fx_protocol.weekly_report_exports import (
+                export_weekly_report_artifacts,
+            )
+            from ugh_quantamental.fx_protocol.weekly_reports_v2 import (
+                run_weekly_report_v2,
             )
 
             # report_date = Saturday so _resolve_week_window covers Mon–Fri.
             _report_date = (automation_result.as_of_jst + timedelta(days=1)).replace(
                 hour=8, minute=0, second=0, microsecond=0,
             )
-            weekly_result = rebuild_weekly_report(
+            weekly_result = run_weekly_report_v2(
                 csv_output_dir,
                 _report_date,
                 generated_at_utc=datetime.now(timezone.utc),
             )
+            _date_str = _report_date.strftime("%Y%m%d")
+            export_weekly_report_artifacts(weekly_result, csv_output_dir, _date_str)
+
             _obs = weekly_result.get("observation_count", 0)
             _ww = weekly_result.get("week_window", {})
             print(f"  week_window    : {_ww.get('start', '?')} - {_ww.get('end', '?')}")
