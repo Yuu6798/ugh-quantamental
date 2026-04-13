@@ -242,10 +242,19 @@ def main() -> None:
     # cannot corrupt the analytics state rebuilt in Step 8 above.
     # The Monday analysis pipeline remains as a safety-net fallback.
     _is_last_attempt = _env("FX_LAST_RETRY") == "1"
+    # Gate on Step 8 success: annotation_analytics contains the result of
+    # run_annotation_analytics().  If it is None or labeled_observations_path
+    # is missing, the labeled_observations.csv may be stale or absent and we
+    # must not publish a weekly report built from outdated data.
+    _has_fresh_observations = bool(
+        automation_result.annotation_analytics
+        and automation_result.annotation_analytics.get("labeled_observations_path")
+    )
     if (
         write_csv_exports
         and automation_result.as_of_jst.isoweekday() == 5
         and _is_last_attempt
+        and _has_fresh_observations
     ):
         print("--- Weekly report (Friday auto-trigger) ---")
         try:
