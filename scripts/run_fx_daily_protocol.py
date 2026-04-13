@@ -229,6 +229,35 @@ def main() -> None:
                 print(f"  {key}: {val}")
     print("=================================\n")
 
+    # --- Weekly report generation (Friday only) ---
+    # On Friday, auto-generate the weekly report so it is available the same
+    # evening.  If this fails the Monday analysis pipeline acts as fallback.
+    if write_csv_exports and automation_result.as_of_jst.isoweekday() == 5:
+        print("--- Weekly report (Friday auto-trigger) ---")
+        try:
+            from datetime import datetime, timedelta, timezone
+
+            from ugh_quantamental.fx_protocol.analytics_rebuild import (
+                rebuild_weekly_report,
+            )
+
+            # report_date = Saturday so _resolve_week_window covers Mon–Fri.
+            _report_date = (automation_result.as_of_jst + timedelta(days=1)).replace(
+                hour=8, minute=0, second=0, microsecond=0,
+            )
+            weekly_result = rebuild_weekly_report(
+                csv_output_dir,
+                _report_date,
+                generated_at_utc=datetime.now(timezone.utc),
+            )
+            _obs = weekly_result.get("observation_count", 0)
+            _ww = weekly_result.get("week_window", {})
+            print(f"  week_window    : {_ww.get('start', '?')} - {_ww.get('end', '?')}")
+            print(f"  observations   : {_obs}")
+            print("[OK] Weekly report generated.")
+        except Exception as exc:
+            print(f"[WARN] Weekly report generation failed (non-fatal): {exc}")
+
 
 if __name__ == "__main__":
     main()
