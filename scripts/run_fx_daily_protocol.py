@@ -229,23 +229,27 @@ def main() -> None:
                 print(f"  {key}: {val}")
     print("=================================\n")
 
-    # --- Weekly report generation (Friday, final attempt only) ---
-    # On Friday's last scheduled run, auto-generate the weekly report so it
-    # is available the same evening instead of waiting for Monday's analysis
-    # pipeline.  Guarded by FX_LAST_RETRY to avoid redundant rebuilds on
-    # earlier retry runs (each would write a different generated_at_utc and
-    # create extra commits).
+    # --- Weekly report generation (Friday only) ---
+    # On any successful Friday run, auto-generate the weekly report so it is
+    # available the same evening.  NOT gated on FX_LAST_RETRY: when the final
+    # attempt (20:00 JST) hits FxDataFetchError the script exits before this
+    # block, so gating on _is_last_attempt would silently skip weekly
+    # generation even though an earlier run succeeded and persisted fresh data.
     #
-    # Uses run_weekly_report_v2 (read-only) + export_weekly_report_artifacts
-    # rather than rebuild_weekly_report, which destructively deletes
-    # labeled_observations.csv before rebuilding.  This way a failure here
-    # cannot corrupt the analytics state rebuilt in Step 8 above.
+    # Rebuilds annotation analytics (with AI annotation pass) before generating
+    # the v2 report.  The daily Step 8 (run_annotation_analytics) builds
+    # labeled_observations.csv without the AI annotation pass; the weekly path
+    # needs rebuild_annotation_analytics to inject AI-enriched labels so that
+    # annotation-dependent metrics are accurate.
+    #
+    # Uses rebuild_annotation_analytics (non-destructive) + run_weekly_report_v2
+    # + export_weekly_report_artifacts rather than rebuild_weekly_report, which
+    # destructively deletes labeled_observations.csv before rebuilding.
     # The Monday analysis pipeline remains as a safety-net fallback.
-    _is_last_attempt = _env("FX_LAST_RETRY") == "1"
-    # Gate on Step 8 success: annotation_analytics contains the result of
-    # run_annotation_analytics().  If it is None or labeled_observations_path
-    # is missing, the labeled_observations.csv may be stale or absent and we
-    # must not publish a weekly report built from outdated data.
+    #
+    # Gate on Step 8 success: if annotation_analytics is None or
+    # labeled_observations_path is missing, the daily data may be stale or
+    # absent and we must not publish a weekly report from outdated data.
     _has_fresh_observations = bool(
         automation_result.annotation_analytics
         and automation_result.annotation_analytics.get("labeled_observations_path")
@@ -253,18 +257,29 @@ def main() -> None:
     if (
         write_csv_exports
         and automation_result.as_of_jst.isoweekday() == 5
-        and _is_last_attempt
         and _has_fresh_observations
     ):
         print("--- Weekly report (Friday auto-trigger) ---")
         try:
             from datetime import datetime, timedelta, timezone
 
+            from ugh_quantamental.fx_protocol.analytics_rebuild import (
+                rebuild_annotation_analytics,
+            )
             from ugh_quantamental.fx_protocol.weekly_report_exports import (
                 export_weekly_report_artifacts,
             )
             from ugh_quantamental.fx_protocol.weekly_reports_v2 import (
                 run_weekly_report_v2,
+            )
+
+            _gen_utc = datetime.now(timezone.utc)
+
+            # Re-derive labeled observations with AI annotations so the weekly
+            # report includes AI-enriched labels and annotation-dependent
+            # metrics (annotated_analysis_ready, slice breakdowns) are accurate.
+            rebuild_annotation_analytics(
+                csv_output_dir, generated_at_utc=_gen_utc,
             )
 
             # report_date = Saturday so _resolve_week_window covers Mon–Fri.
@@ -274,7 +289,7 @@ def main() -> None:
             weekly_result = run_weekly_report_v2(
                 csv_output_dir,
                 _report_date,
-                generated_at_utc=datetime.now(timezone.utc),
+                generated_at_utc=_gen_utc,
             )
             _date_str = _report_date.strftime("%Y%m%d")
             export_weekly_report_artifacts(weekly_result, csv_output_dir, _date_str)
