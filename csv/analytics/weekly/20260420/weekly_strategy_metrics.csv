@@ -1,0 +1,5 @@
+strategy_kind,observation_count,direction_hit_count,direction_hit_rate,range_hit_count,range_hit_rate,state_proxy_hit_count,state_proxy_hit_rate,mean_close_error_bp,median_close_error_bp,mean_magnitude_error_bp
+baseline_prev_day_direction,4,2,0.5,,,,,29.19,31.71,23.84
+baseline_random_walk,4,0,0.0,,,,,16.01,10.7,16.01
+baseline_simple_technical,4,2,0.5,,,,,34.46,42.0,23.76
+ugh,4,1,0.25,3,0.75,4,1.0,16.07,10.83,15.86
