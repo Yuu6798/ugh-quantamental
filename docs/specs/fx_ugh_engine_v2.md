@@ -225,6 +225,7 @@ is replaced.
 | 5 | In `forecasting.py`, replace `build_ugh_forecast` with four variant builders (or one parameterized builder) that emit four `ForecastRecord`s per snapshot, each with its variant's `ProjectionConfig`. |
 | 6 | Update existing engine tests (`tests/engine/test_projection.py`) with new golden values; add tests per §8. |
 | 7 | Update analytics (weekly / monthly aggregations) to handle the expanded `StrategyKind` set without crashing — most queries iterate over distinct kinds and should require no change. Verify slice metric output dimensions don't break weekly_report.md formatting. |
+| 7.5 | **Prerequisite check**: confirm weekly/monthly aggregation already stratifies by `theory_version` when computing per-strategy metrics, OR add the stratification filter before any v2 record is emitted. Without this, the first v1↔v2 boundary week will produce mixed metrics that are difficult to interpret. |
 | 8 | Land before next Monday's automated weekly cron so 5/11 → 5/29 data accumulates under v2. |
 | 9 | After 10+ business days under v2, re-run monthly review and check H1–H5 across all four variants. |
 
