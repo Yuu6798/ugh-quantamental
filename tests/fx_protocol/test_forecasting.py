@@ -317,6 +317,73 @@ def test_daily_workflow_generates_exactly_four_with_shared_metadata(db_session, 
     assert ugh.q_strength == req.ugh_request.projection.question_features.q_strength
     assert ugh.grv_lock == req.ugh_request.projection.signal_features.grv_lock
     assert ugh.e_star == 15.0
+    # expected_close_change_bp = e_star * trailing_mean_abs_close_change_bp * (0.5 + 0.5*conviction)
+    # = 15.0 * 20.0 * (0.5 + 0.5*0.7) = 15.0 * 20.0 * 0.85 = 255.0
+    assert ugh.expected_close_change_bp == pytest.approx(255.0)
+    assert ugh.forecast_direction == ForecastDirection.up
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_ugh_magnitude_scales_with_volatility_and_conviction(db_session, monkeypatch) -> None:
+    """UGH expected_close_change_bp must equal e_star * trailing_mean_abs_close_change_bp
+    * (0.5 + 0.5*conviction). A negative e_star produces DOWN; near-zero conviction
+    halves the magnitude."""
+    from ugh_quantamental.fx_protocol import forecasting
+
+    req = _request()
+
+    projection_result = ProjectionEngineResult(
+        u_score=-0.4,
+        alignment=0.8,
+        e_raw=-0.5,
+        gravity_bias=-0.1,
+        e_star=-0.6,
+        mismatch_px=0.0,
+        mismatch_sem=0.0,
+        conviction=0.0,
+        urgency=0.5,
+        projection_snapshot=ProjectionSnapshot(
+            projection_id="Will USDJPY close higher?",
+            horizon_days=1,
+            point_estimate=-0.6,
+            lower_bound=-0.8,
+            upper_bound=-0.4,
+            confidence=0.0,
+        ),
+    )
+    state_result = StateEngineResult(
+        evidence_scores=req.ugh_request.state.snapshot.phi.probabilities,
+        updated_probabilities=req.ugh_request.state.snapshot.phi.probabilities,
+        updated_phi=req.ugh_request.state.snapshot.phi,
+        updated_market_svp=req.ugh_request.state.omega.market_svp,
+        dominant_state=LifecycleState.setup,
+        transition_confidence=0.5,
+    )
+
+    def _fake_full_workflow(session, request):
+        del session, request
+        return FullWorkflowResult(
+            projection=ProjectionWorkflowResult(
+                run_id="proj-1",
+                engine_result=projection_result,
+                persisted_run=None,
+            ),
+            state=StateWorkflowResult(
+                run_id="state-1",
+                engine_result=state_result,
+                persisted_run=None,
+            ),
+        )
+
+    monkeypatch.setattr(forecasting, "run_full_workflow", _fake_full_workflow)
+
+    result = run_daily_forecast_workflow(db_session, req)
+    ugh = next(f for f in result.forecasts if f.strategy_kind == StrategyKind.ugh)
+
+    # e_star=-0.6, vol_scale=20.0, conviction=0.0 → factor=0.5
+    # → -0.6 * 20.0 * 0.5 = -6.0 bp, direction=DOWN
+    assert ugh.expected_close_change_bp == pytest.approx(-6.0)
+    assert ugh.forecast_direction == ForecastDirection.down
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
