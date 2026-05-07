@@ -199,6 +199,13 @@ def compute_e_raw(u_score, signal_features, alignment, config):
     from fire_probability and shrinks (never inverts) the direction signal.
     """
     direction_weight_total = config.u_weight + config.t_weight + config.p_weight
+    if direction_weight_total == 0.0:
+        # Preserve v1's zero-denominator guard. Pydantic field constraints
+        # allow ge=0.0 on each weight, so a caller may legitimately set all
+        # three to zero (e.g. to disable the v2 direction layer entirely
+        # while keeping fire/alignment plumbing). Return 0.0 to keep the
+        # bounded/no-NaN invariant.
+        return 0.0
     direction_signal = (
         config.u_weight * u_score
         + config.t_weight * signal_features.technical_score
@@ -247,7 +254,7 @@ is replaced.
 
 | Step | Action |
 |---|---|
-| 1 | Bump `FX_THEORY_VERSION` from `v1` to `v2` in `.github/workflows/fx-daily-protocol.yml` and `fx-analysis-pipeline.yml`. Records persist version in `forecast_record.theory_version` for audit. |
+| 1 | Bump **both** `FX_THEORY_VERSION` and `FX_ENGINE_VERSION` from `v1` to `v2` in `.github/workflows/fx-daily-protocol.yml`, `.github/workflows/fx-analysis-pipeline.yml`, and the manual-run defaults in `scripts/run_fx_daily_protocol.py` (lines 57–58). Both bumps are required: `theory_version` reflects the UGH theory generation, and `engine_version` reflects the projection engine implementation — and v2 changes the engine math (`compute_e_raw`, `fire_probability`). Leaving `engine_version=v1` on v2 records would falsely claim v1 engine semantics, breaking audit and replay. Records persist both fields in `forecast_record.{theory_version,engine_version}` for stratification. |
 | 2 | Implement v2 `compute_e_raw` in `engine/projection.py` and v2 `fire_probability` in `fx_protocol/market_ugh_builder.py`. |
 | 3 | Add `p_weight` (default `0.20`) and `conviction_floor` (default `0.5`) fields to `ProjectionConfig` in `engine/projection_models.py`. Defaults are the alpha-variant values, chosen so existing `ProjectionConfig()` callers (including `run_projection_engine(config=None)`, `ProjectionWorkflowRequest.config`'s `default_factory`, and replay/workflow tests that omit configs) continue to function and receive v2-alpha behavior. Variant builders for beta/gamma/delta in step 5 supply explicit configs. |
 | 4 | Add four enum values to `StrategyKind`: `ugh_v2_alpha`, `ugh_v2_beta`, `ugh_v2_gamma`, `ugh_v2_delta`. Retire `ugh` from new daily emission (keep enum for historical record loading). |
@@ -255,7 +262,7 @@ is replaced.
 | 5 | In `forecasting.py`, replace `build_ugh_forecast` with four variant builders (or one parameterized builder) that emit four `ForecastRecord`s per snapshot, each with its variant's `ProjectionConfig`. |
 | 6 | Update existing engine tests (`tests/engine/test_projection.py`) with new golden values; add tests per §8. |
 | 7 | Update analytics (weekly / monthly aggregations) to handle the expanded `StrategyKind` set without crashing — most queries iterate over distinct kinds and should require no change. Verify slice metric output dimensions don't break weekly_report.md formatting. |
-| 7.5 | **Prerequisite check**: confirm weekly/monthly aggregation already stratifies by `theory_version` when computing per-strategy metrics, OR add the stratification filter before any v2 record is emitted. Without this, the first v1↔v2 boundary week will produce mixed metrics that are difficult to interpret. |
+| 7.5 | **Prerequisite check**: confirm weekly/monthly aggregation already stratifies by `theory_version` (and ideally also `engine_version`, since both bump in step 1) when computing per-strategy metrics, OR add the stratification filter before any v2 record is emitted. Without this, the first v1↔v2 boundary week will produce mixed metrics that are difficult to interpret. |
 | 8 | Land before next Monday's automated weekly cron so 5/11 → 5/29 data accumulates under v2. |
 | 9 | After 10+ business days under v2, re-run monthly review and check H1–H5 across all four variants. |
 
