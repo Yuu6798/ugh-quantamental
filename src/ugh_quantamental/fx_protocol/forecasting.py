@@ -190,7 +190,15 @@ def build_ugh_forecast(
     projection_res = full_result.projection.engine_result
     state_res = full_result.state.engine_result
 
-    expected_close_change_bp = projection_res.e_star
+    # e_star is a unitless [-1, 1] score (direction × confidence). Scale it to bp
+    # by the trailing mean absolute close change so UGH magnitudes are on the same
+    # unit as baseline_simple_technical / baseline_prev_day_direction. Apply a
+    # conviction-based dampener (0.5–1.0) to shrink low-confidence forecasts.
+    ctx = request.baseline_context
+    conviction_factor = 0.5 + 0.5 * projection_res.conviction
+    expected_close_change_bp = (
+        projection_res.e_star * ctx.trailing_mean_abs_close_change_bp * conviction_factor
+    )
 
     return _make_base_record(
         request=request,
