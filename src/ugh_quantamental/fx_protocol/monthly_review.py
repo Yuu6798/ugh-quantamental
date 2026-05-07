@@ -24,6 +24,8 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ugh_quantamental.fx_protocol.models import is_ugh_kind
+
 logger = logging.getLogger(__name__)
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -55,12 +57,43 @@ THRESHOLD_MINIMUM_OBSERVATIONS: int = 5
 # Strategies to compare
 # ---------------------------------------------------------------------------
 
-STRATEGY_KINDS: tuple[str, ...] = (
+#: Order: legacy ``ugh`` first (for v1-era replay), then v2 variants, then baselines.
+#: Downstream UGH-only paths pool rows via :func:`is_ugh_kind` rather than
+#: relying on a single canonical kind. Anchor-based comparisons (baseline
+#: deltas, review flags) iterate ``UGH_KINDS`` and pick the first variant with
+#: non-zero forecast_count, so v1-era reports anchor on ``ugh`` and v2-era
+#: reports anchor on whichever variant has data first.
+UGH_KINDS: tuple[str, ...] = (
     "ugh",
+    "ugh_v2_alpha",
+    "ugh_v2_beta",
+    "ugh_v2_gamma",
+    "ugh_v2_delta",
+)
+
+STRATEGY_KINDS: tuple[str, ...] = (
+    *UGH_KINDS,
     "baseline_random_walk",
     "baseline_prev_day_direction",
     "baseline_simple_technical",
 )
+
+
+def _select_canonical_ugh_metrics(
+    strategy_metrics: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Pick the canonical UGH metrics row for anchor comparisons.
+
+    Returns the first metrics row in ``UGH_KINDS`` order whose
+    ``forecast_count > 0``. If no UGH-class row has data, falls back to the
+    legacy ``ugh`` row if present, else ``None``.
+    """
+    by_kind = {m["strategy_kind"]: m for m in strategy_metrics if m.get("strategy_kind")}
+    for kind in UGH_KINDS:
+        m = by_kind.get(kind)
+        if m is not None and m.get("forecast_count", 0) > 0:
+            return m
+    return by_kind.get("ugh")
 
 
 # ---------------------------------------------------------------------------
@@ -237,12 +270,12 @@ def compute_monthly_baseline_comparisons(
     - mean_abs_magnitude_error_bp_delta_vs_ugh
     - state_proxy_hit_rate_delta_vs_ugh (if computable)
     """
-    ugh = next((m for m in strategy_metrics if m["strategy_kind"] == "ugh"), None)
+    ugh = _select_canonical_ugh_metrics(strategy_metrics)
 
     result: list[dict[str, Any]] = []
     for m in strategy_metrics:
         sk = m["strategy_kind"]
-        if sk == "ugh":
+        if is_ugh_kind(sk):
             continue
 
         dir_delta: float | None = None
@@ -294,8 +327,12 @@ def compute_monthly_baseline_comparisons(
 def compute_monthly_state_metrics(
     observations: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
-    """Compute UGH performance grouped by dominant_state (from labeled observations)."""
-    ugh_rows = [r for r in observations if r.get("strategy_kind") == "ugh"]
+    """Compute UGH performance grouped by dominant_state (from labeled observations).
+
+    Pools all UGH-class rows (legacy ``ugh`` + v2 variants); state-engine
+    diagnostics are shared across variants.
+    """
+    ugh_rows = [r for r in observations if is_ugh_kind(r.get("strategy_kind", ""))]
     groups: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in ugh_rows:
         state = row.get("dominant_state", "") or "unknown"
@@ -340,12 +377,15 @@ def compute_monthly_intervention_metrics(
 def compute_monthly_event_tag_metrics(
     observations: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
-    """Compute UGH performance grouped by event_tag (confirmed annotations, expanded)."""
+    """Compute UGH performance grouped by event_tag (confirmed annotations, expanded).
+
+    Pools all UGH-class rows (legacy ``ugh`` + v2 variants).
+    """
     confirmed = [
         r
         for r in observations
         if r.get("annotation_status", "").strip().lower() == "confirmed"
-        and r.get("strategy_kind") == "ugh"
+        and is_ugh_kind(r.get("strategy_kind", ""))
     ]
     groups: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in confirmed:
@@ -381,13 +421,13 @@ def _compute_slice_metrics_for_ugh(
         r
         for r in observations
         if r.get("annotation_status", "").strip().lower() == "confirmed"
-        and r.get("strategy_kind") == "ugh"
+        and is_ugh_kind(r.get("strategy_kind", ""))
     ]
     non_confirmed = [
         r
         for r in observations
         if r.get("annotation_status", "").strip().lower() != "confirmed"
-        and r.get("strategy_kind") == "ugh"
+        and is_ugh_kind(r.get("strategy_kind", ""))
     ]
 
     groups: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -534,9 +574,10 @@ def select_representative_cases(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Select representative success and failure case examples (UGH only).
 
-    Returns (successes, failures) each as a list of case dicts.
+    Returns (successes, failures) each as a list of case dicts. Pools all
+    UGH-class rows (legacy ``ugh`` + v2 variants).
     """
-    ugh_rows = [r for r in observations if r.get("strategy_kind") == "ugh"]
+    ugh_rows = [r for r in observations if is_ugh_kind(r.get("strategy_kind", ""))]
 
     successes: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
@@ -602,7 +643,7 @@ def compute_review_flags(
     """
     flags: list[dict[str, str]] = []
 
-    ugh = next((m for m in strategy_metrics if m["strategy_kind"] == "ugh"), None)
+    ugh = _select_canonical_ugh_metrics(strategy_metrics)
 
     # 1. Insufficient data
     if ugh is None or ugh["forecast_count"] < THRESHOLD_MINIMUM_OBSERVATIONS:
@@ -804,6 +845,45 @@ def compute_monthly_slice_metrics(
 # ---------------------------------------------------------------------------
 
 
+def _stratify_observations_by_versions(
+    rows: list[dict[str, str]],
+    *,
+    theory_version_filter: str | None = None,
+    engine_version_filter: str | None = None,
+) -> list[dict[str, str]]:
+    """Spec §7.5 stratification: filter monthly observations by version columns.
+
+    Auto-detect mode (both filters ``None``): if rows contain more than one
+    distinct ``theory_version``, the latest one is selected and a warning
+    is logged. Single-version data is returned unchanged. Explicit-filter
+    mode drops rows whose column does not match the filter (or whose
+    column is missing).
+    """
+    if theory_version_filter is None and engine_version_filter is None:
+        present = {row.get("theory_version", "") for row in rows} - {""}
+        if len(present) <= 1:
+            return rows
+        latest = max(present)
+        logger.warning(
+            "monthly_review: auto-stratifying mixed theory_versions %s; "
+            "filtering to latest=%s",
+            sorted(present),
+            latest,
+        )
+        return [r for r in rows if r.get("theory_version", "") == latest]
+
+    filtered = rows
+    if theory_version_filter is not None:
+        filtered = [
+            r for r in filtered if r.get("theory_version", "") == theory_version_filter
+        ]
+    if engine_version_filter is not None:
+        filtered = [
+            r for r in filtered if r.get("engine_version", "") == engine_version_filter
+        ]
+    return filtered
+
+
 def run_monthly_review(
     observations: list[dict[str, str]],
     health_rows: list[dict[str, str]],
@@ -813,6 +893,8 @@ def run_monthly_review(
     business_day_count: int = 20,
     max_examples: int = 3,
     include_annotations: bool = True,
+    theory_version_filter: str | None = None,
+    engine_version_filter: str | None = None,
 ) -> dict[str, Any]:
     """Generate a monthly review from pre-loaded observations and provider health data.
 
@@ -835,6 +917,13 @@ def run_monthly_review(
         Maximum representative success/failure examples to include.
     include_annotations:
         Whether to include annotation-aware metrics (default: True).
+    theory_version_filter:
+        Optional ``theory_version`` filter; ``None`` auto-detects (filters
+        a mixed-version window to its latest version with a warning).
+        Spec §7.5: required to keep v1 and v2 records from being mixed
+        under shared ``strategy_kind`` values across the boundary month.
+    engine_version_filter:
+        Optional ``engine_version`` filter; same behavior as above.
 
     Returns
     -------
@@ -843,6 +932,14 @@ def run_monthly_review(
     """
     if review_generated_at_jst is None:
         review_generated_at_jst = datetime.now(_JST)
+
+    # Spec §7.5 stratification — applied before any per-strategy aggregation
+    # so version mixing cannot leak into baseline-vs-UGH deltas or review flags.
+    observations = _stratify_observations_by_versions(
+        observations,
+        theory_version_filter=theory_version_filter,
+        engine_version_filter=engine_version_filter,
+    )
 
     # Count unique as_of dates in observations to determine included/missing windows
     seen_dates: set[str] = set()
@@ -896,6 +993,14 @@ def run_monthly_review(
     # Recommendation summary
     recommendation = build_recommendation_summary(review_flags)
 
+    # Stratification audit fields: which version values survived the filter.
+    theory_versions_in_window = sorted(
+        {row.get("theory_version", "") for row in observations} - {""}
+    )
+    engine_versions_in_window = sorted(
+        {row.get("engine_version", "") for row in observations} - {""}
+    )
+
     return {
         "review_version": "v1",
         "pair": pair,
@@ -903,6 +1008,8 @@ def run_monthly_review(
         "requested_window_count": business_day_count,
         "included_window_count": included_window_count,
         "missing_window_count": missing_window_count,
+        "theory_versions_in_window": theory_versions_in_window,
+        "engine_versions_in_window": engine_versions_in_window,
         "monthly_strategy_metrics": strategy_metrics,
         "monthly_baseline_comparisons": baseline_comparisons,
         "monthly_state_metrics": state_metrics,

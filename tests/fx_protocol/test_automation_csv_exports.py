@@ -221,7 +221,7 @@ class TestAutomationCsvIntegration:
             assert result.evaluation_csv_path is None
         session.close()
 
-    def test_forecast_csv_has_four_rows(self) -> None:
+    def test_forecast_csv_has_seven_rows(self) -> None:
         import csv
 
         from unittest.mock import MagicMock
@@ -250,11 +250,13 @@ class TestAutomationCsvIntegration:
             ):
                 result = run_fx_daily_protocol_once(cfg, provider, session)
 
+            from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
+
             assert result.forecast_csv_path is not None
             with open(result.forecast_csv_path, newline="", encoding="utf-8") as fh:
                 reader = csv.DictReader(fh)
                 rows = list(reader)
-            assert len(rows) == 4
+            assert len(rows) == EXPECTED_DAILY_BATCH_SIZE
         session.close()
 
     def test_idempotent_rerun_overwrites_csv(self) -> None:

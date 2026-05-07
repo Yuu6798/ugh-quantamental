@@ -21,6 +21,12 @@ class WeeklyReportRequest(BaseModel):
     ``business_day_count`` determines how many completed protocol windows
     (each ending at 08:00 JST on a Mon–Fri business day) are included.
     Report generation may happen on weekends.
+
+    ``theory_version_filter`` and ``engine_version_filter`` provide spec §7.5
+    stratification: ``None`` (default) auto-detects mixed-version windows
+    and filters to the latest version with a warning, preserving v1↔v2
+    boundary clarity. An explicit value pins the report to a single
+    version (e.g. ``"v1"`` for historical replay).
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -29,6 +35,8 @@ class WeeklyReportRequest(BaseModel):
     report_generated_at_jst: datetime
     business_day_count: int = Field(default=5, ge=1)
     max_examples: int = Field(default=3, ge=1)
+    theory_version_filter: str | None = Field(default=None)
+    engine_version_filter: str | None = Field(default=None)
 
     @field_validator("report_generated_at_jst")
     @classmethod

@@ -21,6 +21,9 @@ import logging
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ugh_quantamental.fx_protocol.models import is_ugh_kind
+from ugh_quantamental.fx_protocol.monthly_review import UGH_KINDS
+
 logger = logging.getLogger(__name__)
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -130,11 +133,24 @@ def extract_weekly_trends(
         week_window = report.get("week_window", {})
         strategy_metrics = report.get("strategy_metrics", [])
 
+        # Pick canonical UGH metrics for governance trend extraction. v1-era
+        # weekly reports anchor on legacy ``ugh``; v2-era reports anchor on
+        # the first variant in ``UGH_KINDS`` order with non-zero forecast_count.
+        # Falling back to the last UGH-class metrics seen preserves the
+        # legacy behavior when only ``ugh`` is present.
+        by_kind = {
+            m.get("strategy_kind"): m
+            for m in strategy_metrics
+            if is_ugh_kind(m.get("strategy_kind", ""))
+        }
         ugh_metrics: dict[str, Any] | None = None
-        for m in strategy_metrics:
-            if m.get("strategy_kind") == "ugh":
+        for kind in UGH_KINDS:
+            m = by_kind.get(kind)
+            if m is not None and (m.get("forecast_count") or 0) > 0:
                 ugh_metrics = m
                 break
+        if ugh_metrics is None:
+            ugh_metrics = by_kind.get("ugh")
 
         entry: dict[str, Any] = {
             "week_start": week_window.get("start", ""),

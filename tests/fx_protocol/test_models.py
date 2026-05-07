@@ -195,7 +195,16 @@ def test_currency_pair_usdjpy_exists() -> None:
 
 
 def test_strategy_kind_all_values() -> None:
-    expected = {"ugh", "baseline_random_walk", "baseline_prev_day_direction", "baseline_simple_technical"}
+    expected = {
+        "ugh",
+        "ugh_v2_alpha",
+        "ugh_v2_beta",
+        "ugh_v2_gamma",
+        "ugh_v2_delta",
+        "baseline_random_walk",
+        "baseline_prev_day_direction",
+        "baseline_simple_technical",
+    }
     assert {s.value for s in StrategyKind} == expected
 
 

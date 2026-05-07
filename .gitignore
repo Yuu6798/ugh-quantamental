@@ -5,5 +5,8 @@ dist/
 build/
 .pytest_cache/
 .ruff_cache/
-.semantic-ci/
+# Ignore the semantic-ci cache (.semantic-ci/cache/) but keep target.yaml
+# tracked so verdicts are reproducible across local + CI runs.
+.semantic-ci/*
+!.semantic-ci/target.yaml
 data/

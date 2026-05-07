@@ -35,8 +35,8 @@ jobs:
       FX_LAST_RETRY: ${{ (github.event.schedule == '0 11 * * 1-5' || github.event_name == 'workflow_dispatch') && '1' || '0' }}
       FX_DATA_BRANCH: ${{ vars.FX_DATA_BRANCH || 'fx-daily-data' }}
       FX_SQLITE_FILENAME: ${{ vars.FX_SQLITE_FILENAME || 'fx_protocol.db' }}
-      FX_THEORY_VERSION: ${{ vars.FX_THEORY_VERSION || 'v1' }}
-      FX_ENGINE_VERSION: ${{ vars.FX_ENGINE_VERSION || 'v1' }}
+      FX_THEORY_VERSION: ${{ vars.FX_THEORY_VERSION || 'v2' }}
+      FX_ENGINE_VERSION: ${{ vars.FX_ENGINE_VERSION || 'v2' }}
       FX_SCHEMA_VERSION: ${{ vars.FX_SCHEMA_VERSION || 'v1' }}
       FX_PROTOCOL_VERSION: ${{ vars.FX_PROTOCOL_VERSION || 'v1' }}
       FX_WRITE_CSV_EXPORTS: ${{ vars.FX_WRITE_CSV_EXPORTS || '1' }}

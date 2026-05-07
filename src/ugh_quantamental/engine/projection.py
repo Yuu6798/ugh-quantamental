@@ -1,4 +1,11 @@
-"""Deterministic v1 projection engine using explicit normalized feature contracts."""
+"""Deterministic projection engine using explicit normalized feature contracts.
+
+The pipeline structure (compute_u → compute_alignment → compute_e_raw →
+compute_gravity_bias → compute_e_star → mismatch / conviction / urgency)
+matches v1. ``compute_e_raw`` and the upstream ``fire_probability`` builder
+are redesigned for v2 (see ``docs/specs/fx_ugh_engine_v2.md`` §6.1 / §5.3).
+All other functions remain byte-identical to v1.
+"""
 
 import math
 
@@ -74,18 +81,45 @@ def compute_e_raw(
     alignment: float,
     config: ProjectionConfig,
 ) -> float:
-    """Compute pre-bias projection signal E_raw in [-1, 1]."""
-    fire_component = signal_features.fire_probability * 2.0 - 1.0
-    temporal_component = signal_features.technical_score
+    """Compute pre-bias projection signal E_raw in [-1, 1] (v2).
 
-    numerator = (
+    v2 form: ``e_raw = clamp(direction_signal × conviction_multiplier ×
+    alignment, -1, 1)`` where:
+
+    * ``direction_signal`` = weighted sum of three independent directional
+      inputs (``u_score``, ``technical_score``, ``price_implied_score``)
+      normalized by the sum of the three direction weights.
+    * ``conviction_multiplier`` = ``conviction_floor + (1 -
+      conviction_floor) * fire_probability`` ∈ ``[conviction_floor, 1.0]``.
+      Maps fire monotonically to a magnitude shrink — never inverts the
+      direction signal.
+
+    See spec §6.1 for the full rationale and §9A for why fire is treated as
+    a conviction multiplier (Framing A) rather than a directional confirmer
+    in v2.
+    """
+    direction_weight_total = config.u_weight + config.t_weight + config.p_weight
+    if direction_weight_total == 0.0:
+        # Preserve v1's zero-denominator guard. Pydantic field constraints
+        # allow ge=0.0 on each weight, so a caller may legitimately set all
+        # three direction weights to zero (e.g. to disable the direction
+        # layer while keeping fire/alignment plumbing). Return 0.0 to keep
+        # the bounded / no-NaN invariant.
+        return 0.0
+
+    direction_signal = (
         config.u_weight * u_score
-        + config.f_weight * fire_component
-        + config.t_weight * temporal_component
+        + config.t_weight * signal_features.technical_score
+        + config.p_weight * signal_features.price_implied_score
+    ) / direction_weight_total
+
+    # fire_probability ∈ [0, 1]; conviction_multiplier ∈ [floor, 1.0].
+    conviction_multiplier = (
+        config.conviction_floor
+        + (1.0 - config.conviction_floor) * signal_features.fire_probability
     )
-    denom = config.u_weight + config.f_weight + config.t_weight
-    normalized = 0.0 if denom == 0 else numerator / denom
-    return _clamp(normalized * alignment, -1.0, 1.0)
+
+    return _clamp(direction_signal * conviction_multiplier * alignment, -1.0, 1.0)
 
 
 def compute_gravity_bias(signal_features: SignalFeatures, config: ProjectionConfig) -> float:

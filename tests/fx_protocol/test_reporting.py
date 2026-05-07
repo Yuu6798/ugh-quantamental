@@ -794,11 +794,15 @@ def test_run_weekly_report_five_windows(db_session: Any) -> None:
     assert result.included_window_count == 5
     assert result.missing_window_count == 0
     assert len(result.window_end_jst_values) == 5
-    # 4 strategy kinds
-    assert len(result.strategy_metrics) == 4
-    # 3 baseline comparisons
+    # v2: 5 UGH-class strategies (legacy ugh + 4 v2 variants) + 3 baselines = 8 metrics rows.
+    # The seeded fixture only emits legacy ``ugh`` rows so v2 variants appear with
+    # forecast_count=0; this is the expected v1-era report shape until step 7.5
+    # stratification adds a theory_version filter.
+    assert len(result.strategy_metrics) == 8
+    # 3 baseline comparisons (one per baseline; UGH is the comparison anchor).
     assert len(result.baseline_comparisons) == 3
-    # UGH has forecasts
+    # The fixture seeds legacy ``ugh`` rows; the canonical UGH metrics anchor
+    # therefore resolves to ``ugh`` (first UGH-class kind with non-zero count).
     ugh_m = next(m for m in result.strategy_metrics if m.strategy_kind == StrategyKind.ugh)
     assert ugh_m.forecast_count == 5
 

@@ -24,6 +24,7 @@ from ugh_quantamental.fx_protocol.calendar import (
 )
 from ugh_quantamental.fx_protocol.data_sources import FxMarketDataProvider
 from ugh_quantamental.fx_protocol.ids import make_forecast_batch_id
+from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
 from ugh_quantamental.fx_protocol.request_builders import (
     build_daily_forecast_request,
     build_daily_outcome_request,
@@ -293,7 +294,7 @@ def run_fx_daily_protocol_once(
         from ugh_quantamental.persistence.repositories import FxForecastRepository
 
         existing = FxForecastRepository.load_fx_forecast_batch(session, expected_batch_id)
-        if existing is not None and len(existing.forecasts) == 4:
+        if existing is not None and len(existing.forecasts) == EXPECTED_DAILY_BATCH_SIZE:
             # Complete batch already exists — idempotent skip.
             forecast_batch_id = existing.forecast_batch_id
             forecast_created = False
@@ -321,7 +322,10 @@ def run_fx_daily_protocol_once(
         prior_as_of = snapshot.completed_windows[-1].window_start_jst
         prior_batch_id = make_forecast_batch_id(config.pair, prior_as_of, config.protocol_version)
         prior_batch = _FxFR.load_fx_forecast_batch(session, prior_batch_id)
-        _prior_batch_ready = prior_batch is not None and len(prior_batch.forecasts) == 4
+        _prior_batch_ready = (
+            prior_batch is not None
+            and len(prior_batch.forecasts) == EXPECTED_DAILY_BATCH_SIZE
+        )
 
     if _prior_batch_ready:
         outcome_request = build_daily_outcome_request(

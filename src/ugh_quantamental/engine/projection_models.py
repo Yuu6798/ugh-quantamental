@@ -71,13 +71,33 @@ class AlignmentInputs(BaseModel):
 
 
 class ProjectionConfig(BaseModel):
-    """Configuration coefficients for deterministic v1 projection calculations."""
+    """Configuration coefficients for deterministic projection calculations.
+
+    No-argument construction (``ProjectionConfig()``) yields the **v2-alpha**
+    variant defined in ``docs/specs/fx_ugh_engine_v2.md`` §5.2: the
+    conservative direction-weight set with a 0.5 conviction floor. Variant
+    builders for ``ugh_v2_beta`` / ``gamma`` / ``delta`` supply explicit
+    overrides for ``u_weight`` / ``t_weight`` / ``p_weight`` /
+    ``conviction_floor`` to deviate from this default.
+
+    ``f_weight`` is retained for replay compatibility with v1 records but is
+    not consumed by ``compute_e_raw`` v2 — fire's contribution to ``e_raw``
+    is now expressed by ``conviction_floor`` (see §6.1).
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    u_weight: FiniteFloat = Field(default=0.5, ge=0.0)
+    # Direction-signal weights (v2). u_weight and t_weight defaults bumped
+    # from v1's (0.5, 0.2) to alpha's (0.40, 0.30); p_weight is new in v2.
+    u_weight: FiniteFloat = Field(default=0.40, ge=0.0)
     f_weight: FiniteFloat = Field(default=0.3, ge=0.0)
-    t_weight: FiniteFloat = Field(default=0.2, ge=0.0)
+    t_weight: FiniteFloat = Field(default=0.30, ge=0.0)
+    p_weight: FiniteFloat = Field(default=0.20, ge=0.0)
+    # Conviction multiplier floor (v2): the multiplier mapped from
+    # fire_probability is constrained to [conviction_floor, 1.0]. fire=0
+    # produces multiplier=conviction_floor (shrink only, never sign flip);
+    # fire=1.0 produces multiplier=1.0. See spec §5.3 / §6.1.
+    conviction_floor: FiniteFloat = Field(default=0.5, ge=0.0, le=1.0)
 
     pair_weight_qf: FiniteFloat = Field(default=1.0, ge=0.0)
     pair_weight_qt: FiniteFloat = Field(default=1.0, ge=0.0)

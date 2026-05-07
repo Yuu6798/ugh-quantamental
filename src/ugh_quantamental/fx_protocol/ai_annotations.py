@@ -23,6 +23,7 @@ from ugh_quantamental.fx_protocol.annotation_models import (
     AiAnnotationRecord,
     ExternalEvidenceBundle,
 )
+from ugh_quantamental.fx_protocol.models import is_ugh_kind
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ def make_deterministic_adapter(
             # Failure reason
             strategy = obs.get("strategy_kind", "")
             failure = None
-            if strategy == "ugh" and not hit:
+            if is_ugh_kind(strategy) and not hit:
                 failure = "direction_miss"
 
             # Evidence refs
