@@ -257,6 +257,36 @@ v2 is **invalidated** (escalate to Phase 3) if:
 - H1 not met after 10 May business days, OR
 - H4 violated (state / range engine regressed).
 
+## 9.5. Design choice: fire as conviction multiplier (Framing A) vs directional confirmer (Framing B)
+
+v2 adopts **Framing A**: `fire_probability` enters `compute_e_raw` as a
+conviction multiplier in `[conviction_floor, 1.0]` (default `[0.5, 1.0]`).
+Fire never flips the direction signal — values below 0.5 only shrink it.
+
+The conceptually richer alternative is **Framing B**: fire as a
+directional confirmer with multiplier `2*fire − 1` in `[-1, +1]`, where
+`fire = 0.5` produces `e_raw = 0` (flat, equivalent to random-walk
+baseline), `fire > 0.5` amplifies direction in the same sign, and
+`fire < 0.5` actively reverses it.
+
+Framing B requires fire to **measure something with intrinsic
+directional meaning** — i.e. fire's value distribution must encode
+"continuation evidence" vs "reversal evidence". The current v2 fire
+formula (range_evidence + |momentum_evidence|) does not: |momentum| is
+non-negative by construction and range contraction is "quiescence", not
+"reversal". So Framing B with the current fire formula would assign
+physical meaning where none exists, producing arbitrary direction flips
+in low-signal markets.
+
+**v2 holds at Framing A** while May 2026 data is collected. If the fire
+distribution observed in production clusters tightly near 0.5 with low
+discriminative power, that signals the next milestone: redesign fire
+itself to carry directional content (e.g., explicit mean-reversion
+evidence from extreme prev_close_change magnitudes, or u_score versus
+realized momentum disagreement) and promote fire to Framing B. This is
+the eventual target — fire should be a quantity whose value *means*
+something specific — but premature promotion is rejected.
+
 ## 10. Out of scope (deferred)
 
 - **Coefficient empirical fitting**. With ~30 observations split across
