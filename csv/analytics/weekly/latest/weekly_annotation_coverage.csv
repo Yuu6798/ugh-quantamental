@@ -1,6 +1,6 @@
 field,total_observations,ai_populated_count,ai_populated_rate,auto_populated_count,auto_populated_rate,manual_populated_count,manual_populated_rate,effective_populated_count,effective_populated_rate,missing_count,missing_rate
-regime_label,16,16,1.0,0,0.0,0,0.0,16,1.0,0,0.0
-event_tags,16,0,0.0,0,0.0,0,0.0,0,0.0,16,1.0
-volatility_label,16,16,1.0,0,0.0,0,0.0,16,1.0,0,0.0
-intervention_risk,16,16,1.0,0,0.0,0,0.0,16,1.0,0,0.0
-failure_reason,16,4,0.25,0,0.0,0,0.0,4,0.25,12,0.75
+regime_label,20,20,1.0,0,0.0,0,0.0,20,1.0,0,0.0
+event_tags,20,0,0.0,0,0.0,0,0.0,0,0.0,20,1.0
+volatility_label,20,20,1.0,0,0.0,0,0.0,20,1.0,0,0.0
+intervention_risk,20,20,1.0,0,0.0,0,0.0,20,1.0,0,0.0
+failure_reason,20,4,0.2,0,0.0,0,0.0,4,0.2,16,0.8
