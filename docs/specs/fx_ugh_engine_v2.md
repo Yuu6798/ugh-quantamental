@@ -106,21 +106,48 @@ fields that v1 computed but did not consume.
 
 ### 5.1 `ProjectionConfig` additions
 
-| Field | Default | Purpose |
-|---|---|---|
-| `p_weight` | `0.20` | Weight of `price_implied_score` in direction signal (new) |
-| `conviction_floor` | `0.5` | Minimum conviction multiplier when `fire_probability == 0` (new) |
+| Field | Purpose |
+|---|---|
+| `p_weight` | Weight of `price_implied_score` in direction signal (new) |
+| `conviction_floor` | Minimum conviction multiplier when `fire_probability == 0` (new) |
 
-`u_weight` (default 0.40), `f_weight` (0.30), `t_weight` (0.30) are
-**re-roled**: `f_weight` no longer multiplies a directional component;
-instead it scales the conviction band width (see §6.1). `u_weight` and
-`t_weight` continue to weight directional components, with `p_weight`
-joining them.
+`u_weight`, `t_weight`, `p_weight` weight three independent directional
+components. `f_weight` is no longer used in `compute_e_raw` (see §6.1);
+its conviction-shaping role is taken over by `conviction_floor`.
 
-Default sum is `u_weight + t_weight + p_weight = 0.80`; normalization is
-explicit in the formula below.
+Direction normalization is explicit in the formula: the weighted sum is
+divided by `u_weight + t_weight + p_weight`. No constraint that the three
+direction weights sum to any particular value.
 
-### 5.2 `fire_probability` redefinition
+### 5.2 Parallel variant deployment
+
+v2 is deployed as **four parameter variants in parallel**, exposed as four
+new `StrategyKind` values. Each daily run produces one forecast from each
+variant against the same snapshot, enabling head-to-head comparison
+unconfounded by market regime drift.
+
+Rationale: at this stage of the project, the goal is **proof-of-concept
+parameter exploration**, not picking a single conservative production
+configuration. With ~16 business days per month per variant, a single
+configuration would generate underpowered evidence; running four in
+parallel gives 64 strategy-days/month while every variant evaluates the
+same market state, making weight-effect comparisons direct.
+
+| Variant `StrategyKind` | u_w | t_w | p_w | floor | Hypothesis tested |
+|---|---|---|---|---|---|
+| `ugh_v2_alpha` | 0.40 | 0.30 | 0.20 | 0.5 | Conservative: v1 weights preserved, price_implied as add-on |
+| `ugh_v2_beta` | 0.20 | 0.20 | 0.40 | 0.5 | Price-heavy: prev_change is the dominant signal (April finding extrapolated) |
+| `ugh_v2_gamma` | 0.40 | 0.30 | 0.20 | 0.3 | Fire-sensitive: lower floor lets fire shrink direction more aggressively |
+| `ugh_v2_delta` | 0.20 | 0.30 | 0.30 | 0.5 | u-light: tests whether u_score's composite logic adds value or noise |
+
+Total daily forecasts: 3 baselines (existing) + 4 v2 variants = **7 strategies**.
+
+The legacy `ugh` (v1) strategy is **retired** at v2 cut-over since it has
+been empirically dominated by `baseline_simple_technical` for the entire
+observation period. Historical v1 records remain readable via
+`theory_version=v1` for audit; new daily runs no longer emit v1.
+
+### 5.3 `fire_probability` redefinition
 
 v1: multiplicative (`range_exp × momentum_abs`, returns 0 in choppy)
 v2: additive evidence model with neutral prior 0.5
@@ -192,11 +219,14 @@ is replaced.
 | Step | Action |
 |---|---|
 | 1 | Bump `FX_THEORY_VERSION` from `v1` to `v2` in `.github/workflows/fx-daily-protocol.yml` and `fx-analysis-pipeline.yml`. Records persist version in `forecast_record.theory_version` for audit. |
-| 2 | Implement v2 in `engine/projection.py` and `fx_protocol/market_ugh_builder.py`. |
-| 3 | Update `engine/projection_models.py` to add `p_weight` and `conviction_floor` fields with defaults. |
-| 4 | Update existing engine tests (`tests/engine/test_projection.py`) with new golden values; add tests per §8. |
-| 5 | Land before next Monday's automated weekly cron so 5/11 → 5/29 data accumulates under v2. |
-| 6 | After 10+ business days under v2, re-run monthly review and check H1–H5. |
+| 2 | Implement v2 `compute_e_raw` in `engine/projection.py` and v2 `fire_probability` in `fx_protocol/market_ugh_builder.py`. |
+| 3 | Add `p_weight` and `conviction_floor` fields (no defaults; required) to `ProjectionConfig` in `engine/projection_models.py`. Variant configs supply them explicitly. |
+| 4 | Add four enum values to `StrategyKind`: `ugh_v2_alpha`, `ugh_v2_beta`, `ugh_v2_gamma`, `ugh_v2_delta`. Retire `ugh` from new daily emission (keep enum for historical record loading). |
+| 5 | In `forecasting.py`, replace `build_ugh_forecast` with four variant builders (or one parameterized builder) that emit four `ForecastRecord`s per snapshot, each with its variant's `ProjectionConfig`. |
+| 6 | Update existing engine tests (`tests/engine/test_projection.py`) with new golden values; add tests per §8. |
+| 7 | Update analytics (weekly / monthly aggregations) to handle the expanded `StrategyKind` set without crashing — most queries iterate over distinct kinds and should require no change. Verify slice metric output dimensions don't break weekly_report.md formatting. |
+| 8 | Land before next Monday's automated weekly cron so 5/11 → 5/29 data accumulates under v2. |
+| 9 | After 10+ business days under v2, re-run monthly review and check H1–H5 across all four variants. |
 
 Historical `v1` records remain untouched (read-only replay invariant).
 Weekly / monthly reports stratify by `theory_version` if present; the v1/v2
@@ -243,19 +273,44 @@ or update inline if invariant.
 ## 9. Acceptance criteria
 
 v2 ships once:
-1. All test plan items in §8 pass.
+1. All test plan items in §8 pass for every variant.
 2. `ruff check .` and `pytest -q` clean.
-3. Engine runs deterministically (same snapshot → same forecast batch).
+3. Engine runs deterministically (same snapshot → same forecast batch
+   for each variant; variant outputs differ only by their config).
 4. `theory_version` is correctly recorded on new forecasts.
+5. All four variants produce a forecast for every daily run; no variant
+   silently skips.
 
-v2 is **validated** once May 2026 data shows:
-1. **H1 met**: UGH choppy dir_rate > 0% in May labeled_observations.
-2. **H4 met**: state_proxy_hit_rate ≥ 95%, range_hit_rate ≥ 70%.
-3. At least one of {H2, H3, H5} met.
+v2 is **validated** once May 2026 data shows (multi-variant interpretation):
+1. **H1 met by ≥ 1 variant**: at least one of `ugh_v2_alpha…delta` shows
+   choppy `dir_rate > 0%` in May labeled_observations with a binomial test
+   that no longer rejects the 50:50 prior at the lower tail.
+2. **H4 met by all variants**: `state_proxy_hit_rate ≥ 95%`,
+   `range_hit_rate ≥ 70%` (these come from state engine and range derivation
+   which are shared across variants — should be identical across them).
+3. **At least one variant** also satisfies one of {H2, H3, H5}.
+4. The **best variant** by overall dir_rate is identified and proposed as
+   the **production default for v3**. Other variants may continue running
+   for one further month or be retired.
 
 v2 is **invalidated** (escalate to Phase 3) if:
-- H1 not met after 10 May business days, OR
-- H4 violated (state / range engine regressed).
+- H1 not met by **any** variant after 10 May business days, OR
+- H4 violated (state / range engine regressed in shared infrastructure).
+
+The four-variant comparison itself is an acceptance criterion: regardless
+of absolute dir_rate, the **dispersion** between variants tells us which
+parameters matter:
+- If all four variants perform identically → weights are not the binding
+  constraint; the structural engine redesign is what mattered.
+- If `beta` (price-heavy) wins decisively → next iteration shifts weight
+  further toward `price_implied_score`.
+- If `gamma` (low floor) wins → fire is a real signal; promote toward
+  Framing B.
+- If `delta` (u-light) wins → `u_score` is noise; redesign or remove
+  `compute_u`.
+
+Each of these outcomes feeds directly into the next milestone's design
+question.
 
 ## 9.5. Design choice: fire as conviction multiplier (Framing A) vs directional confirmer (Framing B)
 
