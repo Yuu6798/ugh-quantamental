@@ -328,3 +328,79 @@ class TestEdgeCases:
         assert 0.0 <= sf.context_score <= 2.0
         assert 0.0 <= sf.grv_lock <= 1.0
         assert 0.0 <= sf.fire_probability <= 1.0
+
+
+# ---------------------------------------------------------------------------
+# v2 fire_probability semantics (spec §5.3 / §8.1)
+# ---------------------------------------------------------------------------
+
+
+class TestFireProbabilityV2:
+    """v2 redefined ``fire_probability`` from a multiplicative collapse-to-zero
+    formula to an additive evidence model centered at 0.5 (spec §5.3).
+    """
+
+    def _stats_with(
+        self,
+        *,
+        range_expansion: float,
+        momentum_5d: float,
+    ) -> dict[str, float]:
+        """Build a stats dict with only ``range_expansion`` / ``momentum_5d``
+        materially set; other fields use neutral / zero values so that
+        ``derive_signal_features`` cleanly isolates the fire formula's two
+        inputs.
+        """
+        return {
+            "prev_close_change_bp": 0.0,
+            "trailing_mean_abs_change_bp": 1.0,
+            "trailing_mean_range": 1.0,
+            "recent_mean_range": 1.0,
+            "sma5": 100.0,
+            "sma20": 100.0,
+            "momentum_5d": momentum_5d,
+            "directional_consistency": 0.5,
+            "range_expansion": range_expansion,
+            "spot_vs_sma20": 0.0,
+        }
+
+    def test_fire_neutral_when_no_signal(self) -> None:
+        """range_exp=1.0 and momentum=0 → no thrust evidence → fire == 0.5 exact."""
+        s = derive_signal_features(self._stats_with(range_expansion=1.0, momentum_5d=0.0))
+        assert s["fire_probability"] == pytest.approx(0.5)
+
+    def test_fire_increases_with_momentum(self) -> None:
+        """Positive momentum at neutral range → fire > 0.5."""
+        s = derive_signal_features(self._stats_with(range_expansion=1.0, momentum_5d=0.005))
+        assert s["fire_probability"] > 0.5
+
+    def test_fire_decreases_with_range_contraction(self) -> None:
+        """Range contraction (range_exp < 1) at zero momentum → fire < 0.5.
+
+        This is the v2-specific behavior: under v1 the multiplicative formula
+        bottomed out at 0 in choppy regimes; under v2 contraction is encoded
+        as negative thrust evidence and shifts fire below the 0.5 prior.
+        """
+        s = derive_signal_features(self._stats_with(range_expansion=0.6, momentum_5d=0.0))
+        assert s["fire_probability"] < 0.5
+
+    def test_fire_clamped_to_unit_interval(self) -> None:
+        """Extreme inputs must not escape [0, 1]."""
+        s_high = derive_signal_features(
+            self._stats_with(range_expansion=10.0, momentum_5d=0.5)
+        )
+        s_low = derive_signal_features(
+            self._stats_with(range_expansion=-5.0, momentum_5d=0.0)
+        )
+        assert 0.0 <= s_high["fire_probability"] <= 1.0
+        assert 0.0 <= s_low["fire_probability"] <= 1.0
+
+    def test_fire_symmetric_in_momentum_sign(self) -> None:
+        """Fire depends on |momentum|; sign must not change it."""
+        s_pos = derive_signal_features(
+            self._stats_with(range_expansion=1.0, momentum_5d=0.005)
+        )
+        s_neg = derive_signal_features(
+            self._stats_with(range_expansion=1.0, momentum_5d=-0.005)
+        )
+        assert s_pos["fire_probability"] == pytest.approx(s_neg["fire_probability"])

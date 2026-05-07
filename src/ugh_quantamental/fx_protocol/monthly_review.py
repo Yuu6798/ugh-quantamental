@@ -24,6 +24,8 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ugh_quantamental.fx_protocol.models import is_ugh_kind
+
 logger = logging.getLogger(__name__)
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -55,12 +57,43 @@ THRESHOLD_MINIMUM_OBSERVATIONS: int = 5
 # Strategies to compare
 # ---------------------------------------------------------------------------
 
-STRATEGY_KINDS: tuple[str, ...] = (
+#: Order: legacy ``ugh`` first (for v1-era replay), then v2 variants, then baselines.
+#: Downstream UGH-only paths pool rows via :func:`is_ugh_kind` rather than
+#: relying on a single canonical kind. Anchor-based comparisons (baseline
+#: deltas, review flags) iterate ``UGH_KINDS`` and pick the first variant with
+#: non-zero forecast_count, so v1-era reports anchor on ``ugh`` and v2-era
+#: reports anchor on whichever variant has data first.
+UGH_KINDS: tuple[str, ...] = (
     "ugh",
+    "ugh_v2_alpha",
+    "ugh_v2_beta",
+    "ugh_v2_gamma",
+    "ugh_v2_delta",
+)
+
+STRATEGY_KINDS: tuple[str, ...] = (
+    *UGH_KINDS,
     "baseline_random_walk",
     "baseline_prev_day_direction",
     "baseline_simple_technical",
 )
+
+
+def _select_canonical_ugh_metrics(
+    strategy_metrics: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Pick the canonical UGH metrics row for anchor comparisons.
+
+    Returns the first metrics row in ``UGH_KINDS`` order whose
+    ``forecast_count > 0``. If no UGH-class row has data, falls back to the
+    legacy ``ugh`` row if present, else ``None``.
+    """
+    by_kind = {m["strategy_kind"]: m for m in strategy_metrics if m.get("strategy_kind")}
+    for kind in UGH_KINDS:
+        m = by_kind.get(kind)
+        if m is not None and m.get("forecast_count", 0) > 0:
+            return m
+    return by_kind.get("ugh")
 
 
 # ---------------------------------------------------------------------------
@@ -237,12 +270,12 @@ def compute_monthly_baseline_comparisons(
     - mean_abs_magnitude_error_bp_delta_vs_ugh
     - state_proxy_hit_rate_delta_vs_ugh (if computable)
     """
-    ugh = next((m for m in strategy_metrics if m["strategy_kind"] == "ugh"), None)
+    ugh = _select_canonical_ugh_metrics(strategy_metrics)
 
     result: list[dict[str, Any]] = []
     for m in strategy_metrics:
         sk = m["strategy_kind"]
-        if sk == "ugh":
+        if is_ugh_kind(sk):
             continue
 
         dir_delta: float | None = None
@@ -294,8 +327,12 @@ def compute_monthly_baseline_comparisons(
 def compute_monthly_state_metrics(
     observations: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
-    """Compute UGH performance grouped by dominant_state (from labeled observations)."""
-    ugh_rows = [r for r in observations if r.get("strategy_kind") == "ugh"]
+    """Compute UGH performance grouped by dominant_state (from labeled observations).
+
+    Pools all UGH-class rows (legacy ``ugh`` + v2 variants); state-engine
+    diagnostics are shared across variants.
+    """
+    ugh_rows = [r for r in observations if is_ugh_kind(r.get("strategy_kind", ""))]
     groups: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in ugh_rows:
         state = row.get("dominant_state", "") or "unknown"
@@ -340,12 +377,15 @@ def compute_monthly_intervention_metrics(
 def compute_monthly_event_tag_metrics(
     observations: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
-    """Compute UGH performance grouped by event_tag (confirmed annotations, expanded)."""
+    """Compute UGH performance grouped by event_tag (confirmed annotations, expanded).
+
+    Pools all UGH-class rows (legacy ``ugh`` + v2 variants).
+    """
     confirmed = [
         r
         for r in observations
         if r.get("annotation_status", "").strip().lower() == "confirmed"
-        and r.get("strategy_kind") == "ugh"
+        and is_ugh_kind(r.get("strategy_kind", ""))
     ]
     groups: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in confirmed:
@@ -381,13 +421,13 @@ def _compute_slice_metrics_for_ugh(
         r
         for r in observations
         if r.get("annotation_status", "").strip().lower() == "confirmed"
-        and r.get("strategy_kind") == "ugh"
+        and is_ugh_kind(r.get("strategy_kind", ""))
     ]
     non_confirmed = [
         r
         for r in observations
         if r.get("annotation_status", "").strip().lower() != "confirmed"
-        and r.get("strategy_kind") == "ugh"
+        and is_ugh_kind(r.get("strategy_kind", ""))
     ]
 
     groups: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -534,9 +574,10 @@ def select_representative_cases(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Select representative success and failure case examples (UGH only).
 
-    Returns (successes, failures) each as a list of case dicts.
+    Returns (successes, failures) each as a list of case dicts. Pools all
+    UGH-class rows (legacy ``ugh`` + v2 variants).
     """
-    ugh_rows = [r for r in observations if r.get("strategy_kind") == "ugh"]
+    ugh_rows = [r for r in observations if is_ugh_kind(r.get("strategy_kind", ""))]
 
     successes: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
@@ -602,7 +643,7 @@ def compute_review_flags(
     """
     flags: list[dict[str, str]] = []
 
-    ugh = next((m for m in strategy_metrics if m["strategy_kind"] == "ugh"), None)
+    ugh = _select_canonical_ugh_metrics(strategy_metrics)
 
     # 1. Insufficient data
     if ugh is None or ugh["forecast_count"] < THRESHOLD_MINIMUM_OBSERVATIONS:

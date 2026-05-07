@@ -581,7 +581,14 @@ def db_session():
 
 
 def _seed_forecast_batch(session, as_of_jst, batch_id_override: str | None = None):
-    """Seed exactly 4 forecast records in the DB for a given as_of_jst."""
+    """Seed a v2-shaped forecast batch (4 UGH variants + 3 baselines = 7).
+
+    All 4 v2 UGH variants share the same UGH-engine-derived fields under this
+    fixture; the only thing that differs across variants is ``strategy_kind``
+    (and, transitively, ``forecast_id``). This keeps the v1 test assertions
+    valid when they switch from selecting ``StrategyKind.ugh`` to selecting
+    one of the v2 variants.
+    """
     from zoneinfo import ZoneInfo
 
     from ugh_quantamental.fx_protocol.ids import make_forecast_batch_id
@@ -615,9 +622,7 @@ def _seed_forecast_batch(session, as_of_jst, batch_id_override: str | None = Non
         protocol_version="v1",
     )
 
-    ugh_rec = ForecastRecord(
-        forecast_id=make_forecast_id(pair, as_of_jst, prot, StrategyKind.ugh),
-        strategy_kind=StrategyKind.ugh,
+    ugh_kwargs_common = dict(
         forecast_direction=ForecastDirection.up,
         expected_close_change_bp=53.0,
         expected_range=ExpectedRange(low_price=149.0, high_price=152.0),
@@ -637,7 +642,21 @@ def _seed_forecast_batch(session, as_of_jst, batch_id_override: str | None = Non
         urgency=0.6,
         input_snapshot_ref="ref/001",
         primary_question="Will USDJPY close higher?",
-        **base_rec,
+    )
+
+    ugh_variant_recs = tuple(
+        ForecastRecord(
+            forecast_id=make_forecast_id(pair, as_of_jst, prot, variant),
+            strategy_kind=variant,
+            **ugh_kwargs_common,
+            **base_rec,
+        )
+        for variant in (
+            StrategyKind.ugh_v2_alpha,
+            StrategyKind.ugh_v2_beta,
+            StrategyKind.ugh_v2_gamma,
+            StrategyKind.ugh_v2_delta,
+        )
     )
 
     rw_rec = ForecastRecord(
@@ -663,14 +682,18 @@ def _seed_forecast_batch(session, as_of_jst, batch_id_override: str | None = Non
     )
 
     FxForecastRepository.save_fx_forecast_batch(
-        session, forecast_batch_id=batch_id, forecasts=(ugh_rec, rw_rec, pd_rec, st_rec)
+        session,
+        forecast_batch_id=batch_id,
+        forecasts=(*ugh_variant_recs, rw_rec, pd_rec, st_rec),
     )
     return batch_id
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
-def test_workflow_generates_outcome_and_four_evaluations(db_session) -> None:
+def test_workflow_generates_outcome_and_seven_evaluations(db_session) -> None:
     from zoneinfo import ZoneInfo
+
+    from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
 
     _JST = ZoneInfo("Asia/Tokyo")
     as_of = datetime(2026, 3, 13, 8, 0, 0, tzinfo=_JST)
@@ -680,10 +703,10 @@ def test_workflow_generates_outcome_and_four_evaluations(db_session) -> None:
     result = run_daily_outcome_evaluation_workflow(db_session, req)
 
     assert result.outcome.realized_direction == ForecastDirection.up
-    assert len(result.evaluations) == 4
+    assert len(result.evaluations) == EXPECTED_DAILY_BATCH_SIZE
 
 
-def test_all_four_evaluations_share_one_outcome(db_session) -> None:
+def test_all_evaluations_share_one_outcome(db_session) -> None:
     from zoneinfo import ZoneInfo
 
     _JST = ZoneInfo("Asia/Tokyo")
@@ -708,13 +731,17 @@ def test_ugh_evaluation_has_range_hit_set(db_session) -> None:
     req = _outcome_request()
     result = run_daily_outcome_evaluation_workflow(db_session, req)
 
-    ugh_ev = next(ev for ev in result.evaluations if ev.strategy_kind == StrategyKind.ugh)
+    ugh_ev = next(
+        ev for ev in result.evaluations if ev.strategy_kind == StrategyKind.ugh_v2_alpha
+    )
     assert ugh_ev.range_hit is not None
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
 def test_baseline_evaluations_have_range_hit_none(db_session) -> None:
     from zoneinfo import ZoneInfo
+
+    from ugh_quantamental.fx_protocol.models import is_ugh_kind
 
     _JST = ZoneInfo("Asia/Tokyo")
     as_of = datetime(2026, 3, 13, 8, 0, 0, tzinfo=_JST)
@@ -724,7 +751,7 @@ def test_baseline_evaluations_have_range_hit_none(db_session) -> None:
     result = run_daily_outcome_evaluation_workflow(db_session, req)
 
     for ev in result.evaluations:
-        if ev.strategy_kind != StrategyKind.ugh:
+        if not is_ugh_kind(ev.strategy_kind):
             assert ev.range_hit is None, f"baseline {ev.strategy_kind} should have range_hit=None"
 
 
@@ -742,7 +769,9 @@ def test_state_proxy_from_next_day_batch(db_session) -> None:
     req = _outcome_request()
     result = run_daily_outcome_evaluation_workflow(db_session, req)
 
-    ugh_ev = next(ev for ev in result.evaluations if ev.strategy_kind == StrategyKind.ugh)
+    ugh_ev = next(
+        ev for ev in result.evaluations if ev.strategy_kind == StrategyKind.ugh_v2_alpha
+    )
     # The next-day batch has dominant_state=setup, so realized_state_proxy should be "setup"
     assert ugh_ev.realized_state_proxy == "setup"
     assert ugh_ev.state_proxy_hit is not None
@@ -760,7 +789,9 @@ def test_state_proxy_none_when_next_batch_absent(db_session) -> None:
     req = _outcome_request()
     result = run_daily_outcome_evaluation_workflow(db_session, req)
 
-    ugh_ev = next(ev for ev in result.evaluations if ev.strategy_kind == StrategyKind.ugh)
+    ugh_ev = next(
+        ev for ev in result.evaluations if ev.strategy_kind == StrategyKind.ugh_v2_alpha
+    )
     assert ugh_ev.realized_state_proxy is None
     assert ugh_ev.state_proxy_hit is None
 

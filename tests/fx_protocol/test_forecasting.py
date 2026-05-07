@@ -252,7 +252,7 @@ def test_baseline_construction_rules_are_deterministic() -> None:
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
-def test_daily_workflow_generates_exactly_four_with_shared_metadata(db_session, monkeypatch) -> None:
+def test_daily_workflow_generates_seven_with_shared_metadata(db_session, monkeypatch) -> None:
     from ugh_quantamental.fx_protocol import forecasting
 
     req = _request()
@@ -304,23 +304,29 @@ def test_daily_workflow_generates_exactly_four_with_shared_metadata(db_session, 
 
     result = run_daily_forecast_workflow(db_session, req)
 
-    assert len(result.forecasts) == 4
+    # v2: 4 UGH variants (alpha/beta/gamma/delta) + 3 baselines = 7 forecasts.
+    from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
+
+    assert len(result.forecasts) == EXPECTED_DAILY_BATCH_SIZE
     batch_ids = {f.forecast_batch_id for f in result.forecasts}
     assert batch_ids == {result.forecast_batch_id}
     assert {f.pair for f in result.forecasts} == {CurrencyPair.USDJPY}
     _JST = ZoneInfo("Asia/Tokyo")
     assert {f.as_of_jst for f in result.forecasts} == {req.as_of_jst.replace(tzinfo=_JST)}
-    assert len({f.forecast_id for f in result.forecasts}) == 4
+    assert len({f.forecast_id for f in result.forecasts}) == EXPECTED_DAILY_BATCH_SIZE
 
-    ugh = next(f for f in result.forecasts if f.strategy_kind == StrategyKind.ugh)
-    assert ugh.primary_question == "Will USDJPY close higher?"
-    assert ugh.q_strength == req.ugh_request.projection.question_features.q_strength
-    assert ugh.grv_lock == req.ugh_request.projection.signal_features.grv_lock
-    assert ugh.e_star == 15.0
+    # All 4 UGH variants share the projection result under a fake workflow.
+    ugh_alpha = next(
+        f for f in result.forecasts if f.strategy_kind == StrategyKind.ugh_v2_alpha
+    )
+    assert ugh_alpha.primary_question == "Will USDJPY close higher?"
+    assert ugh_alpha.q_strength == req.ugh_request.projection.question_features.q_strength
+    assert ugh_alpha.grv_lock == req.ugh_request.projection.signal_features.grv_lock
+    assert ugh_alpha.e_star == 15.0
     # expected_close_change_bp = e_star * trailing_mean_abs_close_change_bp * (0.5 + 0.5*conviction)
     # = 15.0 * 20.0 * (0.5 + 0.5*0.7) = 15.0 * 20.0 * 0.85 = 255.0
-    assert ugh.expected_close_change_bp == pytest.approx(255.0)
-    assert ugh.forecast_direction == ForecastDirection.up
+    assert ugh_alpha.expected_close_change_bp == pytest.approx(255.0)
+    assert ugh_alpha.forecast_direction == ForecastDirection.up
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
@@ -378,7 +384,10 @@ def test_ugh_magnitude_scales_with_volatility_and_conviction(db_session, monkeyp
     monkeypatch.setattr(forecasting, "run_full_workflow", _fake_full_workflow)
 
     result = run_daily_forecast_workflow(db_session, req)
-    ugh = next(f for f in result.forecasts if f.strategy_kind == StrategyKind.ugh)
+    # All v2 variants share the projection result (same e_star, conviction)
+    # under a fake full-workflow, so picking any UGH variant gives the same
+    # magnitude. Use alpha as the canonical anchor.
+    ugh = next(f for f in result.forecasts if f.strategy_kind == StrategyKind.ugh_v2_alpha)
 
     # e_star=-0.6, vol_scale=20.0, conviction=0.0 → factor=0.5
     # → -0.6 * 20.0 * 0.5 = -6.0 bp, direction=DOWN
@@ -429,10 +438,12 @@ def test_idempotent_rerun_and_partial_batch_error(db_session, monkeypatch) -> No
 
     monkeypatch.setattr(forecasting, "run_full_workflow", _fake_full_workflow)
 
+    from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
+
     first = run_daily_forecast_workflow(db_session, req)
     second = run_daily_forecast_workflow(db_session, req)
     assert second.forecast_batch_id == first.forecast_batch_id
-    assert len(second.forecasts) == 4
+    assert len(second.forecasts) == EXPECTED_DAILY_BATCH_SIZE
 
     from ugh_quantamental.persistence.models import FxForecastRecord
 

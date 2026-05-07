@@ -25,12 +25,64 @@ class CurrencyPair(str, Enum):
 
 
 class StrategyKind(str, Enum):
-    """Supported forecast strategy kinds."""
+    """Supported forecast strategy kinds.
+
+    `ugh` is the legacy v1 UGH strategy, retired from new daily emission at the
+    v2 cut-over but kept readable for historical record loading. New daily runs
+    emit one forecast per `ugh_v2_*` variant instead.
+    """
 
     ugh = "ugh"
+    ugh_v2_alpha = "ugh_v2_alpha"
+    ugh_v2_beta = "ugh_v2_beta"
+    ugh_v2_gamma = "ugh_v2_gamma"
+    ugh_v2_delta = "ugh_v2_delta"
     baseline_random_walk = "baseline_random_walk"
     baseline_prev_day_direction = "baseline_prev_day_direction"
     baseline_simple_technical = "baseline_simple_technical"
+
+
+_UGH_V2_STRATEGY_KINDS: tuple[StrategyKind, ...] = (
+    StrategyKind.ugh_v2_alpha,
+    StrategyKind.ugh_v2_beta,
+    StrategyKind.ugh_v2_gamma,
+    StrategyKind.ugh_v2_delta,
+)
+
+#: Single source of truth for the strategies emitted on every daily run under
+#: v2: 4 UGH variants + 3 baselines. Order is the canonical batch order.
+#: Used by daily-batch completeness checks (forecasting / outcomes / automation)
+#: and by annotation-history slicing in :mod:`analytics_annotations`.
+#: Legacy ``ugh`` is intentionally absent — it is retired from new daily
+#: emission per spec §5.2 / §7.4 — but remains in :class:`StrategyKind` so
+#: historical ``v1`` records remain readable.
+_ACTIVE_STRATEGY_KINDS: tuple[StrategyKind, ...] = (
+    *_UGH_V2_STRATEGY_KINDS,
+    StrategyKind.baseline_random_walk,
+    StrategyKind.baseline_prev_day_direction,
+    StrategyKind.baseline_simple_technical,
+)
+
+#: Number of forecasts emitted per snapshot under the v2 active set
+#: (3 baselines + 4 UGH variants = 7).
+EXPECTED_DAILY_BATCH_SIZE: int = len(_ACTIVE_STRATEGY_KINDS)
+
+
+def is_ugh_kind(kind: StrategyKind | str) -> bool:
+    """Return True if `kind` is any UGH-class strategy (legacy v1 or v2 variants).
+
+    Accepts either a `StrategyKind` enum value or its string form, mirroring
+    the mixed enum/string comparisons that pre-v2 code relied on. Unknown
+    strings return False rather than raising so analytics paths that read raw
+    CSV rows degrade gracefully on legacy / forward-compatible kinds.
+    """
+    if isinstance(kind, StrategyKind):
+        return kind == StrategyKind.ugh or kind in _UGH_V2_STRATEGY_KINDS
+    if isinstance(kind, str):
+        return kind == StrategyKind.ugh.value or kind in {
+            k.value for k in _UGH_V2_STRATEGY_KINDS
+        }
+    return False
 
 
 class ForecastDirection(str, Enum):
@@ -371,15 +423,17 @@ class ForecastRecord(BaseModel):
     def _validate_strategy_consistency(self) -> ForecastRecord:
         """Enforce UGH / baseline field-presence contract.
 
-        * ``strategy_kind='ugh'``: all ``_UGH_REQUIRED_FIELDS`` must be non-null.
+        * UGH-class strategies (legacy ``ugh`` and all ``ugh_v2_*`` variants):
+          all ``_UGH_REQUIRED_FIELDS`` must be non-null.
         * Baseline strategy kinds: all ``_UGH_REQUIRED_FIELDS`` must be ``None``
           so that UGH-exclusive data cannot contaminate baseline records.
         """
-        if self.strategy_kind == StrategyKind.ugh:
+        if is_ugh_kind(self.strategy_kind):
             null_fields = [f for f in _UGH_REQUIRED_FIELDS if getattr(self, f) is None]
             if null_fields:
                 raise ValueError(
-                    f"strategy_kind='ugh' requires non-null fields: {null_fields}"
+                    f"strategy_kind='{self.strategy_kind.value}' requires non-null fields: "
+                    f"{null_fields}"
                 )
         elif self.strategy_kind in _BASELINE_STRATEGY_KINDS:
             set_fields = [f for f in _UGH_REQUIRED_FIELDS if getattr(self, f) is not None]
@@ -652,11 +706,11 @@ class EvaluationRecord(BaseModel):
                     f"baseline strategy_kind='{self.strategy_kind.value}' must have "
                     "range_hit=None (no forecast envelope exists for baselines)"
                 )
-        elif self.strategy_kind == StrategyKind.ugh:
+        elif is_ugh_kind(self.strategy_kind):
             if self.range_hit is None:
                 raise ValueError(
-                    "strategy_kind='ugh' requires range_hit to be set "
-                    "(UGH forecasts always include expected_range)"
+                    f"strategy_kind='{self.strategy_kind.value}' requires range_hit to be "
+                    "set (UGH forecasts always include expected_range)"
                 )
         return self
 

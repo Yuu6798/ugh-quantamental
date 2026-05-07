@@ -13,11 +13,13 @@ from ugh_quantamental.fx_protocol.forecast_models import (
 )
 from ugh_quantamental.fx_protocol.ids import make_forecast_batch_id, make_forecast_id
 from ugh_quantamental.fx_protocol.models import (
+    EXPECTED_DAILY_BATCH_SIZE,
     DisconfirmerRule,
     ExpectedRange,
     ForecastDirection,
     ForecastRecord,
     StrategyKind,
+    is_ugh_kind,
 )
 from ugh_quantamental.persistence.repositories import FxForecastRepository
 from ugh_quantamental.schemas.enums import QuestionDirection
@@ -101,7 +103,7 @@ def _make_base_record(
     }
 
     optional_fields = {
-        "input_snapshot_ref": request.input_snapshot_ref if strategy_kind == StrategyKind.ugh else None,
+        "input_snapshot_ref": request.input_snapshot_ref if is_ugh_kind(strategy_kind) else None,
         "primary_question": primary_question,
         "expected_range": expected_range,
         "dominant_state": dominant_state,
@@ -179,21 +181,116 @@ def build_simple_technical_forecast(
     )
 
 
-def build_ugh_forecast(
+#: Per-variant ``ProjectionConfig`` overrides for the four v2 UGH variants
+#: (spec §5.2). ``ugh_v2_alpha`` is conservative — its values match the
+#: no-arg ``ProjectionConfig()`` defaults — so the entry below is empty
+#: and exists for symmetry / explicitness. ``beta`` / ``gamma`` / ``delta``
+#: each override the four directional knobs (``u_weight``, ``t_weight``,
+#: ``p_weight``, ``conviction_floor``) from alpha.
+_UGH_V2_VARIANT_CONFIGS: dict[StrategyKind, dict[str, float]] = {
+    StrategyKind.ugh_v2_alpha: {
+        "u_weight": 0.40,
+        "t_weight": 0.30,
+        "p_weight": 0.20,
+        "conviction_floor": 0.5,
+    },
+    StrategyKind.ugh_v2_beta: {
+        "u_weight": 0.20,
+        "t_weight": 0.20,
+        "p_weight": 0.40,
+        "conviction_floor": 0.5,
+    },
+    StrategyKind.ugh_v2_gamma: {
+        "u_weight": 0.40,
+        "t_weight": 0.30,
+        "p_weight": 0.20,
+        "conviction_floor": 0.3,
+    },
+    StrategyKind.ugh_v2_delta: {
+        "u_weight": 0.20,
+        "t_weight": 0.30,
+        "p_weight": 0.30,
+        "conviction_floor": 0.5,
+    },
+}
+
+#: Order in which v2 UGH variants are emitted into a forecast batch.
+UGH_V2_VARIANTS: tuple[StrategyKind, ...] = (
+    StrategyKind.ugh_v2_alpha,
+    StrategyKind.ugh_v2_beta,
+    StrategyKind.ugh_v2_gamma,
+    StrategyKind.ugh_v2_delta,
+)
+
+
+def _build_variant_request(
+    base_request: DailyForecastWorkflowRequest,
+    variant: StrategyKind,
+):
+    """Return a copy of ``base_request.ugh_request`` with the variant's config.
+
+    The returned object is a fresh ``FullWorkflowRequest`` (the base request's
+    ``ugh_request`` is frozen Pydantic). ``projection.config`` is replaced
+    with the variant's :class:`ProjectionConfig`; all other fields are
+    preserved.
+    """
+    from ugh_quantamental.engine.projection_models import ProjectionConfig
+    from ugh_quantamental.workflows.models import (
+        FullWorkflowRequest,
+        ProjectionWorkflowRequest,
+    )
+
+    overrides = _UGH_V2_VARIANT_CONFIGS[variant]
+    base_proj = base_request.ugh_request.projection
+    variant_config = ProjectionConfig(**overrides)
+    variant_projection = ProjectionWorkflowRequest(
+        projection_id=base_proj.projection_id,
+        horizon_days=base_proj.horizon_days,
+        question_features=base_proj.question_features,
+        signal_features=base_proj.signal_features,
+        alignment_inputs=base_proj.alignment_inputs,
+        config=variant_config,
+        run_id=base_proj.run_id,
+        created_at=base_proj.created_at,
+    )
+    return FullWorkflowRequest(
+        projection=variant_projection,
+        state=base_request.ugh_request.state,
+    )
+
+
+def build_ugh_variant_forecast(
     session: Session,
     request: DailyForecastWorkflowRequest,
     forecast_batch_id: str,
     window_end_jst,
+    *,
+    variant: StrategyKind,
 ) -> ForecastRecord:
-    full_result = run_full_workflow(session=session, request=request.ugh_request)
-    projection_req = request.ugh_request.projection
+    """Build one ``ForecastRecord`` for the given v2 UGH variant.
+
+    Replaces the v1 ``build_ugh_forecast`` builder, which emitted a single
+    ``StrategyKind.ugh`` record. v2 emits four variant records per snapshot
+    (spec §5.2); this function produces one of them, parameterized by the
+    ``variant`` ``StrategyKind`` (which selects the per-variant
+    :class:`ProjectionConfig` from ``_UGH_V2_VARIANT_CONFIGS``).
+    """
+    if variant not in _UGH_V2_VARIANT_CONFIGS:
+        raise ValueError(
+            f"variant must be one of {tuple(_UGH_V2_VARIANT_CONFIGS)}; got {variant!r}"
+        )
+
+    variant_request = _build_variant_request(request, variant)
+    full_result = run_full_workflow(session=session, request=variant_request)
+    projection_req = variant_request.projection
     projection_res = full_result.projection.engine_result
     state_res = full_result.state.engine_result
 
     # e_star is a unitless [-1, 1] score (direction × confidence). Scale it to bp
     # by the trailing mean absolute close change so UGH magnitudes are on the same
     # unit as baseline_simple_technical / baseline_prev_day_direction. Apply a
-    # conviction-based dampener (0.5–1.0) to shrink low-confidence forecasts.
+    # realized-volatility × conviction multiplier (matches PR #87 magnitude
+    # scaling, retained for v2).
     ctx = request.baseline_context
     conviction_factor = 0.5 + 0.5 * projection_res.conviction
     expected_close_change_bp = (
@@ -204,7 +301,7 @@ def build_ugh_forecast(
         request=request,
         forecast_batch_id=forecast_batch_id,
         window_end_jst=window_end_jst,
-        strategy_kind=StrategyKind.ugh,
+        strategy_kind=variant,
         forecast_direction=_direction_from_bp(expected_close_change_bp),
         expected_close_change_bp=expected_close_change_bp,
         expected_range=_build_range_from_baseline_context(
@@ -247,9 +344,10 @@ def run_daily_forecast_workflow(
 
     existing = FxForecastRepository.load_fx_forecast_batch(session, forecast_batch_id)
     if existing is not None:
-        if len(existing.forecasts) != 4:
+        if len(existing.forecasts) != EXPECTED_DAILY_BATCH_SIZE:
             raise ValueError(
-                f"partial forecast batch exists for {forecast_batch_id}: expected 4 records, got {len(existing.forecasts)}"
+                f"partial forecast batch exists for {forecast_batch_id}: expected "
+                f"{EXPECTED_DAILY_BATCH_SIZE} records, got {len(existing.forecasts)}"
             )
         return existing
 
@@ -263,8 +361,15 @@ def run_daily_forecast_workflow(
 
     window_end_jst = next_as_of_jst(request.as_of_jst)
 
+    # v2 batch: one forecast per UGH variant (alpha/beta/gamma/delta) plus
+    # three baselines = 7 records total (cf. EXPECTED_DAILY_BATCH_SIZE).
     forecasts = (
-        build_ugh_forecast(session, request, forecast_batch_id, window_end_jst),
+        *(
+            build_ugh_variant_forecast(
+                session, request, forecast_batch_id, window_end_jst, variant=variant
+            )
+            for variant in UGH_V2_VARIANTS
+        ),
         build_random_walk_forecast(request, forecast_batch_id, window_end_jst),
         build_prev_day_direction_forecast(request, forecast_batch_id, window_end_jst),
         build_simple_technical_forecast(request, forecast_batch_id, window_end_jst),

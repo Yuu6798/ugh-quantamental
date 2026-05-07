@@ -43,7 +43,16 @@ Feature mapping summary
 - ``regime_fit``: directional_consistency.
 - ``narrative_dispersion``: abs(fundamental_score - technical_score) / 2.
 - ``evidence_confidence``: 1 - narrative_dispersion, clamped to [0, 1].
-- ``fire_probability``: range_expansion * abs(momentum_5d), clamped to [0, 1].
+- ``fire_probability`` (v2): additive evidence model centered on 0.5.
+  ``range_evidence = clamp((range_expansion - 1) * 2, -1, 1)``;
+  ``momentum_evidence = clamp(abs(momentum_5d) * 200, 0, 1)``;
+  ``thrust_score = 0.5 * range_evidence + 0.5 * momentum_evidence``;
+  ``fire_probability = clamp(0.5 + 0.5 * thrust_score, 0, 1)``.
+  Centered at 0.5 (no-information prior) so range contraction shifts fire
+  below 0.5 and range expansion / momentum shift it above. Replaces v1's
+  multiplicative ``range_exp * abs(momentum)`` which collapsed to 0 in
+  choppy regimes and produced the structural anti-thrust bias documented
+  in spec §3.
 
 **C. AlignmentInputs**
 
@@ -252,8 +261,15 @@ def derive_signal_features(stats: dict[str, float]) -> dict[str, float]:
     narrative_dispersion = _clamp(abs(fundamental_score - technical_score) / 2.0, 0.0, 1.0)
     evidence_confidence = _clamp(1.0 - narrative_dispersion, 0.0, 1.0)
 
-    momentum_abs = abs(stats["momentum_5d"]) * 100  # same scale as technical_score
-    fire_probability = _clamp(range_exp * _clamp(momentum_abs, 0.0, 1.0), 0.0, 1.0)
+    # v2 additive evidence model (spec §5.3): range_evidence in [-1, 1] and
+    # momentum_evidence in [0, 1] each contribute half-weight to a thrust
+    # score, then map onto [0, 1] centered at 0.5 (no-info prior). Range
+    # contraction (range_exp < 1) yields negative thrust evidence; momentum
+    # is non-negative since |momentum_5d| has no sign.
+    range_evidence = _clamp((range_exp - 1.0) * 2.0, -1.0, 1.0)
+    momentum_evidence = _clamp(abs(stats["momentum_5d"]) * 200.0, 0.0, 1.0)
+    thrust_score = 0.5 * range_evidence + 0.5 * momentum_evidence
+    fire_probability = _clamp(0.5 + 0.5 * thrust_score, 0.0, 1.0)
 
     return {
         "fundamental_score": fundamental_score,

@@ -15,6 +15,8 @@ import shutil
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from ugh_quantamental.fx_protocol.models import is_ugh_kind
+
 if TYPE_CHECKING:
     from ugh_quantamental.fx_protocol.data_models import FxProtocolMarketSnapshot
     from ugh_quantamental.fx_protocol.models import (
@@ -282,7 +284,11 @@ def build_daily_report_md(
     lines.append("## Observation Notes")
     lines.append("")
     if evaluations:
-        ugh_evals = [e for e in evaluations if e.strategy_kind.value == "ugh"]
+        # Pool UGH-class evaluations (legacy + v2 variants); the daily
+        # observation note picks the first available one for direction /
+        # range / close diagnostics. With v2's 4 variants this favors the
+        # canonical batch-order entry (alpha first under the v2 active set).
+        ugh_evals = [e for e in evaluations if is_ugh_kind(e.strategy_kind)]
         if ugh_evals:
             ev = ugh_evals[0]
             lines.append(f"- UGH direction hit: **{ev.direction_hit}**")
@@ -293,7 +299,9 @@ def build_daily_report_md(
             if ev.disconfirmer_explained:
                 hit_rules = ", ".join(ev.disconfirmers_hit) if ev.disconfirmers_hit else "none"
                 lines.append(f"- Disconfirmer explained miss (rules: {hit_rules})")
-        baseline_hits = [e for e in evaluations if e.direction_hit and e.strategy_kind.value != "ugh"]
+        baseline_hits = [
+            e for e in evaluations if e.direction_hit and not is_ugh_kind(e.strategy_kind)
+        ]
         lines.append(
             f"- Baseline direction hits: {len(baseline_hits)}/3"
         )

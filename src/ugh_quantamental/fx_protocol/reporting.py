@@ -14,6 +14,7 @@ from ugh_quantamental.fx_protocol.models import (
     ForecastRecord,
     OutcomeRecord,
     StrategyKind,
+    is_ugh_kind,
 )
 from ugh_quantamental.fx_protocol.report_models import (
     BaselineWeeklyComparison,
@@ -38,7 +39,18 @@ _BASELINE_KINDS: tuple[StrategyKind, ...] = (
     StrategyKind.baseline_simple_technical,
 )
 
-_ALL_STRATEGY_KINDS: tuple[StrategyKind, ...] = (StrategyKind.ugh, *_BASELINE_KINDS)
+# Order: legacy `ugh` first (kept for v1-era replay), then v2 variants.
+# Downstream UGH-only diagnostics pool rows via `is_ugh_kind` rather than
+# relying on a single canonical kind.
+_UGH_KINDS: tuple[StrategyKind, ...] = (
+    StrategyKind.ugh,
+    StrategyKind.ugh_v2_alpha,
+    StrategyKind.ugh_v2_beta,
+    StrategyKind.ugh_v2_gamma,
+    StrategyKind.ugh_v2_delta,
+)
+
+_ALL_STRATEGY_KINDS: tuple[StrategyKind, ...] = (*_UGH_KINDS, *_BASELINE_KINDS)
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +288,7 @@ def _build_strategy_metrics(
         else None
     )
 
-    is_ugh = strategy_kind == StrategyKind.ugh
+    is_ugh = is_ugh_kind(strategy_kind)
     if is_ugh:
         range_rows = [r for r in sk_rows if r.range_hit is not None]
         range_evaluable_count = len(range_rows)
@@ -507,12 +519,25 @@ def run_weekly_report(session: "Session", request: WeeklyReportRequest) -> Weekl
         )
 
     # 5. Build metrics.
-    ugh_rows = [r for r in all_rows if r.strategy_kind == StrategyKind.ugh]
+    # Pool all UGH-class rows (legacy + v2 variants) for state/grv/fire/mismatch
+    # summaries — those diagnostics derive from the shared state engine and are
+    # not variant-specific.
+    ugh_rows = [r for r in all_rows if is_ugh_kind(r.strategy_kind)]
 
     strategy_metrics = tuple(
         _build_strategy_metrics(all_rows, kind) for kind in _ALL_STRATEGY_KINDS
     )
-    ugh_metrics = next(m for m in strategy_metrics if m.strategy_kind == StrategyKind.ugh)
+    # Pick the canonical UGH metrics for baseline comparisons. After step 7.5
+    # the report is stratified by theory_version, so at most one of these has
+    # data per report: legacy `ugh` for v1-era reports, or one of the v2
+    # variants for v2-era reports. Iterate in `_UGH_KINDS` order and take the
+    # first variant with non-zero forecast_count; if none has data, fall back
+    # to the legacy `ugh` metrics so the comparison structure is preserved.
+    ugh_metrics_by_kind = {m.strategy_kind: m for m in strategy_metrics}
+    ugh_metrics = next(
+        (ugh_metrics_by_kind[k] for k in _UGH_KINDS if ugh_metrics_by_kind[k].forecast_count > 0),
+        ugh_metrics_by_kind[StrategyKind.ugh],
+    )
 
     baseline_comparisons = _build_baseline_comparisons(all_rows, ugh_metrics)
     state_metrics = _build_state_metrics(ugh_rows)

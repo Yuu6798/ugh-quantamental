@@ -11,12 +11,13 @@ from ugh_quantamental.fx_protocol.ids import (
     make_outcome_id,
 )
 from ugh_quantamental.fx_protocol.models import (
+    EXPECTED_DAILY_BATCH_SIZE,
     DisconfirmerRule,
     EvaluationRecord,
     ForecastDirection,
     ForecastRecord,
     OutcomeRecord,
-    StrategyKind,
+    is_ugh_kind,
 )
 from ugh_quantamental.fx_protocol.outcome_models import (
     DailyOutcomeWorkflowRequest,
@@ -218,7 +219,7 @@ def build_evaluation_record(
     State-proxy fields are ``None`` for baseline strategies.
     ``range_hit`` is ``None`` for baseline strategies and always set for UGH.
     """
-    is_ugh = forecast.strategy_kind == StrategyKind.ugh
+    is_ugh = is_ugh_kind(forecast.strategy_kind)
 
     direction_hit = forecast.forecast_direction == outcome.realized_direction
 
@@ -325,10 +326,11 @@ def run_daily_outcome_evaluation_workflow(
             f"No forecast batch found for {forecast_batch_id!r}. "
             "Run run_daily_forecast_workflow for this window first."
         )
-    if len(batch.forecasts) != 4:
+    if len(batch.forecasts) != EXPECTED_DAILY_BATCH_SIZE:
         raise ValueError(
             f"Forecast batch {forecast_batch_id!r} is incomplete: "
-            f"expected 4 forecasts, found {len(batch.forecasts)}."
+            f"expected {EXPECTED_DAILY_BATCH_SIZE} forecasts, found "
+            f"{len(batch.forecasts)}."
         )
 
     # --- Step 4: try next-day batch for realized state proxy (read-only) ---
@@ -338,8 +340,11 @@ def run_daily_outcome_evaluation_workflow(
     next_batch = FxForecastRepository.load_fx_forecast_batch(session, next_batch_id)
     realized_state_proxy: str | None = None
     if next_batch is not None:
+        # State engine is shared across all UGH variants, so picking any
+        # UGH-class forecast gives the same dominant_state. Iterate the
+        # batch deterministically (insertion order) and take the first.
         ugh_next = next(
-            (f for f in next_batch.forecasts if f.strategy_kind == StrategyKind.ugh),
+            (f for f in next_batch.forecasts if is_ugh_kind(f.strategy_kind)),
             None,
         )
         if ugh_next is not None and ugh_next.dominant_state is not None:
@@ -351,14 +356,14 @@ def run_daily_outcome_evaluation_workflow(
     )
     if existing_evals is not None:
         count = len(existing_evals)
-        if count == 4:
+        if count == EXPECTED_DAILY_BATCH_SIZE:
             return PersistedOutcomeEvaluationBatch(
                 outcome=persisted_outcome,
                 evaluations=existing_evals,
             )
         raise ValueError(
             f"Partial evaluation batch found for outcome {persisted_outcome.outcome_id!r}: "
-            f"expected 4 evaluations, found {count}. "
+            f"expected {EXPECTED_DAILY_BATCH_SIZE} evaluations, found {count}. "
             "Cannot merge old and new evaluation records."
         )
 

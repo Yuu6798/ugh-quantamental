@@ -23,6 +23,8 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any
 
+from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE, is_ugh_kind
+
 logger = logging.getLogger(__name__)
 
 
@@ -182,7 +184,7 @@ def _build_ai_annotation_row(
     outcome_rows = _collect_recent_outcome_rows(history_dir, limit=5)
 
     if eval_rows:
-        ugh_evals = [r for r in eval_rows if r.get("strategy_kind") == "ugh"]
+        ugh_evals = [r for r in eval_rows if is_ugh_kind(r.get("strategy_kind", ""))]
         if ugh_evals:
             hit_count = sum(
                 1 for r in ugh_evals
@@ -257,7 +259,7 @@ def _collect_recent_eval_rows(
         return []
     rows: list[dict[str, str]] = []
     for date_dir in sorted(os.listdir(history_dir), reverse=True):
-        if len(rows) >= limit * 4:  # 4 strategies per date
+        if len(rows) >= limit * EXPECTED_DAILY_BATCH_SIZE:
             break
         date_path = os.path.join(history_dir, date_dir)
         if not os.path.isdir(date_path):
@@ -269,7 +271,7 @@ def _collect_recent_eval_rows(
             with open(eval_csv, newline="", encoding="utf-8") as fh:
                 reader = csv.DictReader(fh)
                 rows.extend(reader)
-    return rows[:limit * 4]
+    return rows[:limit * EXPECTED_DAILY_BATCH_SIZE]
 
 
 def _collect_recent_outcome_rows(
