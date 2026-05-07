@@ -1,0 +1,40 @@
+# semantic-ci target.yaml — UGH FX engine v2 implementation gate
+intent: "Implement v2 projection engine: variant emission, fire redesign, version stratification (spec docs/specs/fx_ugh_engine_v2.md §7 steps 1-7.5)"
+change:
+  primary_kind: feature
+  allowed_secondary_kinds:
+    - refactor
+    - test_update
+  scope:
+    files: []
+    modules:
+      - ugh_quantamental.engine.projection
+      - ugh_quantamental.engine.projection_models
+      - ugh_quantamental.fx_protocol.market_ugh_builder
+      - ugh_quantamental.fx_protocol.models
+      - ugh_quantamental.fx_protocol.forecasting
+      - ugh_quantamental.fx_protocol.outcomes
+      - ugh_quantamental.fx_protocol.automation
+      - ugh_quantamental.fx_protocol.automation_models
+      - ugh_quantamental.fx_protocol.reporting
+      - ugh_quantamental.fx_protocol.report_models
+      - ugh_quantamental.fx_protocol.weekly_reports_v2
+      - ugh_quantamental.fx_protocol.monthly_review
+      - ugh_quantamental.fx_protocol.monthly_governance
+      - ugh_quantamental.fx_protocol.observability
+      - ugh_quantamental.fx_protocol.analytics_annotations
+      - ugh_quantamental.fx_protocol.ai_annotations
+authorship:
+  authors:
+    - identity: "claude-code-v2-engine-impl"
+  declared_at: "2026-05-07T00:00:00Z"
+# Spec §7 step 5 explicitly directs replacing build_ugh_forecast with
+# parameterized variant builders ("In forecasting.py, replace
+# build_ugh_forecast with four variant builders ... that emit four
+# ForecastRecords per snapshot, each with its variant's
+# ProjectionConfig"). This is an intentional public-API removal aligned
+# with the v1→v2 cut-over (legacy `ugh` strategy retired per §5.2).
+api_surface:
+  allow_changes:
+    - fqn: "fx_protocol.forecasting.build_ugh_forecast"
+constraints: []
