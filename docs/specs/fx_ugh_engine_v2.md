@@ -55,10 +55,14 @@ consumed by `compute_e_raw`.**
 - `fire_probability` (via `fire_component = 2p − 1`)
 - `technical_score`
 
-It ignores: `price_implied_score`, `fundamental_score`, `regime_fit`,
-`narrative_dispersion`, `evidence_confidence`. Several of these are computed
-specifically as projection inputs but the projection function never reads
-them.
+Other `SignalFeatures` fields ARE used elsewhere in the projection
+pipeline — `fundamental_score` enters via `compute_u`, `regime_fit` and
+`narrative_dispersion` enter via `compute_gravity_bias`, and
+`evidence_confidence` enters via `compute_conviction`. The single signal
+that is computed by `derive_signal_features` but is not consumed by
+**any** function whose output flows into `e_raw` is **`price_implied_score`**:
+its only consumer is `compute_mismatch_px` (which records the mismatch
+diagnostic but does not feed back into `e_raw` or `e_star`).
 
 `price_implied_score` is the bp-normalized prev close change
 (`prev_close_change_bp / trailing_mean_abs_change_bp`, clamped to [-1, +1]).
@@ -91,8 +95,8 @@ These are the propositions v2 makes that May data will confirm or reject.
 | ID | Hypothesis | Measurable in May | Failure → action |
 |---|---|---|---|
 | H1 | Removing the `fire = 0` anti-thrust bias eliminates the systematic 0/N choppy direction-miss pattern. | UGH choppy `dir_rate > 0%`; binomial test against 50:50 no longer rejects in either tail. | Phase 3: regime-aware switching. |
-| H2 | Adding `price_implied_score` to `compute_e_raw` lifts UGH choppy `dir_rate` toward `baseline_prev_day_direction` parity. | UGH choppy `dir_rate ≥ baseline_prev_day_direction choppy dir_rate − 15 pp`. | Drop p_weight, try mean-reversion factor. |
-| H3 | Fire-as-conviction-amplifier preserves trending performance. | UGH trending `dir_rate ≥ baseline_simple_technical trending dir_rate − 10 pp`. | Re-tune u_weight / t_weight ratio. |
+| H2 | Adding `price_implied_score` to `compute_e_raw` lifts UGH choppy `dir_rate` toward `baseline_prev_day_direction` parity. | At least one v2 variant (any of `alpha`/`beta`/`gamma`/`delta`) achieves choppy `dir_rate ≥ baseline_prev_day_direction choppy dir_rate − 15 pp`. The variant that achieves this is recorded as the H2-best variant for the dispersion matrix in §9.4. | Drop `p_weight` (negate or zero it); next iteration tests mean-reversion factor. |
+| H3 | Fire-as-conviction-amplifier preserves trending performance. | At least one v2 variant achieves trending `dir_rate ≥ baseline_simple_technical trending dir_rate − 10 pp`. | Re-tune u_weight / t_weight ratio. |
 | H4 | The state engine and volatility band remain unchanged-good. | `state_proxy_hit_rate ≥ 95%`, `range_hit_rate ≥ 70%`. | Engine regression; revert state-related changes. |
 | H5 | UGH magnitude is no longer indistinguishable from random_walk. | `mean_close_error_bp` differs from baseline_random_walk by ≥ 1.0 bp in either direction in any weekly report. | conviction-multiplier tuning. |
 
@@ -183,7 +187,7 @@ is a 25% magnitude shrink, not "no contribution". This is intentional:
 under Framing A, the absence of thrust evidence reduces our confidence
 in the direction signal; we are conservative about emitting full-strength
 forecasts when fire is neutral. Only fire=1.0 produces no shrink. See
-§9.5 for the future Framing B alternative where fire=0.5 *does* mean
+§9A for the future Framing B alternative where fire=0.5 *does* mean
 true zero contribution.
 
 ## 6. Revised engine math
@@ -224,7 +228,7 @@ Key properties:
 - **Conservative dampening at neutral fire**: `fire = 0.5` produces
   `multiplier = floor + (1−floor)*0.5` = 0.75 at default floor — a 25%
   magnitude shrink, not zero contribution. This is by design under
-  Framing A; see §5.3 and §9.5.
+  Framing A; see §5.3 and §9A.
 - **Full strength only at maximal fire**: only `fire = 1.0` produces
   multiplier 1.0 (no shrink).
 - **No-direction → no-output**: if all three direction inputs are 0,
@@ -293,6 +297,19 @@ Engine (`tests/engine/test_projection.py`):
 | `test_fire_one_maximizes_signal` | direction inputs +0.5, fire=1.0 | e_raw matches direction_signal × alignment exactly |
 | `test_price_implied_alone_drives_direction` | u=0, technical=0, price_implied=+1.0, fire=1.0, alpha defaults | direction_signal = (0.40·0 + 0.30·0 + 0.20·1.0) / (0.40+0.30+0.20) = 0.20 / 0.90 ≈ 0.2222; conviction_multiplier = 1.0; e_raw = 0.2222 × alignment |
 | `test_no_anti_thrust_bias_in_choppy` | all directional inputs 0, fire ∈ {0, 0.5, 1} | e_raw == 0.0 in all cases |
+| `test_zero_weight_guard` | `ProjectionConfig(u_weight=0, t_weight=0, p_weight=0)`, any direction inputs and fire | e_raw == 0.0 (preserves bounded/no-NaN invariant from §6.1 guard) |
+
+Helpers introduced in migration steps 4b and 4c (`tests/fx_protocol/test_strategy_kind_helpers.py` or equivalent location):
+
+| Test | Assertion |
+|---|---|
+| `test_is_ugh_kind_legacy_enum` | `is_ugh_kind(StrategyKind.ugh) is True` |
+| `test_is_ugh_kind_legacy_string` | `is_ugh_kind("ugh") is True` |
+| `test_is_ugh_kind_v2_variants_enum` | `is_ugh_kind(StrategyKind.ugh_v2_alpha)` … `is_ugh_kind(StrategyKind.ugh_v2_delta)` all True |
+| `test_is_ugh_kind_v2_variants_string` | `is_ugh_kind("ugh_v2_alpha")` … `is_ugh_kind("ugh_v2_delta")` all True |
+| `test_is_ugh_kind_baselines_false` | `is_ugh_kind(StrategyKind.baseline_random_walk)` etc. all False |
+| `test_is_ugh_kind_unknown_string_false` | `is_ugh_kind("not_a_kind")` is False |
+| `test_expected_daily_batch_size_matches_active_kinds` | `EXPECTED_DAILY_BATCH_SIZE == len(_ACTIVE_STRATEGY_KINDS) == 7` after v2 migration |
 
 Builder (`tests/fx_protocol/test_market_ugh_builder.py`):
 
@@ -408,7 +425,7 @@ itself: another month of identical-config running is automatic, no spec
 revision required. Inconclusive data is a known and handled risk, not a
 failure.
 
-## 9.5. Design choice: fire as conviction multiplier (Framing A) vs directional confirmer (Framing B)
+## 9A. Design choice: fire as conviction multiplier (Framing A) vs directional confirmer (Framing B)
 
 v2 adopts **Framing A**: `fire_probability` enters `compute_e_raw` as a
 conviction multiplier in `[conviction_floor, 1.0]` (default `[0.5, 1.0]`).
