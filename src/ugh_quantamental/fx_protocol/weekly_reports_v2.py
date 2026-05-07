@@ -192,6 +192,57 @@ def _load_labeled_observations_for_week(
     return result
 
 
+def _stratify_by_versions(
+    rows: list[dict[str, str]],
+    *,
+    theory_version_filter: str | None = None,
+    engine_version_filter: str | None = None,
+) -> list[dict[str, str]]:
+    """Stratify observations by ``theory_version`` and ``engine_version``.
+
+    Spec §7.5: weekly / monthly aggregations must stratify by
+    ``theory_version`` (and ideally ``engine_version``) to avoid mixing v1
+    and v2 records under shared ``strategy_kind`` values across the
+    boundary week.
+
+    Behavior:
+
+    * If both ``theory_version_filter`` and ``engine_version_filter`` are
+      ``None``, **auto-detect**: when the input rows contain more than
+      one distinct ``theory_version`` the latest one (lexicographic max
+      across the v1/v2/... sequence) is selected and a warning is logged;
+      single-version data is returned unchanged.
+    * If either filter is non-None, rows whose corresponding column does
+      not match are dropped.
+    * Rows missing the version column entirely are kept under the
+      auto-detect path (they predate stratification) but dropped under
+      an explicit filter (no silent inclusion).
+    """
+    if theory_version_filter is None and engine_version_filter is None:
+        present = {row.get("theory_version", "") for row in rows} - {""}
+        if len(present) <= 1:
+            return rows
+        latest = max(present)
+        logger.warning(
+            "weekly_reports_v2: auto-stratifying mixed theory_versions %s; "
+            "filtering to latest=%s",
+            sorted(present),
+            latest,
+        )
+        return [r for r in rows if r.get("theory_version", "") == latest]
+
+    filtered = rows
+    if theory_version_filter is not None:
+        filtered = [
+            r for r in filtered if r.get("theory_version", "") == theory_version_filter
+        ]
+    if engine_version_filter is not None:
+        filtered = [
+            r for r in filtered if r.get("engine_version", "") == engine_version_filter
+        ]
+    return filtered
+
+
 def _load_provider_health_rows(csv_output_dir: str) -> list[dict[str, str]]:
     """Load provider_health.csv from latest/ or observability layout."""
     base = os.path.abspath(csv_output_dir)
@@ -577,6 +628,8 @@ def run_weekly_report_v2(
     *,
     business_day_count: int = 5,
     generated_at_utc: datetime | None = None,
+    theory_version_filter: str | None = None,
+    engine_version_filter: str | None = None,
 ) -> dict[str, Any]:
     """Generate a v2 annotation-aware weekly report from CSV history.
 
@@ -594,6 +647,15 @@ def run_weekly_report_v2(
         Number of business days to include (default 5).
     generated_at_utc:
         Timestamp for the report generation.  Defaults to ``datetime.now(UTC)``.
+    theory_version_filter:
+        Optional ``theory_version`` filter (e.g. ``"v1"`` or ``"v2"``).
+        ``None`` (default) auto-detects: a single-version window is
+        returned unchanged; a mixed-version window is filtered to the
+        latest version with a warning. Required reading for the v1↔v2
+        boundary week — without it metrics would silently mix records
+        under shared baseline ``strategy_kind`` values (spec §7.5).
+    engine_version_filter:
+        Optional ``engine_version`` filter; same behavior as above.
 
     Returns
     -------
@@ -607,6 +669,13 @@ def run_weekly_report_v2(
 
     # Load data
     observations = _load_labeled_observations_for_week(csv_output_dir, week_start, week_end)
+    # Spec §7.5: stratify by theory_version + engine_version before metrics
+    # are computed so the v1↔v2 boundary week does not silently mix records.
+    observations = _stratify_by_versions(
+        observations,
+        theory_version_filter=theory_version_filter,
+        engine_version_filter=engine_version_filter,
+    )
     all_health_rows = _load_provider_health_rows(csv_output_dir)
     week_health_rows = _filter_provider_health_for_week(all_health_rows, week_start, week_end)
 
@@ -634,6 +703,16 @@ def run_weekly_report_v2(
     model_versions = source_summary.get("model_versions", [])
     prompt_versions = source_summary.get("prompt_versions", [])
 
+    # Stratification metadata: which theory / engine versions are actually
+    # present in the (post-filter) observation set. Lets readers verify
+    # at a glance that no v1↔v2 mixing slipped through.
+    theory_versions_in_window = sorted(
+        {row.get("theory_version", "") for row in observations} - {""}
+    )
+    engine_versions_in_window = sorted(
+        {row.get("engine_version", "") for row in observations} - {""}
+    )
+
     # Collect generated artifact paths placeholder (filled by export layer)
     return {
         "report_version": "v2",
@@ -641,6 +720,8 @@ def run_weekly_report_v2(
         "report_date_jst": report_date_jst.isoformat(),
         "week_window": {"start": week_start, "end": week_end},
         "business_day_count": business_day_count,
+        "theory_versions_in_window": theory_versions_in_window,
+        "engine_versions_in_window": engine_versions_in_window,
         "core_analysis_ready": obs_count > 0,
         "annotated_analysis_ready": ai_or_auto_count > 0,
         "annotation_coverage": coverage,

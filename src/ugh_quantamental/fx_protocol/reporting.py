@@ -170,10 +170,55 @@ def resolve_completed_window_ends(
 # ---------------------------------------------------------------------------
 
 
+def _stratify_eval_orms(
+    eval_orms: list,
+    forecast_map: "dict[str, ForecastRecord]",
+    *,
+    theory_version_filter: str | None,
+    engine_version_filter: str | None,
+) -> list:
+    """Spec §7.5 stratification: filter evaluation ORMs by their forecast's
+    ``theory_version`` / ``engine_version``. Auto-detect when both filters
+    are ``None`` and the forecast set spans multiple versions.
+    """
+    if theory_version_filter is None and engine_version_filter is None:
+        present = {fc.theory_version for fc in forecast_map.values()}
+        if len(present) <= 1:
+            return eval_orms
+        latest = max(present)
+        return [
+            orm
+            for orm in eval_orms
+            if (fc := forecast_map.get(orm.forecast_id)) is not None
+            and fc.theory_version == latest
+        ]
+
+    out = []
+    for orm in eval_orms:
+        fc = forecast_map.get(orm.forecast_id)
+        if fc is None:
+            continue
+        if (
+            theory_version_filter is not None
+            and fc.theory_version != theory_version_filter
+        ):
+            continue
+        if (
+            engine_version_filter is not None
+            and fc.engine_version != engine_version_filter
+        ):
+            continue
+        out.append(orm)
+    return out
+
+
 def _load_weekly_rows(
     session: "Session",
     pair_value: str,
     naive_utc_windows: tuple[datetime, ...],
+    *,
+    theory_version_filter: str | None = None,
+    engine_version_filter: str | None = None,
 ) -> tuple[list[_WeeklyRow], frozenset[datetime]]:
     """Load and join evaluation, forecast, and outcome records for the given windows.
 
@@ -216,6 +261,18 @@ def _load_weekly_rows(
             select(FxForecastRecord).where(FxForecastRecord.forecast_id.in_(forecast_ids))
         ).scalars()
     }
+
+    # Spec §7.5 stratification: drop evaluations whose forecast's
+    # theory_version / engine_version doesn't match the requested filter
+    # (or, in auto-detect mode, doesn't match the latest version present).
+    eval_orms = _stratify_eval_orms(
+        eval_orms,
+        forecast_map,
+        theory_version_filter=theory_version_filter,
+        engine_version_filter=engine_version_filter,
+    )
+    if not eval_orms:
+        return [], frozenset()
 
     # 3. Outcome records (one batch query).
     outcome_ids = {r.outcome_id for r in eval_orms}
@@ -503,7 +560,11 @@ def run_weekly_report(session: "Session", request: WeeklyReportRequest) -> Weekl
 
     # 3. Load all rows for this pair + window set.
     all_rows, eval_windows_naive_utc = _load_weekly_rows(
-        session, request.pair.value, naive_utc_windows
+        session,
+        request.pair.value,
+        naive_utc_windows,
+        theory_version_filter=request.theory_version_filter,
+        engine_version_filter=request.engine_version_filter,
     )
 
     # 4. Determine which windows have data.

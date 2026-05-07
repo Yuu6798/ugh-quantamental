@@ -845,6 +845,45 @@ def compute_monthly_slice_metrics(
 # ---------------------------------------------------------------------------
 
 
+def _stratify_observations_by_versions(
+    rows: list[dict[str, str]],
+    *,
+    theory_version_filter: str | None = None,
+    engine_version_filter: str | None = None,
+) -> list[dict[str, str]]:
+    """Spec §7.5 stratification: filter monthly observations by version columns.
+
+    Auto-detect mode (both filters ``None``): if rows contain more than one
+    distinct ``theory_version``, the latest one is selected and a warning
+    is logged. Single-version data is returned unchanged. Explicit-filter
+    mode drops rows whose column does not match the filter (or whose
+    column is missing).
+    """
+    if theory_version_filter is None and engine_version_filter is None:
+        present = {row.get("theory_version", "") for row in rows} - {""}
+        if len(present) <= 1:
+            return rows
+        latest = max(present)
+        logger.warning(
+            "monthly_review: auto-stratifying mixed theory_versions %s; "
+            "filtering to latest=%s",
+            sorted(present),
+            latest,
+        )
+        return [r for r in rows if r.get("theory_version", "") == latest]
+
+    filtered = rows
+    if theory_version_filter is not None:
+        filtered = [
+            r for r in filtered if r.get("theory_version", "") == theory_version_filter
+        ]
+    if engine_version_filter is not None:
+        filtered = [
+            r for r in filtered if r.get("engine_version", "") == engine_version_filter
+        ]
+    return filtered
+
+
 def run_monthly_review(
     observations: list[dict[str, str]],
     health_rows: list[dict[str, str]],
@@ -854,6 +893,8 @@ def run_monthly_review(
     business_day_count: int = 20,
     max_examples: int = 3,
     include_annotations: bool = True,
+    theory_version_filter: str | None = None,
+    engine_version_filter: str | None = None,
 ) -> dict[str, Any]:
     """Generate a monthly review from pre-loaded observations and provider health data.
 
@@ -876,6 +917,13 @@ def run_monthly_review(
         Maximum representative success/failure examples to include.
     include_annotations:
         Whether to include annotation-aware metrics (default: True).
+    theory_version_filter:
+        Optional ``theory_version`` filter; ``None`` auto-detects (filters
+        a mixed-version window to its latest version with a warning).
+        Spec §7.5: required to keep v1 and v2 records from being mixed
+        under shared ``strategy_kind`` values across the boundary month.
+    engine_version_filter:
+        Optional ``engine_version`` filter; same behavior as above.
 
     Returns
     -------
@@ -884,6 +932,14 @@ def run_monthly_review(
     """
     if review_generated_at_jst is None:
         review_generated_at_jst = datetime.now(_JST)
+
+    # Spec §7.5 stratification — applied before any per-strategy aggregation
+    # so version mixing cannot leak into baseline-vs-UGH deltas or review flags.
+    observations = _stratify_observations_by_versions(
+        observations,
+        theory_version_filter=theory_version_filter,
+        engine_version_filter=engine_version_filter,
+    )
 
     # Count unique as_of dates in observations to determine included/missing windows
     seen_dates: set[str] = set()
@@ -937,6 +993,14 @@ def run_monthly_review(
     # Recommendation summary
     recommendation = build_recommendation_summary(review_flags)
 
+    # Stratification audit fields: which version values survived the filter.
+    theory_versions_in_window = sorted(
+        {row.get("theory_version", "") for row in observations} - {""}
+    )
+    engine_versions_in_window = sorted(
+        {row.get("engine_version", "") for row in observations} - {""}
+    )
+
     return {
         "review_version": "v1",
         "pair": pair,
@@ -944,6 +1008,8 @@ def run_monthly_review(
         "requested_window_count": business_day_count,
         "included_window_count": included_window_count,
         "missing_window_count": missing_window_count,
+        "theory_versions_in_window": theory_versions_in_window,
+        "engine_versions_in_window": engine_versions_in_window,
         "monthly_strategy_metrics": strategy_metrics,
         "monthly_baseline_comparisons": baseline_comparisons,
         "monthly_state_metrics": state_metrics,
