@@ -297,10 +297,17 @@ something specific — but premature promotion is rejected.
   spec. Until then, v2 is regime-blind by design.
 - **`gravity_bias` redesign**. The bias term is small in magnitude relative
   to the −0.30 anti-thrust floor and is not the primary fault.
-- **Mean-reversion explicit factor**. v2 captures mean-reversion implicitly
-  via `price_implied_score` sign (when prev change was extreme, score is
-  saturated; this can act as continuation OR reversion depending on weight).
-  An explicit `mean_reversion_score` is reserved for Phase 3.
+- **Mean-reversion explicit factor**. v2 defaults to **continuation**
+  (positive `p_weight = 0.20`) because the April-month evidence is that
+  `baseline_prev_day_direction` (a continuation strategy) achieves
+  43.8% dir hit on the same observations where UGH achieves 31.2% — i.e.
+  same-direction extrapolation from prev_change is the empirically
+  stronger choice with current data. If H2 fails on May data
+  (UGH choppy dir_rate remains well below `baseline_prev_day_direction`
+  choppy dir_rate), the next iteration negates `p_weight` to test
+  reversion. An explicit `mean_reversion_score` factor that combines
+  prev_change magnitude with regime-conditional reversal probability is
+  reserved for Phase 3.
 - **State-engine direction extraction**. The state engine returns lifecycle
   state (setup/fire/exhaustion) which is direction-agnostic. Extracting
   direction from state transitions is non-trivial and deferred.
