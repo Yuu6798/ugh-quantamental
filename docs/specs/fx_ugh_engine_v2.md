@@ -106,10 +106,19 @@ fields that v1 computed but did not consume.
 
 ### 5.1 `ProjectionConfig` additions
 
-| Field | Purpose |
-|---|---|
-| `p_weight` | Weight of `price_implied_score` in direction signal (new) |
-| `conviction_floor` | Minimum conviction multiplier when `fire_probability == 0` (new) |
+| Field | Default | Purpose |
+|---|---|---|
+| `p_weight` | `0.20` (matches `ugh_v2_alpha`) | Weight of `price_implied_score` in direction signal (new) |
+| `conviction_floor` | `0.5` (matches `ugh_v2_alpha`) | Multiplier when `fire_probability == 0`; also sets the `fire_probability == 0.5` shrink. Default value reproduces the alpha variant's behavior. |
+
+The defaults are chosen so that `ProjectionConfig()` (no-argument
+construction) keeps working everywhere it is currently called — most
+notably `run_projection_engine(config=None)` and
+`ProjectionWorkflowRequest.config`'s `default_factory=ProjectionConfig`,
+plus replay/workflow tests that omit explicit configs. Such default-
+constructed configs receive **v2-alpha behavior**, which is the
+conservative variant of the four. Variant builders for beta / gamma /
+delta supply explicit configs (see step 5).
 
 `u_weight`, `t_weight`, `p_weight` weight three independent directional
 components. `f_weight` is no longer used in `compute_e_raw` (see §6.1);
@@ -159,9 +168,23 @@ thrust_score = 0.5 * range_evidence + 0.5 * momentum_evidence
 fire_probability = clamp(0.5 + 0.5 * thrust_score, 0.0, 1.0)
 ```
 
-Semantic: `fire_probability` measures the probability of directional thrust
-with 0.5 as the no-information prior. `0.5 → no contribution to e_raw`,
-`> 0.5 → boost direction signal`, `< 0.5 → shrink direction signal`.
+Semantic of `fire_probability` itself: this number measures the
+probability of directional thrust, with 0.5 as the no-information prior
+of the **fire formula**. Above 0.5 there is positive thrust evidence
+(range expansion or momentum or both); below 0.5 there is quiescence
+evidence (range contraction).
+
+Note the asymmetry between the fire formula's centered semantic and how
+it is *consumed* in `compute_e_raw` under Framing A: the conviction
+multiplier maps fire monotonically to `[conviction_floor, 1.0]`, not
+symmetrically around fire=0.5. Therefore fire=0.5 produces a multiplier
+of `floor + (1-floor)*0.5` (= 0.75 at the default floor of 0.5), which
+is a 25% magnitude shrink, not "no contribution". This is intentional:
+under Framing A, the absence of thrust evidence reduces our confidence
+in the direction signal; we are conservative about emitting full-strength
+forecasts when fire is neutral. Only fire=1.0 produces no shrink. See
+§9.5 for the future Framing B alternative where fire=0.5 *does* mean
+true zero contribution.
 
 ## 6. Revised engine math
 
@@ -189,8 +212,14 @@ def compute_e_raw(u_score, signal_features, alignment, config):
 ```
 
 Key properties:
-- **No anti-thrust bias**: `fire = 0` shrinks direction by `conviction_floor`
-  (default 0.5×) but never flips its sign.
+- **No anti-thrust bias**: `fire = 0` shrinks direction to `conviction_floor`
+  fraction of full strength (default 0.5×) but never flips its sign.
+- **Conservative dampening at neutral fire**: `fire = 0.5` produces
+  `multiplier = floor + (1−floor)*0.5` = 0.75 at default floor — a 25%
+  magnitude shrink, not zero contribution. This is by design under
+  Framing A; see §5.3 and §9.5.
+- **Full strength only at maximal fire**: only `fire = 1.0` produces
+  multiplier 1.0 (no shrink).
 - **No-direction → no-output**: if all three direction inputs are 0,
   e_raw = 0 regardless of fire.
 - **All directional inputs are independent**: `price_implied_score` enters
@@ -220,7 +249,7 @@ is replaced.
 |---|---|
 | 1 | Bump `FX_THEORY_VERSION` from `v1` to `v2` in `.github/workflows/fx-daily-protocol.yml` and `fx-analysis-pipeline.yml`. Records persist version in `forecast_record.theory_version` for audit. |
 | 2 | Implement v2 `compute_e_raw` in `engine/projection.py` and v2 `fire_probability` in `fx_protocol/market_ugh_builder.py`. |
-| 3 | Add `p_weight` and `conviction_floor` fields (no defaults; required) to `ProjectionConfig` in `engine/projection_models.py`. Variant configs supply them explicitly. |
+| 3 | Add `p_weight` (default `0.20`) and `conviction_floor` (default `0.5`) fields to `ProjectionConfig` in `engine/projection_models.py`. Defaults are the alpha-variant values, chosen so existing `ProjectionConfig()` callers (including `run_projection_engine(config=None)`, `ProjectionWorkflowRequest.config`'s `default_factory`, and replay/workflow tests that omit configs) continue to function and receive v2-alpha behavior. Variant builders for beta/gamma/delta in step 5 supply explicit configs. |
 | 4 | Add four enum values to `StrategyKind`: `ugh_v2_alpha`, `ugh_v2_beta`, `ugh_v2_gamma`, `ugh_v2_delta`. Retire `ugh` from new daily emission (keep enum for historical record loading). |
 | 4b | **Migrate all UGH-classification sites to recognize the v2 variants as UGH-class strategies.** The current code hardcodes `StrategyKind.ugh` in many places that gate UGH-specific behavior; without this migration, v2 variants will fail validation, lose their range/state diagnostics, and be excluded from analytics. Introduce a helper `is_ugh_kind(k: StrategyKind) -> bool` returning True for `ugh` (legacy) and all `ugh_v2_*`, and apply it to **all** of the following call sites (verified via grep on the v1 codebase, May 2026): `models.py` `ForecastRecord` UGH-required-field validator (lines ~374-382), `models.py` `EvaluationRecord` `range_hit`/`state_proxy_hit` requirement (lines ~633-658), `outcomes.py` `evaluate_forecast_outcome` UGH-only diagnostics (lines ~221, ~342), `forecasting.py:104` (`input_snapshot_ref` population), `reporting.py:41` (`_ALL_STRATEGY_KINDS` constant), `reporting.py:279,510,515` (UGH-row filters), `observability.py:285,296` (scoreboard UGH filter), `monthly_review.py:240` (monthly UGH metric extraction), `monthly_governance.py:135` (governance filter), `analytics_annotations.py:185` (AI annotation UGH eval extraction). Without this expansion, H4 (state proxy / range hit) and the per-variant lenses in §9.5 will be empty or silently misclassified. |
 | 5 | In `forecasting.py`, replace `build_ugh_forecast` with four variant builders (or one parameterized builder) that emit four `ForecastRecord`s per snapshot, each with its variant's `ProjectionConfig`. |
