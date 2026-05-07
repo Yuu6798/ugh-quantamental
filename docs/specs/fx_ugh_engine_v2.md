@@ -273,45 +273,93 @@ or update inline if invariant.
 
 ## 9. Acceptance criteria
 
-v2 ships once:
+### 9.1 Philosophy
+
+v2's purpose is **knowledge accumulation**. Every observable outcome must
+produce a documented learning that informs the next milestone. There is no
+"failure state" in this framework — only different routes through a
+pre-cataloged decision tree. A variant that scores 0/N choppy hits is not
+a failure; it is data point that constrains the design space. The only
+true failure mode is **inconclusive data** (insufficient signal to
+distinguish outcomes), which is itself a known risk handled in §9.4.
+
+### 9.2 Ship criteria (operational gate before merge)
+
+v2 ships into production once:
 1. All test plan items in §8 pass for every variant.
 2. `ruff check .` and `pytest -q` clean.
-3. Engine runs deterministically (same snapshot → same forecast batch
-   for each variant; variant outputs differ only by their config).
-4. `theory_version` is correctly recorded on new forecasts.
-5. All four variants produce a forecast for every daily run; no variant
+3. Engine runs deterministically: same snapshot → same forecast batch for
+   each variant; variant outputs differ only by their config.
+4. `theory_version` is correctly recorded as `v2` on new forecasts;
+   `strategy_kind` correctly records `ugh_v2_alpha`/`beta`/`gamma`/`delta`.
+5. All four variants produce a forecast on every daily run; no variant
    silently skips.
+6. Migration step 7.5 (theory_version stratification in aggregations) is
+   verified as already-present or has been added.
 
-v2 is **validated** once May 2026 data shows (multi-variant interpretation):
-1. **H1 met by ≥ 1 variant**: at least one of `ugh_v2_alpha…delta` shows
-   choppy `dir_rate > 0%` in May labeled_observations with a binomial test
-   that no longer rejects the 50:50 prior at the lower tail.
-2. **H4 met by all variants**: `state_proxy_hit_rate ≥ 95%`,
-   `range_hit_rate ≥ 70%` (these come from state engine and range derivation
-   which are shared across variants — should be identical across them).
-3. **At least one variant** also satisfies one of {H2, H3, H5}.
-4. The **best variant** by overall dir_rate is identified and proposed as
-   the **production default for v3**. Other variants may continue running
-   for one further month or be retired.
+These are operational, not empirical. They gate the merge but say nothing
+about the variants' real-world performance.
 
-v2 is **invalidated** (escalate to Phase 3) if:
-- H1 not met by **any** variant after 10 May business days, OR
-- H4 violated (state / range engine regressed in shared infrastructure).
+### 9.3 Knowledge criteria (the actual goal)
 
-The four-variant comparison itself is an acceptance criterion: regardless
-of absolute dir_rate, the **dispersion** between variants tells us which
-parameters matter:
-- If all four variants perform identically → weights are not the binding
-  constraint; the structural engine redesign is what mattered.
-- If `beta` (price-heavy) wins decisively → next iteration shifts weight
-  further toward `price_implied_score`.
-- If `gamma` (low floor) wins → fire is a real signal; promote toward
-  Framing B.
-- If `delta` (u-light) wins → `u_score` is noise; redesign or remove
-  `compute_u`.
+After ≥ 10 May 2026 business days under v2, the data must locate the
+outcome unambiguously in **one cell** of the dispersion matrix below, and
+the corresponding next-step decision must be recorded as a follow-up
+spec. This recording is what makes v2 a success — not whether any
+particular variant "won".
 
-Each of these outcomes feeds directly into the next milestone's design
-question.
+### 9.4 Variant dispersion → learning matrix
+
+Read this as: "if reality looks like row X, what we learned is column Y,
+and the documented next step is column Z." H1 here is simplified to
+**choppy `direction_hit_count ≥ 1`** for each variant (no statistical
+test required at this sample size; the binary "did we escape 0/N" is what
+matters at this stage).
+
+| Observed pattern | What we learned | Documented next step |
+|---|---|---|
+| All 4 variants pass H1 | The structural changes (no anti-thrust bias + price_implied invested) were the dominant lever. Weight choices were second-order at this resolution. | v3: promote `fire` to Framing B (it has discriminative room). Drop the worst-performing two variants; iterate weights on the remaining two with finer grid. |
+| **Only `beta` passes H1** | `price_implied_score` is the dominant signal; v1 was systematically discarding the best information. | v3: rebuild around prev_change as the primary input; explore explicit mean_reversion factor; consider whether u_score adds anything. |
+| Only `gamma` passes H1 | Fire's signal is real and lowering the floor below 0.5 unlocks it. The conservative floor was masking real conviction information. | v3: promote `fire` to Framing B; redesign the fire formula to carry directional content (continuation vs reversion evidence). |
+| Only `delta` passes H1 | `u_score`'s composite logic is degrading direction prediction; demoting it (and adding price_implied) is what works. | v3: simplify or remove `compute_u`; keep technical + price_implied; reconsider what `u` was meant to capture. |
+| Only `alpha` passes H1 | Conservative invest of price_implied with v1-equivalent weights is the recipe. Aggressive parameter shifts overcorrect. | v3: alpha as default; iterate one parameter at a time on smaller deltas. |
+| **`alpha + gamma` pass (same direction weights, different floor) but `beta + delta` fail** | Direction weights matter more than the conviction floor. The (0.40, 0.30, 0.20) ratio is doing useful work; floor is a finer knob. | v3: hold direction weights at (0.40, 0.30, 0.20); iterate `conviction_floor` on a finer grid (0.3, 0.4, 0.5, 0.6, 0.7). |
+| **`beta + delta` pass (high p_weight) but `alpha + gamma` fail (low p_weight)** | `p_weight` is the binding lever; more weight on `price_implied_score` improves direction. | v3: hold floor at 0.5; iterate `p_weight` on a finer grid (0.20, 0.30, 0.40, 0.50, 0.60). |
+| **No variant passes H1** (all 0/N choppy) | The projection-direction layer needs deeper redesign than the v2 changes provided. The anti-thrust bias removal alone is insufficient. | Phase 3: regime-aware switching with a separate model for choppy markets. v2 variants retire; their data documents what didn't work. |
+| H1 results are **mixed without a clean pattern** (e.g. alpha + delta pass, beta + gamma fail) | At this sample size, multiple parameter changes interact in ways that the 4-variant grid can't disambiguate. | Run v2 unchanged for one additional month to gather more data, then re-evaluate. If still ambiguous, design v2.1 with a 2-variant orthogonal comparison instead. |
+| H4 violated (state or range engine regressed) by any variant | A shared engine component was inadvertently changed. | Hotfix: revert the regression; do not advance to v3 until restored. v2 results from regressed runs are quarantined. |
+
+### 9.5 Per-variant lens reporting
+
+Regardless of which row is realized, the May review must report the
+following five lenses for each variant. These are not pass/fail criteria;
+they are the data points feeding the matrix.
+
+| Lens | Metric |
+|---|---|
+| Choppy direction | `dir_hit_count`, `dir_rate` on choppy-labeled observations |
+| Trending direction | `dir_hit_count`, `dir_rate` on trending-labeled observations |
+| Overall direction | `dir_hit_count`, `dir_rate` on all observations |
+| Magnitude calibration | `mean_close_error_bp` and its delta vs `baseline_random_walk` |
+| Conviction distribution | `fire_probability` distribution stats (mean, std, frac at 0.5 ± 0.05) |
+
+The conviction distribution lens is what tells us whether `fire` carries
+discriminative power (Framing B feasibility check). If most v2 days have
+fire ≈ 0.5, the additive formula is producing constant noise; if fire is
+spread across [0, 1], it is encoding something.
+
+### 9.6 Closure
+
+v2 closes successfully when:
+1. The May data unambiguously selects one row of the matrix.
+2. A follow-up spec for the documented next step is started.
+3. Variant-level reports for all five lenses are persisted in
+   `csv/analytics/monthly/202606/`.
+
+If §9.6 condition 1 cannot be met (mixed pattern row), the spec extends
+itself: another month of identical-config running is automatic, no spec
+revision required. Inconclusive data is a known and handled risk, not a
+failure.
 
 ## 9.5. Design choice: fire as conviction multiplier (Framing A) vs directional confirmer (Framing B)
 
