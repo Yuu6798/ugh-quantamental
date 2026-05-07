@@ -222,6 +222,7 @@ is replaced.
 | 2 | Implement v2 `compute_e_raw` in `engine/projection.py` and v2 `fire_probability` in `fx_protocol/market_ugh_builder.py`. |
 | 3 | Add `p_weight` and `conviction_floor` fields (no defaults; required) to `ProjectionConfig` in `engine/projection_models.py`. Variant configs supply them explicitly. |
 | 4 | Add four enum values to `StrategyKind`: `ugh_v2_alpha`, `ugh_v2_beta`, `ugh_v2_gamma`, `ugh_v2_delta`. Retire `ugh` from new daily emission (keep enum for historical record loading). |
+| 4b | **Migrate all UGH-classification sites to recognize the v2 variants as UGH-class strategies.** The current code hardcodes `StrategyKind.ugh` in many places that gate UGH-specific behavior; without this migration, v2 variants will fail validation, lose their range/state diagnostics, and be excluded from analytics. Introduce a helper `is_ugh_kind(k: StrategyKind) -> bool` returning True for `ugh` (legacy) and all `ugh_v2_*`, and apply it to **all** of the following call sites (verified via grep on the v1 codebase, May 2026): `models.py` `ForecastRecord` UGH-required-field validator (lines ~374-382), `models.py` `EvaluationRecord` `range_hit`/`state_proxy_hit` requirement (lines ~633-658), `outcomes.py` `evaluate_forecast_outcome` UGH-only diagnostics (lines ~221, ~342), `forecasting.py:104` (`input_snapshot_ref` population), `reporting.py:41` (`_ALL_STRATEGY_KINDS` constant), `reporting.py:279,510,515` (UGH-row filters), `observability.py:285,296` (scoreboard UGH filter), `monthly_review.py:240` (monthly UGH metric extraction), `monthly_governance.py:135` (governance filter), `analytics_annotations.py:185` (AI annotation UGH eval extraction). Without this expansion, H4 (state proxy / range hit) and the per-variant lenses in §9.5 will be empty or silently misclassified. |
 | 5 | In `forecasting.py`, replace `build_ugh_forecast` with four variant builders (or one parameterized builder) that emit four `ForecastRecord`s per snapshot, each with its variant's `ProjectionConfig`. |
 | 6 | Update existing engine tests (`tests/engine/test_projection.py`) with new golden values; add tests per §8. |
 | 7 | Update analytics (weekly / monthly aggregations) to handle the expanded `StrategyKind` set without crashing — most queries iterate over distinct kinds and should require no change. Verify slice metric output dimensions don't break weekly_report.md formatting. |
@@ -230,8 +231,17 @@ is replaced.
 | 9 | After 10+ business days under v2, re-run monthly review and check H1–H5 across all four variants. |
 
 Historical `v1` records remain untouched (read-only replay invariant).
-Weekly / monthly reports stratify by `theory_version` if present; the v1/v2
-boundary becomes auditable in CSV.
+However, the **current** weekly and monthly aggregation implementations
+do **not** stratify by `theory_version`: weekly reports load all rows
+without a version filter and monthly review groups by `strategy_kind`
+only. Step 7.5 is therefore not optional. Without it, the v1↔v2
+boundary will silently mix records under shared `strategy_kind` values —
+particularly the baseline strategies, which keep their identifiers
+across the version boundary — producing per-strategy metrics that span
+both theory versions and are not interpretable as either pure-v1 or
+pure-v2. The v1/v2 boundary becomes auditable in CSV **only after**
+step 7.5's stratification has been added (or formally verified to
+already exist in code paths not yet inspected).
 
 ## 8. Test plan
 
