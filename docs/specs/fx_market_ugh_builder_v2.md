@@ -18,17 +18,13 @@ review date 2026-05-01, 16 included business days) flagged
 | baseline_prev_day_direction | 43.8% | +12.5 |
 | baseline_random_walk | 0.0% | -31.2 |
 
-Regime-conditional breakdown for UGH:
+Within the 16 observations, 11 are AI-classified as choppy and UGH hits
+direction in **0 of 11** (binomial p ≈ 0.0005 against a 50:50 prior).
+This is the structural anti-pattern that v2 targets.
 
-| Regime (AI annotation) | N | Dir Hit Rate |
-|---|---|---|
-| trending | 5 | **100.0%** |
-| choppy | 11 | **0.0%** |
-
-UGH is structurally unable to take a directional view in choppy regimes. The
-v1 `fire_probability` formula multiplicatively requires both range expansion
-AND momentum, so when momentum is near zero (the definition of choppy) the
-fire probability collapses to 0. In the projection engine,
+The v1 `fire_probability` formula multiplicatively requires both range
+expansion AND momentum, so when momentum is near zero (the definition of
+choppy) the fire probability collapses to 0. In the projection engine,
 `fire_component = fire_probability × 2 − 1`, so `fire = 0` actively pushes
 `e_raw` toward `−f_weight = −0.30` regardless of direction sign — i.e. the
 engine is biased anti-thrust when it should be neutral.
@@ -176,8 +172,9 @@ Add the following parametrized cases. All must pass deterministically.
 - `test_build_ugh_request_choppy_market_yields_neutral_fire`: synthetic
   snapshot with 20 windows of zero net change but non-zero ranges →
   asserts `fire_probability ∈ [0.4, 0.6]`.
-- `test_build_ugh_request_trending_market_yields_high_fire`: synthetic
-  snapshot with monotonic up-trend → asserts `fire_probability > 0.7`.
+- `test_build_ugh_request_directional_market_yields_high_fire`: synthetic
+  snapshot with monotonic close progression → asserts
+  `fire_probability > 0.7`.
 
 ### 7.3 Regression tests
 
@@ -195,7 +192,8 @@ Add the following parametrized cases. All must pass deterministically.
 4. Existing UGH forecast records are unchanged (read-only).
 5. CLAUDE.md invariants preserved: deterministic, frozen, bounded, naive-UTC, flush-only, read-only replay.
 6. After the v2 build is deployed and ≥10 business days of new data accumulate, a re-run of the monthly review must show:
-   - UGH choppy `dir_rate` strictly greater than 0%
+   - UGH choppy `dir_rate` strictly greater than 0% (i.e. v2 escapes the
+     binomial-significant 0/N anti-pattern)
    - `inspect_direction_logic` flag delta improved (UGH-vs-best-baseline gap < 10 pp), OR
    - if the flag persists, the regime-conditional metrics show non-trivial
      differentiation from random_walk baseline (`mean_close_error_bp` no
