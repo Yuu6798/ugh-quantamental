@@ -250,12 +250,19 @@ def _build_variant_request(
         signal_features=base_proj.signal_features,
         alignment_inputs=base_proj.alignment_inputs,
         config=variant_config,
-        run_id=base_proj.run_id,
+        # run_id intentionally cleared per variant: ``ProjectionRunRecord``'s
+        # primary key is ``run_id``, and 4 variants saving against the same
+        # base run_id would collide on flush. ``run_projection_workflow``
+        # generates a fresh ``proj-<uuid>`` when run_id is None.
+        run_id=None,
         created_at=base_proj.created_at,
     )
+    base_state = base_request.ugh_request.state
+    # Same reasoning for state runs.
+    variant_state = base_state.model_copy(update={"run_id": None})
     return FullWorkflowRequest(
         projection=variant_projection,
-        state=base_request.ugh_request.state,
+        state=variant_state,
     )
 
 

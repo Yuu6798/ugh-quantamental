@@ -286,7 +286,8 @@ def _check_canonical_business_day_window(
 class ForecastRecord(BaseModel):
     """Immutable locked forecast produced at as_of_jst.
 
-    For ``strategy_kind="ugh"`` all UGH engine fields are required.
+    For UGH-class strategies (legacy ``ugh`` and any ``ugh_v2_*`` variant —
+    cf. :func:`is_ugh_kind`) all UGH engine fields are required.
     For baseline strategy kinds those fields may be ``None``.
     Baselines still require ``forecast_direction`` and ``expected_close_change_bp``.
     ``disconfirmers`` may be an empty tuple for baselines.
