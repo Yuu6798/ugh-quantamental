@@ -9,6 +9,8 @@ empty string denotes missing, and boolean fields use the ``"true"`` /
 
 from __future__ import annotations
 
+from statistics import median
+
 _TRUTHY = ("true", "1", "yes")
 
 
@@ -30,4 +32,48 @@ def collect_floats(rows: list[dict[str, str]], field: str) -> list[float]:
     return result
 
 
-__all__ = ["count_bool_rows", "collect_floats"]
+def safe_rate(
+    numerator: int, denominator: int, *, ndigits: int | None = 4
+) -> float | None:
+    """Return ``numerator / denominator`` or ``None`` when *denominator* is 0.
+
+    With ``ndigits=None`` rounding is skipped; otherwise the result is
+    rounded to *ndigits* decimal places (default 4).
+    """
+    if denominator == 0:
+        return None
+    rate = numerator / denominator
+    return rate if ndigits is None else round(rate, ndigits)
+
+
+def safe_mean(values: list[float], *, ndigits: int | None = 2) -> float | None:
+    """Return the arithmetic mean of *values* or ``None`` if empty.
+
+    With ``ndigits=None`` rounding is skipped; otherwise the result is
+    rounded to *ndigits* decimal places (default 2).
+    """
+    if not values:
+        return None
+    mean = sum(values) / len(values)
+    return mean if ndigits is None else round(mean, ndigits)
+
+
+def safe_median(values: list[float], *, ndigits: int | None = 2) -> float | None:
+    """Return the median of *values* or ``None`` if empty.
+
+    With ``ndigits=None`` rounding is skipped; otherwise the result is
+    rounded to *ndigits* decimal places (default 2).
+    """
+    if not values:
+        return None
+    med = median(values)
+    return med if ndigits is None else round(med, ndigits)
+
+
+__all__ = [
+    "collect_floats",
+    "count_bool_rows",
+    "safe_mean",
+    "safe_median",
+    "safe_rate",
+]
