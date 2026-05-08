@@ -21,9 +21,25 @@ from ugh_quantamental.fx_protocol.csv_utils import (
 )
 from ugh_quantamental.fx_protocol.models import is_ugh_kind
 
-# Re-exported for backwards compatibility — callers (automation, tests) import
-# these names from observability.
-__all__ = ["append_csv_row", "write_csv_artifact"]
+# Explicit ``__all__`` so ``append_csv_row`` and ``write_csv_artifact`` (re-exports
+# from :mod:`csv_utils`) are recognized as part of this module's public API and
+# survive ``from observability import *``. Includes every previously-public name
+# so star-imports remain backwards compatible.
+__all__ = [
+    "PROVIDER_HEALTH_FIELDNAMES",
+    "SCOREBOARD_FIELDNAMES",
+    "append_csv_row",
+    "build_daily_report_md",
+    "build_input_snapshot",
+    "build_provider_health_row",
+    "build_run_summary",
+    "build_scoreboard_rows",
+    "collect_all_evaluations_from_history",
+    "publish_observability_to_layout",
+    "write_csv_artifact",
+    "write_json_artifact",
+    "write_md_artifact",
+]
 
 if TYPE_CHECKING:
     from ugh_quantamental.fx_protocol.data_models import FxProtocolMarketSnapshot
