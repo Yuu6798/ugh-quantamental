@@ -85,7 +85,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
-          python -m pip install anthropic
 
       - name: Run FX daily protocol
         working-directory: code
@@ -112,6 +111,10 @@ jobs:
             echo "commit_sha=$commit_sha" >> "$GITHUB_OUTPUT"
             echo "commit_msg=$commit_msg" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Install LLM summary dependency (best-effort)
+        if: steps.commit.outputs.pushed == 'true'
+        run: python -m pip install anthropic || true
 
       - name: Build notification body
         id: summary
