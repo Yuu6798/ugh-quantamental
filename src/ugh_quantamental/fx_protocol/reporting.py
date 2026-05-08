@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
+from ugh_quantamental.fx_protocol.metrics_utils import safe_mean
 from ugh_quantamental.fx_protocol.models import (
     EvaluationRecord,
     ForecastDirection,
@@ -104,13 +105,6 @@ def _jst_to_naive_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=_JST)
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
-
-
-def _safe_mean(values: list[float]) -> float | None:
-    """Return the arithmetic mean of *values*, or ``None`` if the list is empty."""
-    if not values:
-        return None
-    return sum(values) / len(values)
 
 
 def _direction_accuracy(rows: list[_WeeklyRow]) -> float | None:
@@ -358,11 +352,13 @@ def _build_strategy_metrics(
         range_hit_count = 0
         range_hit_rate = None
 
-    mean_abs_close_error_bp = _safe_mean(
-        [r.close_error_bp for r in sk_rows if r.close_error_bp is not None]
+    mean_abs_close_error_bp = safe_mean(
+        [r.close_error_bp for r in sk_rows if r.close_error_bp is not None],
+        ndigits=None,
     )
-    mean_abs_magnitude_error_bp = _safe_mean(
-        [r.magnitude_error_bp for r in sk_rows if r.magnitude_error_bp is not None]
+    mean_abs_magnitude_error_bp = safe_mean(
+        [r.magnitude_error_bp for r in sk_rows if r.magnitude_error_bp is not None],
+        ndigits=None,
     )
 
     return StrategyWeeklyMetrics(
@@ -429,7 +425,7 @@ def _build_state_metrics(ugh_rows: list[_WeeklyRow]) -> tuple[StateWeeklyMetrics
                 dominant_state=state,
                 forecast_count=len(state_rows),
                 direction_accuracy=_direction_accuracy(state_rows),
-                mean_abs_close_error_bp=_safe_mean(close_errors),
+                mean_abs_close_error_bp=safe_mean(close_errors, ndigits=None),
             )
         )
     return tuple(results)
@@ -443,11 +439,13 @@ def _build_grv_fire_summary(ugh_rows: list[_WeeklyRow]) -> WeeklyGrvFireSummary:
     return WeeklyGrvFireSummary(
         fire_count=len(fire_rows),
         non_fire_count=len(non_fire_rows),
-        mean_grv_lock_fire=_safe_mean(
-            [r.grv_lock for r in fire_rows if r.grv_lock is not None]
+        mean_grv_lock_fire=safe_mean(
+            [r.grv_lock for r in fire_rows if r.grv_lock is not None],
+            ndigits=None,
         ),
-        mean_grv_lock_non_fire=_safe_mean(
-            [r.grv_lock for r in non_fire_rows if r.grv_lock is not None]
+        mean_grv_lock_non_fire=safe_mean(
+            [r.grv_lock for r in non_fire_rows if r.grv_lock is not None],
+            ndigits=None,
         ),
         fire_direction_accuracy=_direction_accuracy(fire_rows),
     )

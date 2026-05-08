@@ -1,5 +1,5 @@
-# semantic-ci target.yaml — Phase 1 fx_protocol utility extraction
-intent: "Extract duplicated CSV-write and row-aggregation helpers in fx_protocol into shared csv_utils.py and metrics_utils.py modules. No behavior change, no public API change."
+# semantic-ci target.yaml — Phase 1.5 safe-stats helper consolidation
+intent: "Move float|None safe_rate/safe_mean/safe_median into metrics_utils with an ndigits parameter; drop duplicate locals in monthly_review and reporting. weekly_reports_v2's str-returning CSV-format helpers stay local. No behavior change."
 change:
   primary_kind: refactor
   allowed_secondary_kinds:
@@ -7,39 +7,19 @@ change:
   scope:
     files: []
     modules:
-      # New canonical modules
-      - ugh_quantamental.fx_protocol.csv_utils
       - ugh_quantamental.fx_protocol.metrics_utils
-      # Modules updated to delegate / import from the new modules
-      - ugh_quantamental.fx_protocol.csv_exports
-      - ugh_quantamental.fx_protocol.observability
-      - ugh_quantamental.fx_protocol.analytics_annotations
       - ugh_quantamental.fx_protocol.monthly_review
-      - ugh_quantamental.fx_protocol.monthly_review_exports
-      - ugh_quantamental.fx_protocol.weekly_reports_v2
-      - ugh_quantamental.fx_protocol.weekly_report_exports
+      - ugh_quantamental.fx_protocol.reporting
 authorship:
   authors:
-    - identity: "claude-code-refactor-phase1"
+    - identity: "claude-code-refactor-phase1-5"
   declared_at: "2026-05-08T00:00:00Z"
-# API surface changes from relocating duplicated helpers into shared modules.
-# All previously-public names (csv_exports.write_csv_rows,
-# observability.write_csv_artifact, observability.append_csv_row) remain
-# importable via re-export at their original module paths, but the canonical
-# definitions now live in csv_utils / metrics_utils. semantic-ci's static
-# analysis treats this as a same-named symbol moving FQNs, which is
-# accurate.
+# All affected names are private (leading-underscore) helpers; the public API
+# of fx_protocol is unchanged. The new public additions in metrics_utils are
+# the canonical home for these helpers, declared explicitly below.
 api_surface:
   allow_changes:
-    # New canonical public symbols — added intentionally as the deliverable
-    # of this refactor.
-    - fqn: "fx_protocol.csv_utils.write_csv_rows"
-    - fqn: "fx_protocol.csv_utils.append_csv_row"
-    - fqn: "fx_protocol.metrics_utils.count_bool_rows"
-    - fqn: "fx_protocol.metrics_utils.collect_floats"
-    # Symbols whose definition moved out of these modules (still resolvable
-    # at the original path via re-export for backwards compatibility).
-    - fqn: "fx_protocol.csv_exports.write_csv_rows"
-    - fqn: "fx_protocol.observability.write_csv_artifact"
-    - fqn: "fx_protocol.observability.append_csv_row"
+    - fqn: "fx_protocol.metrics_utils.safe_rate"
+    - fqn: "fx_protocol.metrics_utils.safe_mean"
+    - fqn: "fx_protocol.metrics_utils.safe_median"
 constraints: []

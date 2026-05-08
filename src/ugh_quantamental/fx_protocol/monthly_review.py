@@ -20,11 +20,16 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta
-from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from ugh_quantamental.fx_protocol.metrics_utils import collect_floats, count_bool_rows
+from ugh_quantamental.fx_protocol.metrics_utils import (
+    collect_floats,
+    count_bool_rows,
+    safe_mean,
+    safe_median,
+    safe_rate,
+)
 from ugh_quantamental.fx_protocol.models import is_ugh_kind
 
 logger = logging.getLogger(__name__)
@@ -132,24 +137,6 @@ def _is_in_window(date_str: str, start: str, end: str) -> bool:
     return start <= date_str <= end
 
 
-def _safe_rate(numerator: int, denominator: int) -> float | None:
-    if denominator == 0:
-        return None
-    return round(numerator / denominator, 4)
-
-
-def _safe_mean(values: list[float]) -> float | None:
-    if not values:
-        return None
-    return round(sum(values) / len(values), 2)
-
-
-def _safe_median(values: list[float]) -> float | None:
-    if not values:
-        return None
-    return round(median(values), 2)
-
-
 # ---------------------------------------------------------------------------
 # Strategy metrics computation
 # ---------------------------------------------------------------------------
@@ -189,19 +176,19 @@ def compute_monthly_strategy_metrics(
             "strategy_kind": sk,
             "forecast_count": n,
             "direction_hit_count": dir_hits,
-            "direction_hit_rate": _safe_rate(dir_hits, n),
+            "direction_hit_rate": safe_rate(dir_hits, n),
             "range_hit_count": range_hits,
-            "range_hit_rate": _safe_rate(range_hits, len(range_evaluable))
+            "range_hit_rate": safe_rate(range_hits, len(range_evaluable))
             if range_evaluable
             else None,
             "state_proxy_hit_count": state_hits,
-            "state_proxy_hit_rate": _safe_rate(state_hits, len(state_evaluable))
+            "state_proxy_hit_rate": safe_rate(state_hits, len(state_evaluable))
             if state_evaluable
             else None,
-            "mean_abs_close_error_bp": _safe_mean(close_errors),
-            "median_abs_close_error_bp": _safe_median(close_errors),
-            "mean_abs_magnitude_error_bp": _safe_mean(mag_errors),
-            "median_abs_magnitude_error_bp": _safe_median(mag_errors),
+            "mean_abs_close_error_bp": safe_mean(close_errors),
+            "median_abs_close_error_bp": safe_median(close_errors),
+            "mean_abs_magnitude_error_bp": safe_mean(mag_errors),
+            "median_abs_magnitude_error_bp": safe_median(mag_errors),
         })
 
     # Also include any extra strategies present in data but not in STRATEGY_KINDS
@@ -221,19 +208,19 @@ def compute_monthly_strategy_metrics(
                 "strategy_kind": sk,
                 "forecast_count": n,
                 "direction_hit_count": dir_hits,
-                "direction_hit_rate": _safe_rate(dir_hits, n),
+                "direction_hit_rate": safe_rate(dir_hits, n),
                 "range_hit_count": range_hits,
-                "range_hit_rate": _safe_rate(range_hits, len(range_evaluable))
+                "range_hit_rate": safe_rate(range_hits, len(range_evaluable))
                 if range_evaluable
                 else None,
                 "state_proxy_hit_count": state_hits,
-                "state_proxy_hit_rate": _safe_rate(state_hits, len(state_evaluable))
+                "state_proxy_hit_rate": safe_rate(state_hits, len(state_evaluable))
                 if state_evaluable
                 else None,
-                "mean_abs_close_error_bp": _safe_mean(close_errors),
-                "median_abs_close_error_bp": _safe_median(close_errors),
-                "mean_abs_magnitude_error_bp": _safe_mean(mag_errors),
-                "median_abs_magnitude_error_bp": _safe_median(mag_errors),
+                "mean_abs_close_error_bp": safe_mean(close_errors),
+                "median_abs_close_error_bp": safe_median(close_errors),
+                "mean_abs_magnitude_error_bp": safe_mean(mag_errors),
+                "median_abs_magnitude_error_bp": safe_median(mag_errors),
             })
 
     return result
@@ -332,8 +319,8 @@ def compute_monthly_state_metrics(
         result.append({
             "dominant_state": state,
             "forecast_count": n,
-            "direction_hit_rate": _safe_rate(dir_hits, n),
-            "mean_abs_close_error_bp": _safe_mean(close_errors),
+            "direction_hit_rate": safe_rate(dir_hits, n),
+            "mean_abs_close_error_bp": safe_mean(close_errors),
         })
     return result
 
@@ -391,8 +378,8 @@ def compute_monthly_event_tag_metrics(
         result.append({
             "event_tag": tag,
             "observation_count": n,
-            "direction_hit_rate": _safe_rate(dir_hits, n),
-            "mean_abs_close_error_bp": _safe_mean(close_errors),
+            "direction_hit_rate": safe_rate(dir_hits, n),
+            "mean_abs_close_error_bp": safe_mean(close_errors),
         })
     return result
 
@@ -431,8 +418,8 @@ def _compute_slice_metrics_for_ugh(
         result.append({
             field: label,
             "observation_count": n,
-            "direction_hit_rate": _safe_rate(dir_hits, n),
-            "mean_abs_close_error_bp": _safe_mean(close_errors),
+            "direction_hit_rate": safe_rate(dir_hits, n),
+            "mean_abs_close_error_bp": safe_mean(close_errors),
         })
     return result
 
