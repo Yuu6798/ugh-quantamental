@@ -1,14 +1,14 @@
 {
-  "as_of_jst": "2026-05-07T08:00:00+09:00",
-  "generated_at_utc": "2026-05-07T00:26:00Z",
-  "forecast_batch_id": "fb_USDJPY_20260507T080000_v1_307a71ca6a8cff31",
+  "as_of_jst": "2026-05-08T08:00:00+09:00",
+  "generated_at_utc": "2026-05-08T06:55:50Z",
+  "forecast_batch_id": "fb_USDJPY_20260508T080000_v1_773fd3926db43a3e",
   "outcome_id": null,
   "evaluation_count": 0,
   "forecast_csv_path": "latest/forecast.csv",
   "outcome_csv_path": null,
   "evaluation_csv_path": null,
   "protocol_version": "v1",
-  "theory_version": "v1",
-  "engine_version": "v1",
+  "theory_version": "v2",
+  "engine_version": "v2",
   "schema_version": "v1"
 }
