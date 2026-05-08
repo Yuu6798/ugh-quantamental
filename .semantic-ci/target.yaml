@@ -1,5 +1,5 @@
-# semantic-ci target.yaml — Phase 3a report_window extraction
-intent: "Extract byte-equivalent window resolution and version stratification helpers from weekly_reports_v2 and monthly_review into a shared fx_protocol/report_window module. No behavior change. No public API change."
+# semantic-ci target.yaml — Phase 3b annotation_coverage extraction
+intent: "Extract duplicated annotation-status counting from weekly_reports_v2.build_annotation_coverage and monthly_review.compute_annotation_coverage_summary into fx_protocol/annotation_coverage.count_by_annotation_status. Both wrappers retain their existing public signatures and output dict shapes. No behavior change."
 change:
   primary_kind: refactor
   allowed_secondary_kinds:
@@ -7,20 +7,17 @@ change:
   scope:
     files: []
     modules:
-      - ugh_quantamental.fx_protocol.report_window
+      - ugh_quantamental.fx_protocol.annotation_coverage
       - ugh_quantamental.fx_protocol.weekly_reports_v2
       - ugh_quantamental.fx_protocol.monthly_review
-      - ugh_quantamental.fx_protocol.monthly_review_exports
 authorship:
   authors:
-    - identity: "claude-code-refactor-phase3a"
+    - identity: "claude-code-refactor-phase3b"
   declared_at: "2026-05-08T00:00:00Z"
-# All affected names are private (leading-underscore) helpers; the public API
-# of fx_protocol is unchanged. The new public additions in report_window are
-# the canonical home for these helpers, declared explicitly below.
+# The two existing public wrappers (build_annotation_coverage,
+# compute_annotation_coverage_summary) keep their signatures and
+# output dict keys verbatim. The new helper is the canonical home.
 api_surface:
   allow_changes:
-    - fqn: "fx_protocol.report_window.resolve_business_day_window"
-    - fqn: "fx_protocol.report_window.is_in_window"
-    - fqn: "fx_protocol.report_window.stratify_observations_by_versions"
+    - fqn: "fx_protocol.annotation_coverage.count_by_annotation_status"
 constraints: []
