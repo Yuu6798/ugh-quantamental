@@ -12,10 +12,15 @@ from __future__ import annotations
 
 import pytest
 
-from ugh_quantamental.fx_protocol.monthly_review import (
-    _stratify_observations_by_versions,
+# Phase 3a: both _stratify_by_versions (weekly) and _stratify_observations_by_versions
+# (monthly) were consolidated into a single canonical helper in report_window.
+# Aliases here keep the existing two test classes' calling conventions.
+from ugh_quantamental.fx_protocol.report_window import (
+    stratify_observations_by_versions as _stratify_by_versions,
 )
-from ugh_quantamental.fx_protocol.weekly_reports_v2 import _stratify_by_versions
+from ugh_quantamental.fx_protocol.report_window import (
+    stratify_observations_by_versions as _stratify_observations_by_versions,
+)
 
 
 @pytest.fixture()

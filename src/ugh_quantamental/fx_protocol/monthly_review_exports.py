@@ -26,13 +26,13 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from ugh_quantamental.fx_protocol.csv_utils import write_csv_rows
-from ugh_quantamental.fx_protocol.monthly_review import (
-    _resolve_month_window,
-    run_monthly_review,
+from ugh_quantamental.fx_protocol.monthly_review import run_monthly_review
+from ugh_quantamental.fx_protocol.report_window import (
+    is_in_window,
+    resolve_business_day_window,
 )
 from ugh_quantamental.fx_protocol.weekly_reports_v2 import (
     WEEKLY_SLICE_METRICS_FIELDNAMES,
-    _is_in_week,
     _load_labeled_observations_for_week,
     _load_provider_health_rows,
     _filter_provider_health_for_week,
@@ -496,7 +496,7 @@ def _build_forecast_lookup(
     for date_dir in sorted(os.listdir(history_dir)):
         # Quick date range check on directory name (YYYYMMDD)
         if len(date_dir) == 8 and date_dir.isdigit():
-            if not _is_in_week(date_dir, month_start, month_end):
+            if not is_in_window(date_dir, month_start, month_end):
                 continue
 
         date_path = os.path.join(history_dir, date_dir)
@@ -631,7 +631,7 @@ def rebuild_monthly_review(
         )
 
     # Resolve window
-    month_start, month_end = _resolve_month_window(review_date_jst, business_day_count)
+    month_start, month_end = resolve_business_day_window(review_date_jst, business_day_count)
 
     # Load data (reuse weekly data loading helpers)
     observations = _load_labeled_observations_for_week(csv_output_dir, month_start, month_end)

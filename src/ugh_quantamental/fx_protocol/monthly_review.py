@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -31,6 +31,7 @@ from ugh_quantamental.fx_protocol.metrics_utils import (
     safe_rate,
 )
 from ugh_quantamental.fx_protocol.models import is_ugh_kind
+from ugh_quantamental.fx_protocol.report_window import stratify_observations_by_versions
 
 logger = logging.getLogger(__name__)
 
@@ -100,41 +101,6 @@ def _select_canonical_ugh_metrics(
         if m is not None and m.get("forecast_count", 0) > 0:
             return m
     return by_kind.get("ugh")
-
-
-# ---------------------------------------------------------------------------
-# Pure helpers (no I/O)
-# ---------------------------------------------------------------------------
-
-
-def _resolve_month_window(
-    review_date_jst: datetime,
-    business_day_count: int = 20,
-) -> tuple[str, str]:
-    """Return (start_date_str, end_date_str) YYYYMMDD for the month window.
-
-    Walks backwards from the day *before* review_date_jst collecting
-    business_day_count Mon-Fri dates.
-    """
-    if review_date_jst.tzinfo is not None:
-        ts = review_date_jst.astimezone(_JST)
-    else:
-        ts = review_date_jst.replace(tzinfo=_JST)
-
-    dates: list[datetime] = []
-    candidate = ts.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    while len(dates) < business_day_count:
-        if candidate.isoweekday() in range(1, 6):
-            dates.append(candidate)
-        candidate -= timedelta(days=1)
-
-    dates.reverse()
-    return dates[0].strftime("%Y%m%d"), dates[-1].strftime("%Y%m%d")
-
-
-def _is_in_window(date_str: str, start: str, end: str) -> bool:
-    """Check if a YYYYMMDD date string falls within [start, end]."""
-    return start <= date_str <= end
 
 
 # ---------------------------------------------------------------------------
@@ -817,44 +783,6 @@ def compute_monthly_slice_metrics(
 # ---------------------------------------------------------------------------
 
 
-def _stratify_observations_by_versions(
-    rows: list[dict[str, str]],
-    *,
-    theory_version_filter: str | None = None,
-    engine_version_filter: str | None = None,
-) -> list[dict[str, str]]:
-    """Spec §7.5 stratification: filter monthly observations by version columns.
-
-    Auto-detect mode (both filters ``None``): if rows contain more than one
-    distinct ``theory_version``, the latest one is selected and a warning
-    is logged. Single-version data is returned unchanged. Explicit-filter
-    mode drops rows whose column does not match the filter (or whose
-    column is missing).
-    """
-    if theory_version_filter is None and engine_version_filter is None:
-        present = {row.get("theory_version", "") for row in rows} - {""}
-        if len(present) <= 1:
-            return rows
-        latest = max(present)
-        logger.warning(
-            "monthly_review: auto-stratifying mixed theory_versions %s; "
-            "filtering to latest=%s",
-            sorted(present),
-            latest,
-        )
-        return [r for r in rows if r.get("theory_version", "") == latest]
-
-    filtered = rows
-    if theory_version_filter is not None:
-        filtered = [
-            r for r in filtered if r.get("theory_version", "") == theory_version_filter
-        ]
-    if engine_version_filter is not None:
-        filtered = [
-            r for r in filtered if r.get("engine_version", "") == engine_version_filter
-        ]
-    return filtered
-
 
 def run_monthly_review(
     observations: list[dict[str, str]],
@@ -907,7 +835,7 @@ def run_monthly_review(
 
     # Spec §7.5 stratification — applied before any per-strategy aggregation
     # so version mixing cannot leak into baseline-vs-UGH deltas or review flags.
-    observations = _stratify_observations_by_versions(
+    observations = stratify_observations_by_versions(
         observations,
         theory_version_filter=theory_version_filter,
         engine_version_filter=engine_version_filter,
