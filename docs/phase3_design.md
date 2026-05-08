@@ -15,12 +15,12 @@ need to be addressed explicitly before any code moves.
 | 1 | ✅ Done | #93 |
 | 1.5 | ✅ Done | #95 |
 | 2 | ✅ Done | #96 |
-| **3a** | Proposed in this doc | — |
-| 3b | Proposed in this doc | — |
-| 3c | **Out of scope** for now | — |
-| 3d | **Out of scope** for now | — |
+| 3a | ✅ Done | #98 |
+| 3b | ✅ Done | #99 |
+| 3c | **Out of scope** | — |
+| 3d | **Out of scope** | — |
 
-Phase 3 ships as **two small sub-phases (3a, 3b)**. Two larger units
+Phase 3 shipped as **two small sub-phases (3a, 3b)**. Two larger units
 (3c, 3d) are explicitly out of scope and are documented here only so
 future-me knows why they were skipped.
 
@@ -258,9 +258,21 @@ becomes load-bearing for real.
 - Net LOC reduction: ~100 across `weekly_reports_v2.py` and `monthly_review.py`.
 - 3c and 3d documented as deferred (this doc satisfies that).
 
-## Default execution order after this PR merges
+## Execution log
 
-1. Phase 3a in its own PR (window + stratification)
-2. Phase 3b in its own PR (annotation coverage)
-3. Update `docs/refactoring_plan.md`'s status table (3a / 3b → ✅, 3c / 3d → "deferred per phase3_design.md")
-4. Phase 3 closed; consider Phase 4 themes (TBD — no audit findings beyond what's covered above)
+1. Phase 3a — extracted `fx_protocol/report_window.py` with
+   `resolve_business_day_window` / `is_in_window` /
+   `stratify_observations_by_versions`. Net **−47 LOC**. PR #98 (merged).
+2. Phase 3b — extracted `fx_protocol/annotation_coverage.py` with
+   `count_by_annotation_status`; both wrappers retained as 11-line
+   adapters. Wrapper bodies down ~63 → ~22 LOC. PR #99 (merged).
+3. Both sub-phases gated under semantic-ci `primary_kind: refactor` with
+   `4/4 satisfied` (pure helpers, no fs effects to relocate).
+4. Phase 3 closed. 3c (observation-loader bridge) and 3d (metric row
+   schema unification) remain out of scope per the rationale above —
+   re-open the question only if a third weekly/monthly-shaped consumer
+   appears.
+
+Phase 4 themes are TBD; the original audit (see
+`docs/refactoring_plan.md` → "Original audit findings") has no further
+high-impact items beyond what's already covered.

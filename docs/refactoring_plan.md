@@ -15,8 +15,8 @@ expected public-API impact, and the `target.yaml` shape required to gate it unde
 | 1 | Extract `csv_utils` + `metrics_utils` | ✅ Done | #93 |
 | 1.5 | Consolidate `monthly_review` `_safe_*` helpers into `metrics_utils` | ✅ Done | #95 |
 | 2 | Split `analytics_annotations.py` (1028 LOC) | ✅ Done | #96 |
-| 3a | Extract `report_window` (window + version stratification) | Designed, see [`phase3_design.md`](./phase3_design.md) | — |
-| 3b | Extract `annotation_coverage` shared core | Designed, see [`phase3_design.md`](./phase3_design.md) | — |
+| 3a | Extract `report_window` (window + version stratification) | ✅ Done | #98 |
+| 3b | Extract `annotation_coverage` shared core | ✅ Done | #99 |
 | 3c | Observation-loading bridge | Deferred — see design doc | — |
 | 3d | Metric row schema unification | Deferred — see design doc | — |
 
@@ -232,16 +232,20 @@ refactor, and labeling otherwise loses information.
 
 ## Picking what to do next
 
-**Default order**: 1.5 → 2 → 3.
+All planned phases (1, 1.5, 2, 3a, 3b) are shipped. 3c and 3d are
+out of scope per [`phase3_design.md`](./phase3_design.md).
 
-- Phase 1.5 first because it tightens the metrics_utils API and unblocks Phase 3
-  (which needs a single canonical `safe_*` API).
-- Phase 2 next because it has the largest impact-per-risk ratio and is independent
-  of the others.
-- Phase 3 last and only after a written design.
+There is no Phase 4 plan yet. The original audit has no further
+high-impact items in `fx_protocol/`. New refactor work should start
+with a fresh audit (Explore agent over the whole package, plus a
+specific complaint or pain point the user wants addressed).
 
-If the user redirects (e.g. "skip 1.5, go to 2"), follow the redirect — this
-order is a default, not a contract.
+The historical execution order — 1 → 1.5 → 2 → 3a → 3b — was: extract
+shared utilities first (1, 1.5), split the largest module (2), then
+unify the parallel pipelines (3a, 3b). If a future phase appears,
+follow the same shape: small, semantically-scoped PRs with `target.yaml`
+gating, and a written design before anything that's not "obviously
+duplicated, byte-equivalent helpers".
 
 ## Do not touch
 
