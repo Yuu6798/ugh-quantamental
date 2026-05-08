@@ -168,9 +168,9 @@ def run_monthly_pipeline(
                     print(f"  [WARN] Failed to load {report_json}: {exc}")
 
     # Filter weekly reports to the monthly window and deduplicate by week_window
-    from ugh_quantamental.fx_protocol.monthly_review import _resolve_month_window
+    from ugh_quantamental.fx_protocol.report_window import resolve_business_day_window
 
-    month_start, month_end = _resolve_month_window(review_date_jst, month_days)
+    month_start, month_end = resolve_business_day_window(review_date_jst, month_days)
     seen_windows: set[tuple[str, str]] = set()
     relevant_reports: list[dict] = []
     for wr in weekly_reports:

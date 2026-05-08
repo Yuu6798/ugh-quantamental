@@ -16,16 +16,18 @@ import csv
 import logging
 import os
 from collections import defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from statistics import median
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from ugh_quantamental.fx_protocol.metrics_utils import collect_floats, count_bool_rows
+from ugh_quantamental.fx_protocol.report_window import (
+    is_in_window,
+    resolve_business_day_window,
+    stratify_observations_by_versions,
+)
 
 logger = logging.getLogger(__name__)
-
-_JST = ZoneInfo("Asia/Tokyo")
 
 
 # ---------------------------------------------------------------------------
@@ -66,39 +68,6 @@ WEEKLY_SLICE_METRICS_FIELDNAMES: tuple[str, ...] = (
 # ---------------------------------------------------------------------------
 # Pure helpers (no I/O)
 # ---------------------------------------------------------------------------
-
-
-def _resolve_week_window(
-    report_date_jst: datetime,
-    business_day_count: int = 5,
-) -> tuple[str, str]:
-    """Return (start_date_str, end_date_str) for the week window.
-
-    Walks backwards from the day *before* *report_date_jst* collecting
-    *business_day_count* Mon-Fri dates.  The report date itself is excluded
-    to avoid including an incomplete current-day bucket.
-    Returns YYYYMMDD strings for the oldest and newest dates.
-    """
-    if report_date_jst.tzinfo is not None:
-        ts = report_date_jst.astimezone(_JST)
-    else:
-        ts = report_date_jst.replace(tzinfo=_JST)
-
-    dates: list[datetime] = []
-    # Start from the day before report_date to exclude the (potentially incomplete) current day.
-    candidate = ts.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
-    while len(dates) < business_day_count:
-        if candidate.isoweekday() in range(1, 6):
-            dates.append(candidate)
-        candidate -= timedelta(days=1)
-
-    dates.reverse()
-    return dates[0].strftime("%Y%m%d"), dates[-1].strftime("%Y%m%d")
-
-
-def _is_in_week(date_str: str, start: str, end: str) -> bool:
-    """Check if a YYYYMMDD date string falls within [start, end]."""
-    return start <= date_str <= end
 
 
 def _safe_rate(numerator: int, denominator: int) -> str:
@@ -171,60 +140,9 @@ def _load_labeled_observations_for_week(
         as_of = row.get("as_of_jst", "")
         # Extract YYYYMMDD from ISO datetime
         date_str = as_of[:10].replace("-", "") if len(as_of) >= 10 else ""
-        if date_str and _is_in_week(date_str, week_start, week_end):
+        if date_str and is_in_window(date_str, week_start, week_end):
             result.append(row)
     return result
-
-
-def _stratify_by_versions(
-    rows: list[dict[str, str]],
-    *,
-    theory_version_filter: str | None = None,
-    engine_version_filter: str | None = None,
-) -> list[dict[str, str]]:
-    """Stratify observations by ``theory_version`` and ``engine_version``.
-
-    Spec §7.5: weekly / monthly aggregations must stratify by
-    ``theory_version`` (and ideally ``engine_version``) to avoid mixing v1
-    and v2 records under shared ``strategy_kind`` values across the
-    boundary week.
-
-    Behavior:
-
-    * If both ``theory_version_filter`` and ``engine_version_filter`` are
-      ``None``, **auto-detect**: when the input rows contain more than
-      one distinct ``theory_version`` the latest one (lexicographic max
-      across the v1/v2/... sequence) is selected and a warning is logged;
-      single-version data is returned unchanged.
-    * If either filter is non-None, rows whose corresponding column does
-      not match are dropped.
-    * Rows missing the version column entirely are kept under the
-      auto-detect path (they predate stratification) but dropped under
-      an explicit filter (no silent inclusion).
-    """
-    if theory_version_filter is None and engine_version_filter is None:
-        present = {row.get("theory_version", "") for row in rows} - {""}
-        if len(present) <= 1:
-            return rows
-        latest = max(present)
-        logger.warning(
-            "weekly_reports_v2: auto-stratifying mixed theory_versions %s; "
-            "filtering to latest=%s",
-            sorted(present),
-            latest,
-        )
-        return [r for r in rows if r.get("theory_version", "") == latest]
-
-    filtered = rows
-    if theory_version_filter is not None:
-        filtered = [
-            r for r in filtered if r.get("theory_version", "") == theory_version_filter
-        ]
-    if engine_version_filter is not None:
-        filtered = [
-            r for r in filtered if r.get("engine_version", "") == engine_version_filter
-        ]
-    return filtered
 
 
 def _load_provider_health_rows(csv_output_dir: str) -> list[dict[str, str]]:
@@ -269,7 +187,7 @@ def _filter_provider_health_for_week(
     for row in rows:
         as_of = row.get("as_of_jst", "")
         date_str = as_of[:10].replace("-", "").replace("T", "")[:8] if as_of else ""
-        if date_str and _is_in_week(date_str, week_start, week_end):
+        if date_str and is_in_window(date_str, week_start, week_end):
             result.append(row)
     return result
 
@@ -649,13 +567,13 @@ def run_weekly_report_v2(
     if generated_at_utc is None:
         generated_at_utc = datetime.now(timezone.utc)
 
-    week_start, week_end = _resolve_week_window(report_date_jst, business_day_count)
+    week_start, week_end = resolve_business_day_window(report_date_jst, business_day_count)
 
     # Load data
     observations = _load_labeled_observations_for_week(csv_output_dir, week_start, week_end)
     # Spec §7.5: stratify by theory_version + engine_version before metrics
     # are computed so the v1↔v2 boundary week does not silently mix records.
-    observations = _stratify_by_versions(
+    observations = stratify_observations_by_versions(
         observations,
         theory_version_filter=theory_version_filter,
         engine_version_filter=engine_version_filter,
