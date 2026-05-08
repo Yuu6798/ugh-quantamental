@@ -1,5 +1,5 @@
-# semantic-ci target.yaml — Phase 1.5 safe-stats helper consolidation
-intent: "Move float|None safe_rate/safe_mean/safe_median into metrics_utils with an ndigits parameter; drop duplicate locals in monthly_review and reporting. weekly_reports_v2's str-returning CSV-format helpers stay local. No behavior change."
+# semantic-ci target.yaml — Phase 2 analytics_annotations split
+intent: "Extract labeled-observations builder + manual-annotation loading + auto event-tag derivation out of analytics_annotations.py (994 LOC) into a new fx_protocol/labeled_observations.py. analytics_annotations re-exports the moved symbols so existing import paths keep working. No behavior change."
 change:
   primary_kind: refactor
   allowed_secondary_kinds:
@@ -7,19 +7,30 @@ change:
   scope:
     files: []
     modules:
-      - ugh_quantamental.fx_protocol.metrics_utils
-      - ugh_quantamental.fx_protocol.monthly_review
-      - ugh_quantamental.fx_protocol.reporting
+      # New canonical module (substrate for weekly / monthly review)
+      - ugh_quantamental.fx_protocol.labeled_observations
+      # Module the content is split out of; now a slimmer
+      # AI-draft + scoreboard + orchestrator concern.
+      - ugh_quantamental.fx_protocol.analytics_annotations
 authorship:
   authors:
-    - identity: "claude-code-refactor-phase1-5"
+    - identity: "claude-code-refactor-phase2"
   declared_at: "2026-05-08T00:00:00Z"
-# All affected names are private (leading-underscore) helpers; the public API
-# of fx_protocol is unchanged. The new public additions in metrics_utils are
-# the canonical home for these helpers, declared explicitly below.
+# All previously-public symbols (LABELED_OBSERVATION_FIELDNAMES,
+# load_manual_annotations, build_labeled_observations) still resolve at
+# their original ``analytics_annotations.<name>`` path via re-export so
+# automation, analytics_rebuild, the package __init__, and tests do not
+# need to update import paths. semantic-ci's static analysis treats a
+# moved definition as a fqn change, declared explicitly here.
 api_surface:
   allow_changes:
-    - fqn: "fx_protocol.metrics_utils.safe_rate"
-    - fqn: "fx_protocol.metrics_utils.safe_mean"
-    - fqn: "fx_protocol.metrics_utils.safe_median"
+    # New canonical home — added intentionally as the deliverable.
+    - fqn: "fx_protocol.labeled_observations.LABELED_OBSERVATION_FIELDNAMES"
+    - fqn: "fx_protocol.labeled_observations.load_manual_annotations"
+    - fqn: "fx_protocol.labeled_observations.build_labeled_observations"
+    # Symbols whose definition moved out of analytics_annotations
+    # (still resolvable at the original path via re-export).
+    - fqn: "fx_protocol.analytics_annotations.LABELED_OBSERVATION_FIELDNAMES"
+    - fqn: "fx_protocol.analytics_annotations.load_manual_annotations"
+    - fqn: "fx_protocol.analytics_annotations.build_labeled_observations"
 constraints: []
