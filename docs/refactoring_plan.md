@@ -13,9 +13,12 @@ expected public-API impact, and the `target.yaml` shape required to gate it unde
 | Phase | Title | Status | PR |
 |---|---|---|---|
 | 1 | Extract `csv_utils` + `metrics_utils` | ✅ Done | #93 |
-| 1.5 | Consolidate `monthly_review` `_safe_*` helpers into `metrics_utils` | Open | — |
-| 2 | Split `analytics_annotations.py` (1028 LOC) | Open | — |
-| 3 | Unify weekly / monthly report builder | Open | — |
+| 1.5 | Consolidate `monthly_review` `_safe_*` helpers into `metrics_utils` | ✅ Done | #95 |
+| 2 | Split `analytics_annotations.py` (1028 LOC) | ✅ Done | #96 |
+| 3a | Extract `report_window` (window + version stratification) | Designed, see [`phase3_design.md`](./phase3_design.md) | — |
+| 3b | Extract `annotation_coverage` shared core | Designed, see [`phase3_design.md`](./phase3_design.md) | — |
+| 3c | Observation-loading bridge | Deferred — see design doc | — |
+| 3d | Metric row schema unification | Deferred — see design doc | — |
 
 Picking the next phase: see [Picking what to do next](#picking-what-to-do-next).
 
@@ -155,34 +158,30 @@ line count.
 
 ### Phase 3 — Unify weekly / monthly report builder
 
-**Goal**: The two pipelines share substantial structure (load → window-filter →
-group by strategy → metrics → flags → render). Currently each implements its own
-loaders, window helpers, and metric aggregators.
+**Design pinned in [`docs/phase3_design.md`](./phase3_design.md).**
 
-**Approach** (sketch — needs design pass before implementation):
+After audit (see the design doc), Phase 3 splits into:
 
-1. Extract **window resolution** to a small util:
-   `WindowSpec(start_yyyymmdd: str, end_yyyymmdd: str, business_day_count: int)`,
-   `resolve_window(report_date_jst, business_day_count) -> WindowSpec`.
-2. Extract **observation loading + version stratification** (currently duplicated
-   in `weekly_reports_v2._load_labeled_observations_for_week` and
-   `monthly_review._load_observations_for_window`).
-3. Extract **strategy metric computation** keyed on a `WindowSpec` + observation
-   list, producing the same per-strategy dict shape both reports already use.
-4. Leave window-specific logic (review flags, recommendation summary, governance
-   linkage) in the original modules.
+- **Phase 3a** — Extract byte-equivalent window resolution + version
+  stratification helpers (`_resolve_*_window`, `_is_in_*`,
+  `_stratify_*_by_versions`) into a new `fx_protocol/report_window.py`.
+  Net ~70 LOC saved, low risk, no public API change.
+- **Phase 3b** — Extract the duplicated annotation-coverage counting
+  logic into `fx_protocol/annotation_coverage.py`; both modules keep
+  their existing wrapper signatures and call into the shared core.
+  Net ~30 LOC saved, low risk, no public API change.
+- **Phase 3c (deferred)** — Observation-loading bridge. Asymmetric
+  loader contract between weekly (loads from disk) and monthly
+  (receives pre-loaded data) is an architecture question, not a
+  duplication problem. Tiny LOC saved, large blast radius.
+- **Phase 3d (deferred)** — Per-strategy metric row unification across
+  the str ↔ `float | None` schema split. Trades duplication for an
+  adapter abstraction layer; not worth it without a third consumer.
 
-**Caveats**:
-
-- This is the largest and highest-risk phase. Both pipelines have distinct
-  output schemas (`weekly_strategy_metrics.csv` vs `monthly_strategy_metrics.csv`).
-  Verify field alignment before unifying.
-- `_safe_rate` / `_safe_mean` divergence between modules (str vs float|None)
-  must be reconciled first — handle via Phase 1.5.
-- Prefer a series of small PRs over a single mega-refactor. Each PR should
-  satisfy `api_surface_unchanged`.
-
-**Don't start Phase 3 without a written design** in this doc or a sibling
+The earlier sketch under this heading (window + observation loading +
+metric computation as one bundle) was rejected during audit — it
+conflated low-risk byte-identical extraction (Phase 3a) with
+load-bearing schema divergence (would-be Phase 3d).
 spec under `docs/specs/`. The audit identified the opportunity; the design
 is not yet pinned down.
 
