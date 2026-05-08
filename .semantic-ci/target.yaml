@@ -1,40 +1,45 @@
-# semantic-ci target.yaml — UGH FX engine v2 implementation gate
-intent: "Implement v2 projection engine: variant emission, fire redesign, version stratification (spec docs/specs/fx_ugh_engine_v2.md §7 steps 1-7.5)"
+# semantic-ci target.yaml — Phase 1 fx_protocol utility extraction
+intent: "Extract duplicated CSV-write and row-aggregation helpers in fx_protocol into shared csv_utils.py and metrics_utils.py modules. No behavior change, no public API change."
 change:
-  primary_kind: feature
+  primary_kind: refactor
   allowed_secondary_kinds:
-    - refactor
     - test_update
   scope:
     files: []
     modules:
-      - ugh_quantamental.engine.projection
-      - ugh_quantamental.engine.projection_models
-      - ugh_quantamental.fx_protocol.market_ugh_builder
-      - ugh_quantamental.fx_protocol.models
-      - ugh_quantamental.fx_protocol.forecasting
-      - ugh_quantamental.fx_protocol.outcomes
-      - ugh_quantamental.fx_protocol.automation
-      - ugh_quantamental.fx_protocol.automation_models
-      - ugh_quantamental.fx_protocol.reporting
-      - ugh_quantamental.fx_protocol.report_models
-      - ugh_quantamental.fx_protocol.weekly_reports_v2
-      - ugh_quantamental.fx_protocol.monthly_review
-      - ugh_quantamental.fx_protocol.monthly_governance
+      # New canonical modules
+      - ugh_quantamental.fx_protocol.csv_utils
+      - ugh_quantamental.fx_protocol.metrics_utils
+      # Modules updated to delegate / import from the new modules
+      - ugh_quantamental.fx_protocol.csv_exports
       - ugh_quantamental.fx_protocol.observability
       - ugh_quantamental.fx_protocol.analytics_annotations
-      - ugh_quantamental.fx_protocol.ai_annotations
+      - ugh_quantamental.fx_protocol.monthly_review
+      - ugh_quantamental.fx_protocol.monthly_review_exports
+      - ugh_quantamental.fx_protocol.weekly_reports_v2
+      - ugh_quantamental.fx_protocol.weekly_report_exports
 authorship:
   authors:
-    - identity: "claude-code-v2-engine-impl"
-  declared_at: "2026-05-07T00:00:00Z"
-# Spec §7 step 5 explicitly directs replacing build_ugh_forecast with
-# parameterized variant builders ("In forecasting.py, replace
-# build_ugh_forecast with four variant builders ... that emit four
-# ForecastRecords per snapshot, each with its variant's
-# ProjectionConfig"). This is an intentional public-API removal aligned
-# with the v1→v2 cut-over (legacy `ugh` strategy retired per §5.2).
+    - identity: "claude-code-refactor-phase1"
+  declared_at: "2026-05-08T00:00:00Z"
+# API surface changes from relocating duplicated helpers into shared modules.
+# All previously-public names (csv_exports.write_csv_rows,
+# observability.write_csv_artifact, observability.append_csv_row) remain
+# importable via re-export at their original module paths, but the canonical
+# definitions now live in csv_utils / metrics_utils. semantic-ci's static
+# analysis treats this as a same-named symbol moving FQNs, which is
+# accurate.
 api_surface:
   allow_changes:
-    - fqn: "fx_protocol.forecasting.build_ugh_forecast"
+    # New canonical public symbols — added intentionally as the deliverable
+    # of this refactor.
+    - fqn: "fx_protocol.csv_utils.write_csv_rows"
+    - fqn: "fx_protocol.csv_utils.append_csv_row"
+    - fqn: "fx_protocol.metrics_utils.count_bool_rows"
+    - fqn: "fx_protocol.metrics_utils.collect_floats"
+    # Symbols whose definition moved out of these modules (still resolvable
+    # at the original path via re-export for backwards compatibility).
+    - fqn: "fx_protocol.csv_exports.write_csv_rows"
+    - fqn: "fx_protocol.observability.write_csv_artifact"
+    - fqn: "fx_protocol.observability.append_csv_row"
 constraints: []

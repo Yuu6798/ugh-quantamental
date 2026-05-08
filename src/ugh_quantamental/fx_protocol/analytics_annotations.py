@@ -23,6 +23,8 @@ from datetime import datetime, timedelta, timezone
 from statistics import median
 from typing import Any
 
+from ugh_quantamental.fx_protocol.csv_utils import write_csv_rows
+from ugh_quantamental.fx_protocol.metrics_utils import collect_floats, count_bool_rows
 from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE, is_ugh_kind
 
 logger = logging.getLogger(__name__)
@@ -150,7 +152,7 @@ def generate_ai_annotations(
         rows = [r for r in rows if r.get("as_of_jst") != as_of_str]
         rows.append(row)
         rows.sort(key=lambda r: r.get("as_of_jst", ""))
-        _write_csv(path, rows, AI_ANNOTATION_FIELDNAMES)
+        write_csv_rows(path, rows, AI_ANNOTATION_FIELDNAMES, extrasaction="ignore")
         return os.path.abspath(path)
     except Exception:
         logger.warning("AI annotation generation failed (non-fatal).", exc_info=True)
@@ -328,7 +330,7 @@ def generate_manual_annotation_template(csv_output_dir: str) -> str:
         "notes": "Example: copy from ai_annotation_suggestions.csv and edit",
         "annotation_status": "pending",
     }
-    _write_csv(path, [sample_row], MANUAL_ANNOTATION_FIELDNAMES)
+    write_csv_rows(path, [sample_row], MANUAL_ANNOTATION_FIELDNAMES, extrasaction="ignore")
     return os.path.abspath(path)
 
 
@@ -484,7 +486,7 @@ def build_labeled_observations(
         out_dir = os.path.join(base, "analytics")
         os.makedirs(out_dir, exist_ok=True)
         path = os.path.join(out_dir, "labeled_observations.csv")
-        _write_csv(path, rows, LABELED_OBSERVATION_FIELDNAMES)
+        write_csv_rows(path, rows, LABELED_OBSERVATION_FIELDNAMES, extrasaction="ignore")
         return os.path.abspath(path)
     except Exception:
         logger.warning("labeled_observations generation failed (non-fatal).", exc_info=True)
@@ -731,7 +733,7 @@ def build_slice_scoreboard(
         path = os.path.join(
             os.path.abspath(csv_output_dir), "analytics", "slice_scoreboard.csv"
         )
-        _write_csv(path, sb_rows, SLICE_SCOREBOARD_FIELDNAMES)
+        write_csv_rows(path, sb_rows, SLICE_SCOREBOARD_FIELDNAMES, extrasaction="ignore")
         return os.path.abspath(path)
     except Exception:
         logger.warning("slice_scoreboard generation failed (non-fatal).", exc_info=True)
@@ -770,13 +772,13 @@ def _aggregate_slice_scoreboard(
 
     for (sk, rl, vl, ir), rows in sorted(groups.items()):
         n = len(rows)
-        dir_hits = _count_bool(rows, "direction_hit")
+        dir_hits = count_bool_rows(rows, "direction_hit")
         range_evaluable = [r for r in rows if r.get("range_hit", "") != ""]
-        range_hits = _count_bool(range_evaluable, "range_hit")
+        range_hits = count_bool_rows(range_evaluable, "range_hit")
         state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]
-        state_hits = _count_bool(state_evaluable, "state_proxy_hit")
-        close_errors = _collect_floats(rows, "close_error_bp")
-        mag_errors = _collect_floats(rows, "magnitude_error_bp")
+        state_hits = count_bool_rows(state_evaluable, "state_proxy_hit")
+        close_errors = collect_floats(rows, "close_error_bp")
+        mag_errors = collect_floats(rows, "magnitude_error_bp")
 
         result.append({
             "strategy_kind": sk,
@@ -844,7 +846,7 @@ def build_tag_scoreboard(
         path = os.path.join(
             os.path.abspath(csv_output_dir), "analytics", "tag_scoreboard.csv"
         )
-        _write_csv(path, tag_rows, TAG_SCOREBOARD_FIELDNAMES)
+        write_csv_rows(path, tag_rows, TAG_SCOREBOARD_FIELDNAMES, extrasaction="ignore")
         return os.path.abspath(path)
     except Exception:
         logger.warning("tag_scoreboard generation failed (non-fatal).", exc_info=True)
@@ -878,13 +880,13 @@ def _aggregate_tag_scoreboard(
 
     for (sk, tag), rows in sorted(groups.items()):
         n = len(rows)
-        dir_hits = _count_bool(rows, "direction_hit")
+        dir_hits = count_bool_rows(rows, "direction_hit")
         range_evaluable = [r for r in rows if r.get("range_hit", "") != ""]
-        range_hits = _count_bool(range_evaluable, "range_hit")
+        range_hits = count_bool_rows(range_evaluable, "range_hit")
         state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]
-        state_hits = _count_bool(state_evaluable, "state_proxy_hit")
-        close_errors = _collect_floats(rows, "close_error_bp")
-        mag_errors = _collect_floats(rows, "magnitude_error_bp")
+        state_hits = count_bool_rows(state_evaluable, "state_proxy_hit")
+        close_errors = collect_floats(rows, "close_error_bp")
+        mag_errors = collect_floats(rows, "magnitude_error_bp")
 
         result.append({
             "strategy_kind": sk,
@@ -986,43 +988,7 @@ def run_annotation_analytics(
 # ---------------------------------------------------------------------------
 
 
-def _write_csv(
-    path: str,
-    rows: list[dict[str, Any]],
-    fieldnames: tuple[str, ...],
-) -> str:
-    """Write rows to CSV.  Returns absolute path."""
-    abs_path = os.path.abspath(path)
-    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-    with open(abs_path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(fieldnames), extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
-    return abs_path
-
-
 def _read_csv_rows(path: str) -> list[dict[str, str]]:
     """Read all rows from a CSV file."""
     with open(path, newline="", encoding="utf-8") as fh:
         return list(csv.DictReader(fh))
-
-
-def _count_bool(rows: list[dict[str, str]], field: str) -> int:
-    """Count rows where *field* is truthy."""
-    return sum(
-        1 for r in rows
-        if r.get(field, "").lower() in ("true", "1", "yes")
-    )
-
-
-def _collect_floats(rows: list[dict[str, str]], field: str) -> list[float]:
-    """Collect non-empty float values from *field*."""
-    result: list[float] = []
-    for r in rows:
-        v = r.get(field, "")
-        if v != "":
-            try:
-                result.append(float(v))
-            except (ValueError, TypeError):
-                pass
-    return result

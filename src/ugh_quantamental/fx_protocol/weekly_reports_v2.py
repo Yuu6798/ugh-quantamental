@@ -21,6 +21,8 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ugh_quantamental.fx_protocol.metrics_utils import collect_floats, count_bool_rows
+
 logger = logging.getLogger(__name__)
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -99,24 +101,6 @@ def _is_in_week(date_str: str, start: str, end: str) -> bool:
     return start <= date_str <= end
 
 
-def _count_bool(rows: list[dict[str, str]], field: str) -> int:
-    return sum(
-        1 for r in rows if r.get(field, "").lower() in ("true", "1", "yes")
-    )
-
-
-def _collect_floats(rows: list[dict[str, str]], field: str) -> list[float]:
-    result: list[float] = []
-    for r in rows:
-        v = r.get(field, "")
-        if v != "":
-            try:
-                result.append(float(v))
-            except (ValueError, TypeError):
-                pass
-    return result
-
-
 def _safe_rate(numerator: int, denominator: int) -> str:
     if denominator == 0:
         return ""
@@ -138,13 +122,13 @@ def _safe_median(values: list[float]) -> str:
 def _compute_metrics_for_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
     """Compute standard metrics from a list of labeled observation rows."""
     n = len(rows)
-    dir_hits = _count_bool(rows, "direction_hit")
+    dir_hits = count_bool_rows(rows, "direction_hit")
     range_evaluable = [r for r in rows if r.get("range_hit", "") != ""]
-    range_hits = _count_bool(range_evaluable, "range_hit")
+    range_hits = count_bool_rows(range_evaluable, "range_hit")
     state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]
-    state_hits = _count_bool(state_evaluable, "state_proxy_hit")
-    close_errors = _collect_floats(rows, "close_error_bp")
-    mag_errors = _collect_floats(rows, "magnitude_error_bp")
+    state_hits = count_bool_rows(state_evaluable, "state_proxy_hit")
+    close_errors = collect_floats(rows, "close_error_bp")
+    mag_errors = collect_floats(rows, "magnitude_error_bp")
 
     return {
         "observation_count": n,

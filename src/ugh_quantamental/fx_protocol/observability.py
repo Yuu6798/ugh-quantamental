@@ -15,7 +15,31 @@ import shutil
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from ugh_quantamental.fx_protocol.csv_utils import (
+    append_csv_row,
+    write_csv_rows as write_csv_artifact,
+)
 from ugh_quantamental.fx_protocol.models import is_ugh_kind
+
+# Explicit ``__all__`` so ``append_csv_row`` and ``write_csv_artifact`` (re-exports
+# from :mod:`csv_utils`) are recognized as part of this module's public API and
+# survive ``from observability import *``. Includes every previously-public name
+# so star-imports remain backwards compatible.
+__all__ = [
+    "PROVIDER_HEALTH_FIELDNAMES",
+    "SCOREBOARD_FIELDNAMES",
+    "append_csv_row",
+    "build_daily_report_md",
+    "build_input_snapshot",
+    "build_provider_health_row",
+    "build_run_summary",
+    "build_scoreboard_rows",
+    "collect_all_evaluations_from_history",
+    "publish_observability_to_layout",
+    "write_csv_artifact",
+    "write_json_artifact",
+    "write_md_artifact",
+]
 
 if TYPE_CHECKING:
     from ugh_quantamental.fx_protocol.data_models import FxProtocolMarketSnapshot
@@ -441,37 +465,6 @@ def write_md_artifact(path: str, content: str) -> str:
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(content)
     return os.path.abspath(path)
-
-
-def write_csv_artifact(
-    path: str,
-    rows: list[dict[str, Any]],
-    fieldnames: tuple[str, ...],
-) -> str:
-    """Write *rows* to *path* as CSV.  Returns absolute path."""
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(fieldnames), extrasaction="raise")
-        writer.writeheader()
-        writer.writerows(rows)
-    return os.path.abspath(path)
-
-
-def append_csv_row(
-    path: str,
-    row: dict[str, Any],
-    fieldnames: tuple[str, ...],
-) -> str:
-    """Append a single row to *path*; create with header if missing.  Returns absolute path."""
-    abs_path = os.path.abspath(path)
-    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-    write_header = not os.path.exists(abs_path)
-    with open(abs_path, "a", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(fieldnames), extrasaction="raise")
-        if write_header:
-            writer.writeheader()
-        writer.writerow(row)
-    return abs_path
 
 
 # ---------------------------------------------------------------------------
