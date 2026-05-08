@@ -112,18 +112,18 @@ jobs:
             echo "commit_msg=$commit_msg" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Read run summary for notification
+      - name: Read daily report for notification
         id: summary
         if: steps.commit.outputs.pushed == 'true'
         working-directory: data
         run: |
-          summary_path="csv/latest/run_summary.json"
+          report_path="csv/latest/daily_report.md"
           {
             echo 'body<<EOF'
-            if [ -f "$summary_path" ]; then
-              cat "$summary_path"
+            if [ -f "$report_path" ]; then
+              cat "$report_path"
             else
-              echo "(run_summary.json not found)"
+              echo "(daily_report.md not found)"
             fi
             echo EOF
           } >> "$GITHUB_OUTPUT"
@@ -141,11 +141,8 @@ jobs:
           to: ${{ secrets.NOTIFY_EMAIL_TO }}
           subject: "[fx-daily-protocol] ${{ steps.commit.outputs.commit_msg }}"
           body: |
-            FX daily protocol pushed a new commit to ${{ env.FX_DATA_BRANCH }}.
-
-            Commit: ${{ steps.commit.outputs.commit_sha }}
-            URL:    https://github.com/${{ github.repository }}/commit/${{ steps.commit.outputs.commit_sha }}
-            Run:    https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-            run_summary.json:
             ${{ steps.summary.outputs.body }}
+
+            ---
+            Commit: https://github.com/${{ github.repository }}/commit/${{ steps.commit.outputs.commit_sha }}
+            Run:    https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
