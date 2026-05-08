@@ -92,6 +92,7 @@ jobs:
           python scripts/run_fx_daily_protocol.py
 
       - name: Commit and push data branch if changed
+        id: commit
         working-directory: data
         run: |
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -99,8 +100,52 @@ jobs:
           git add -A
           if git diff --cached --quiet; then
             echo "No data changes to commit."
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
           else
-            git commit -m "FX daily protocol run $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            commit_msg="FX daily protocol run $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            git commit -m "$commit_msg"
             git push origin HEAD:"$FX_DATA_BRANCH"
+            commit_sha="$(git rev-parse HEAD)"
             echo "Data branch updated."
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+            echo "commit_sha=$commit_sha" >> "$GITHUB_OUTPUT"
+            echo "commit_msg=$commit_msg" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Read run summary for notification
+        id: summary
+        if: steps.commit.outputs.pushed == 'true'
+        working-directory: data
+        run: |
+          summary_path="csv/latest/run_summary.json"
+          {
+            echo 'body<<EOF'
+            if [ -f "$summary_path" ]; then
+              cat "$summary_path"
+            else
+              echo "(run_summary.json not found)"
+            fi
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Notify by email on new commit
+        if: steps.commit.outputs.pushed == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.MAIL_SERVER }}
+          server_port: ${{ secrets.MAIL_PORT }}
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          from: FX Daily Protocol <${{ secrets.MAIL_USERNAME }}>
+          to: ${{ secrets.NOTIFY_EMAIL_TO }}
+          subject: "[fx-daily-protocol] ${{ steps.commit.outputs.commit_msg }}"
+          body: |
+            FX daily protocol pushed a new commit to ${{ env.FX_DATA_BRANCH }}.
+
+            Commit: ${{ steps.commit.outputs.commit_sha }}
+            URL:    https://github.com/${{ github.repository }}/commit/${{ steps.commit.outputs.commit_sha }}
+            Run:    https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+            run_summary.json:
+            ${{ steps.summary.outputs.body }}
