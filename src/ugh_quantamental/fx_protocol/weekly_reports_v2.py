@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from statistics import median
 from typing import Any
 
+from ugh_quantamental.fx_protocol.annotation_coverage import count_by_annotation_status
 from ugh_quantamental.fx_protocol.metrics_utils import collect_floats, count_bool_rows
 from ugh_quantamental.fx_protocol.report_window import (
     is_in_window,
@@ -201,32 +202,13 @@ def build_annotation_coverage(
     observations: list[dict[str, str]],
 ) -> dict[str, Any]:
     """Compute annotation coverage summary from labeled observations."""
-    total = len(observations)
-    if total == 0:
-        return {
-            "total_observations": 0,
-            "confirmed_annotation_count": 0,
-            "pending_annotation_count": 0,
-            "unlabeled_count": 0,
-            "annotation_coverage_rate": 0.0,
-        }
-
-    confirmed = sum(
-        1 for r in observations
-        if r.get("annotation_status", "").strip().lower() == "confirmed"
-    )
-    pending = sum(
-        1 for r in observations
-        if r.get("annotation_status", "").strip().lower() == "pending"
-    )
-    unlabeled = total - confirmed - pending
-
+    counts = count_by_annotation_status(observations)
     return {
-        "total_observations": total,
-        "confirmed_annotation_count": confirmed,
-        "pending_annotation_count": pending,
-        "unlabeled_count": unlabeled,
-        "annotation_coverage_rate": round(confirmed / total, 4) if total > 0 else 0.0,
+        "total_observations": counts["total"],
+        "confirmed_annotation_count": counts["confirmed"],
+        "pending_annotation_count": counts["pending"],
+        "unlabeled_count": counts["unlabeled"],
+        "annotation_coverage_rate": counts["coverage_rate"],
     }
 
 
