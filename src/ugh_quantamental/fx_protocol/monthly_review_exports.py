@@ -17,7 +17,6 @@ Output layout:
 
 from __future__ import annotations
 
-import csv
 import json
 import logging
 import os
@@ -26,6 +25,7 @@ from datetime import datetime, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ugh_quantamental.fx_protocol.csv_utils import write_csv_rows
 from ugh_quantamental.fx_protocol.monthly_review import (
     _resolve_month_window,
     run_monthly_review,
@@ -375,20 +375,6 @@ def export_monthly_review_md(
 # ---------------------------------------------------------------------------
 
 
-def _write_csv(
-    path: str,
-    rows: list[dict[str, Any]],
-    fieldnames: tuple[str, ...],
-) -> str:
-    abs_path = os.path.abspath(path)
-    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-    with open(abs_path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(fieldnames), extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
-    return abs_path
-
-
 def export_monthly_strategy_metrics_csv(
     review: dict[str, Any],
     output_dir: str,
@@ -396,7 +382,7 @@ def export_monthly_strategy_metrics_csv(
     """Write ``monthly_strategy_metrics.csv`` and return the absolute path."""
     rows = review.get("monthly_strategy_metrics", [])
     path = os.path.join(output_dir, "monthly_strategy_metrics.csv")
-    return _write_csv(path, rows, MONTHLY_STRATEGY_METRICS_FIELDNAMES)
+    return write_csv_rows(path, rows, MONTHLY_STRATEGY_METRICS_FIELDNAMES, extrasaction="ignore")
 
 
 def export_monthly_slice_metrics_csv(
@@ -406,7 +392,7 @@ def export_monthly_slice_metrics_csv(
     """Write ``monthly_slice_metrics.csv`` and return the absolute path."""
     rows = review.get("monthly_slice_metrics", [])
     path = os.path.join(output_dir, "monthly_slice_metrics.csv")
-    return _write_csv(path, rows, WEEKLY_SLICE_METRICS_FIELDNAMES)
+    return write_csv_rows(path, rows, WEEKLY_SLICE_METRICS_FIELDNAMES, extrasaction="ignore")
 
 
 def export_monthly_review_flags_csv(
@@ -416,7 +402,7 @@ def export_monthly_review_flags_csv(
     """Write ``monthly_review_flags.csv`` and return the absolute path."""
     rows = review.get("review_flags", [])
     path = os.path.join(output_dir, "monthly_review_flags.csv")
-    return _write_csv(path, rows, MONTHLY_REVIEW_FLAGS_FIELDNAMES)
+    return write_csv_rows(path, rows, MONTHLY_REVIEW_FLAGS_FIELDNAMES, extrasaction="ignore")
 
 
 # ---------------------------------------------------------------------------

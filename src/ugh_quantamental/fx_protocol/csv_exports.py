@@ -9,12 +9,13 @@ Importable without SQLAlchemy.
 
 from __future__ import annotations
 
-import csv
 import json
 import os
 import shutil
 from datetime import datetime
 from typing import TYPE_CHECKING
+
+from ugh_quantamental.fx_protocol.csv_utils import write_csv_rows
 
 if TYPE_CHECKING:
     from ugh_quantamental.fx_protocol.models import (
@@ -286,31 +287,6 @@ def evaluation_records_to_rows(
         }
         rows.append(row)
     return rows
-
-
-# ---------------------------------------------------------------------------
-# CSV write primitive
-# ---------------------------------------------------------------------------
-
-
-def write_csv_rows(
-    path: str,
-    rows: list[dict[str, object]],
-    fieldnames: tuple[str, ...],
-) -> str:
-    """Write *rows* to *path* as a CSV file with the given *fieldnames* column order.
-
-    Parent directories are created if they do not exist.  If the file already
-    exists it is overwritten (idempotent rerun policy).
-
-    Returns the absolute path of the written file.
-    """
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-    with open(path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(fieldnames), extrasaction="raise")
-        writer.writeheader()
-        writer.writerows(rows)
-    return os.path.abspath(path)
 
 
 # ---------------------------------------------------------------------------

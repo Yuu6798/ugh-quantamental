@@ -9,12 +9,12 @@ Importable without SQLAlchemy.
 
 from __future__ import annotations
 
-import csv
 import json
 import os
 import shutil
 from typing import Any
 
+from ugh_quantamental.fx_protocol.csv_utils import write_csv_rows
 from ugh_quantamental.fx_protocol.weekly_reports_v2 import (
     WEEKLY_SLICE_METRICS_FIELDNAMES,
     WEEKLY_STRATEGY_METRICS_FIELDNAMES,
@@ -316,20 +316,6 @@ def export_weekly_report_md(
 # ---------------------------------------------------------------------------
 
 
-def _write_csv(
-    path: str,
-    rows: list[dict[str, Any]],
-    fieldnames: tuple[str, ...],
-) -> str:
-    abs_path = os.path.abspath(path)
-    os.makedirs(os.path.dirname(abs_path), exist_ok=True)
-    with open(abs_path, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.DictWriter(fh, fieldnames=list(fieldnames), extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
-    return abs_path
-
-
 def export_weekly_strategy_metrics_csv(
     report: dict[str, Any],
     output_dir: str,
@@ -337,7 +323,7 @@ def export_weekly_strategy_metrics_csv(
     """Write ``weekly_strategy_metrics.csv`` and return the absolute path."""
     rows = report.get("strategy_metrics", [])
     path = os.path.join(output_dir, "weekly_strategy_metrics.csv")
-    return _write_csv(path, rows, WEEKLY_STRATEGY_METRICS_FIELDNAMES)
+    return write_csv_rows(path, rows, WEEKLY_STRATEGY_METRICS_FIELDNAMES, extrasaction="ignore")
 
 
 def export_weekly_slice_metrics_csv(
@@ -347,7 +333,7 @@ def export_weekly_slice_metrics_csv(
     """Write ``weekly_slice_metrics.csv`` and return the absolute path."""
     rows = report.get("slice_metrics", [])
     path = os.path.join(output_dir, "weekly_slice_metrics.csv")
-    return _write_csv(path, rows, WEEKLY_SLICE_METRICS_FIELDNAMES)
+    return write_csv_rows(path, rows, WEEKLY_SLICE_METRICS_FIELDNAMES, extrasaction="ignore")
 
 
 WEEKLY_ANNOTATION_COVERAGE_FIELDNAMES: tuple[str, ...] = (
@@ -382,7 +368,7 @@ def export_weekly_annotation_coverage_csv(
         row.update(fc)
         rows.append(row)
     path = os.path.join(output_dir, "weekly_annotation_coverage.csv")
-    return _write_csv(path, rows, WEEKLY_ANNOTATION_COVERAGE_FIELDNAMES)
+    return write_csv_rows(path, rows, WEEKLY_ANNOTATION_COVERAGE_FIELDNAMES, extrasaction="ignore")
 
 
 WEEKLY_AI_ANNOTATION_SUMMARY_FIELDNAMES: tuple[str, ...] = (
@@ -410,7 +396,7 @@ def export_weekly_ai_annotation_summary_csv(
     for pv in report.get("ai_annotation_prompt_versions", []):
         rows.append({"metric": "prompt_version", "value": pv})
     path = os.path.join(output_dir, "weekly_ai_annotation_summary.csv")
-    return _write_csv(path, rows, WEEKLY_AI_ANNOTATION_SUMMARY_FIELDNAMES)
+    return write_csv_rows(path, rows, WEEKLY_AI_ANNOTATION_SUMMARY_FIELDNAMES, extrasaction="ignore")
 
 
 # ---------------------------------------------------------------------------

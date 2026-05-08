@@ -24,6 +24,7 @@ from statistics import median
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from ugh_quantamental.fx_protocol.metrics_utils import collect_floats, count_bool_rows
 from ugh_quantamental.fx_protocol.models import is_ugh_kind
 
 logger = logging.getLogger(__name__)
@@ -131,22 +132,6 @@ def _is_in_window(date_str: str, start: str, end: str) -> bool:
     return start <= date_str <= end
 
 
-def _count_bool(rows: list[dict[str, str]], field: str) -> int:
-    return sum(1 for r in rows if r.get(field, "").lower() in ("true", "1", "yes"))
-
-
-def _collect_floats(rows: list[dict[str, str]], field: str) -> list[float]:
-    result: list[float] = []
-    for r in rows:
-        v = r.get(field, "")
-        if v != "":
-            try:
-                result.append(float(v))
-            except (ValueError, TypeError):
-                pass
-    return result
-
-
 def _safe_rate(numerator: int, denominator: int) -> float | None:
     if denominator == 0:
         return None
@@ -192,13 +177,13 @@ def compute_monthly_strategy_metrics(
     for sk in STRATEGY_KINDS:
         rows = groups.get(sk, [])
         n = len(rows)
-        dir_hits = _count_bool(rows, "direction_hit")
+        dir_hits = count_bool_rows(rows, "direction_hit")
         range_evaluable = [r for r in rows if r.get("range_hit", "") != ""]
-        range_hits = _count_bool(range_evaluable, "range_hit")
+        range_hits = count_bool_rows(range_evaluable, "range_hit")
         state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]
-        state_hits = _count_bool(state_evaluable, "state_proxy_hit")
-        close_errors = [abs(v) for v in _collect_floats(rows, "close_error_bp")]
-        mag_errors = [abs(v) for v in _collect_floats(rows, "magnitude_error_bp")]
+        state_hits = count_bool_rows(state_evaluable, "state_proxy_hit")
+        close_errors = [abs(v) for v in collect_floats(rows, "close_error_bp")]
+        mag_errors = [abs(v) for v in collect_floats(rows, "magnitude_error_bp")]
 
         result.append({
             "strategy_kind": sk,
@@ -224,13 +209,13 @@ def compute_monthly_strategy_metrics(
         if sk not in STRATEGY_KINDS:
             rows = groups[sk]
             n = len(rows)
-            dir_hits = _count_bool(rows, "direction_hit")
+            dir_hits = count_bool_rows(rows, "direction_hit")
             range_evaluable = [r for r in rows if r.get("range_hit", "") != ""]
-            range_hits = _count_bool(range_evaluable, "range_hit")
+            range_hits = count_bool_rows(range_evaluable, "range_hit")
             state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]
-            state_hits = _count_bool(state_evaluable, "state_proxy_hit")
-            close_errors = [abs(v) for v in _collect_floats(rows, "close_error_bp")]
-            mag_errors = [abs(v) for v in _collect_floats(rows, "magnitude_error_bp")]
+            state_hits = count_bool_rows(state_evaluable, "state_proxy_hit")
+            close_errors = [abs(v) for v in collect_floats(rows, "close_error_bp")]
+            mag_errors = [abs(v) for v in collect_floats(rows, "magnitude_error_bp")]
 
             result.append({
                 "strategy_kind": sk,
@@ -342,8 +327,8 @@ def compute_monthly_state_metrics(
     for state in sorted(groups.keys()):
         rows = groups[state]
         n = len(rows)
-        dir_hits = _count_bool(rows, "direction_hit")
-        close_errors = [abs(v) for v in _collect_floats(rows, "close_error_bp")]
+        dir_hits = count_bool_rows(rows, "direction_hit")
+        close_errors = [abs(v) for v in collect_floats(rows, "close_error_bp")]
         result.append({
             "dominant_state": state,
             "forecast_count": n,
@@ -401,8 +386,8 @@ def compute_monthly_event_tag_metrics(
     for tag in sorted(groups.keys()):
         rows = groups[tag]
         n = len(rows)
-        dir_hits = _count_bool(rows, "direction_hit")
-        close_errors = [abs(v) for v in _collect_floats(rows, "close_error_bp")]
+        dir_hits = count_bool_rows(rows, "direction_hit")
+        close_errors = [abs(v) for v in collect_floats(rows, "close_error_bp")]
         result.append({
             "event_tag": tag,
             "observation_count": n,
@@ -441,8 +426,8 @@ def _compute_slice_metrics_for_ugh(
     for label in sorted(groups.keys()):
         rows = groups[label]
         n = len(rows)
-        dir_hits = _count_bool(rows, "direction_hit")
-        close_errors = [abs(v) for v in _collect_floats(rows, "close_error_bp")]
+        dir_hits = count_bool_rows(rows, "direction_hit")
+        close_errors = [abs(v) for v in collect_floats(rows, "close_error_bp")]
         result.append({
             field: label,
             "observation_count": n,
