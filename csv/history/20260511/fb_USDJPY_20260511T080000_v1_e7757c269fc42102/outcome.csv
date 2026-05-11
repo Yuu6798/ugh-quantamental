@@ -1,0 +1,2 @@
+outcome_id,pair,window_start_jst,window_end_jst,realized_open,realized_high,realized_low,realized_close,realized_direction,realized_close_change_bp,realized_range_price,event_happened,event_tags,schema_version,protocol_version,market_data_vendor,market_data_feed_name,market_data_price_type,market_data_resolution,market_data_timezone
+oc_USDJPY_20260508T080000_20260511T080000_v1_0838e2421e7aeca5,USDJPY,2026-05-08T08:00:00+09:00,2026-05-11T08:00:00+09:00,156.89,156.99,156.42,156.65,down,-15.297342086811186,0.5700000000000216,False,,v1,v1,alpha_vantage,FX_DAILY/USDJPY,mid,1d,UTC
