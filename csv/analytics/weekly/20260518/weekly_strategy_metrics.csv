@@ -1,0 +1,8 @@
+strategy_kind,observation_count,direction_hit_count,direction_hit_rate,range_hit_count,range_hit_rate,state_proxy_hit_count,state_proxy_hit_rate,mean_close_error_bp,median_close_error_bp,mean_magnitude_error_bp
+baseline_prev_day_direction,4,3,0.75,,,,,28.43,18.21,20.78
+baseline_random_walk,4,0,0.0,,,,,31.99,31.11,31.99
+baseline_simple_technical,4,0,0.0,,,,,70.47,70.28,12.66
+ugh_v2_alpha,4,0,0.0,4,1.0,4,1.0,37.74,32.75,26.23
+ugh_v2_beta,4,3,0.75,4,1.0,4,1.0,33.2,27.51,26.4
+ugh_v2_delta,4,2,0.5,4,1.0,4,1.0,35.67,30.13,27.33
+ugh_v2_gamma,4,1,0.25,4,1.0,4,1.0,37.25,32.28,26.71
