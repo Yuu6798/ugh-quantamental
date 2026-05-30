@@ -426,6 +426,11 @@ def _direction_from_bp(
 - evaluation での FLAT 扱い: spec §9 / `evaluation_record` のスキーマ
   で FLAT 行を direction_hit としてどう扱うか規定 (既に flat 扱いはあるが
   集計挙動の確認)。
+- **Spec `docs/specs/fx_ugh_engine_v2.md` の整合性**: 動的閾値
+  (`direction_flat_epsilon_ratio` / `direction_flat_epsilon_floor_bp`)
+  の数式と semantics、および evaluation §9 における FLAT 行の direction_hit
+  集計挙動を spec に明文化する (§5.4 target.yaml の `scope.files` で
+  spec を許可)。
 - **`engine_version` の bump**: v2.1 → **v2.2**。`forecast_direction` が
   同一入力で変わる (UP/DOWN ↔ FLAT 境界) ため、Phase 3 を mid-month で
   roll-out すると pre/post の direction_hit が同じ v2.1 報告バケットに
@@ -437,12 +442,14 @@ def _direction_from_bp(
 intent: "Add epsilon threshold so UGH variants can emit FLAT direction when expected magnitude is small, restoring the no-opinion output capability."
 change:
   primary_kind: feature
-  allowed_secondary_kinds: [test_update]
+  allowed_secondary_kinds: [test_update, doc_update]
   scope:
     modules:
       - ugh_quantamental.fx_protocol.forecasting
-      - ugh_quantamental.engine.projection_models  # epsilon を config に置く場合
+      - ugh_quantamental.engine.projection_models  # ProjectionConfig に epsilon 設定を追加
       - ugh_quantamental.fx_protocol.automation_models  # engine_version default を v2.1 → v2.2 に bump
+    files:
+      - docs/specs/fx_ugh_engine_v2.md  # FLAT semantics (§5.2 提案の動的閾値) と evaluation §9 の FLAT 取扱いを反映 (§5.3)
 api_surface:
   allow_changes:
     - fqn: "engine.projection_models.ProjectionConfig.direction_flat_epsilon_ratio"
