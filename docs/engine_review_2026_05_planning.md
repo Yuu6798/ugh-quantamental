@@ -185,6 +185,26 @@ expected_range = _build_range_from_projection(
 > が range を計算しているので、それを直接使う案もある。両者を比較した上で
 > spec に書き起こすのは Phase B 着手時に決定。
 
+**Phase B `target.yaml` (参考雛形)**:
+
+```yaml
+intent: "Generate variant-specific expected_range from projection result (e_star, conviction, config). Concurrently revert range_hit aggregation from per-batch to per-variant (see §6)."
+change:
+  primary_kind: feature
+  allowed_secondary_kinds: [test_update]
+  scope:
+    modules:
+      - ugh_quantamental.fx_protocol.forecasting
+      - ugh_quantamental.fx_protocol.reporting          # §6 集計を per-variant に戻す
+      - ugh_quantamental.fx_protocol.weekly_reports_v2  # 同上
+      - ugh_quantamental.fx_protocol.monthly_review     # 同上
+      - ugh_quantamental.fx_protocol.automation_models  # engine_version v2.2 → v2.3 bump
+api_surface:
+  allow_changes:
+    - fqn: "fx_protocol.automation_models.FxDailyAutomationConfig.engine_version"  # default v2.2 → v2.3
+constraints: []
+```
+
 ### 3.3 `target.yaml` (Phase A)
 
 ```yaml
@@ -295,11 +315,13 @@ change:
       - ugh_quantamental.engine.state
       - ugh_quantamental.engine.state_models
       - ugh_quantamental.fx_protocol.forecasting
+      - ugh_quantamental.fx_protocol.automation_models  # engine_version default を v2 → v2.1 に bump
 authorship:
   authors: [{identity: "claude-code-engine-review-2026-05"}]
 api_surface:
   allow_changes:
     - fqn: "engine.state_models.StateConfig.softmax_temperature"  # default 変更
+    - fqn: "fx_protocol.automation_models.FxDailyAutomationConfig.engine_version"  # default v2 → v2.1
 constraints: []
 ```
 
@@ -385,9 +407,11 @@ change:
     modules:
       - ugh_quantamental.fx_protocol.forecasting
       - ugh_quantamental.engine.projection_models  # epsilon を config に置く場合
+      - ugh_quantamental.fx_protocol.automation_models  # engine_version default を v2.1 → v2.2 に bump
 api_surface:
   allow_changes:
     - fqn: "engine.projection_models.ProjectionConfig.direction_flat_epsilon_bp"
+    - fqn: "fx_protocol.automation_models.FxDailyAutomationConfig.engine_version"  # default v2.1 → v2.2
 constraints: []
 ```
 
@@ -569,7 +593,9 @@ direction_hit_rate が混合データのまま集計される。
       されている (`5/week` の表示になる)
 - [ ] state classifier の dominant_state 遷移で winner margin が 0.05+
       観測される頻度が 50% を超える (現状 0%)
-- [ ] 60 営業日 replay で `fire` 観測が 5+ 件
+- [ ] 60 サンプル (= 5/8-5/29 期間の 15 営業日 × 4 変種) replay で `fire` 観測が 5+ 件
+      (現状 1/60 = 1.7%。観測領域が `fire` の sample × variant ベースである
+      ことを §1 と整合させる)
 - [ ] FLAT direction が「動かない日」で観測される (5/26 type の日で UP/DOWN
       の代わりに FLAT)
 
