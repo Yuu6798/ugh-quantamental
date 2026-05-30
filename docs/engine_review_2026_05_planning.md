@@ -9,10 +9,11 @@ Status: **PLANNING (open)** — 2026-05-29 月末レビューで観測された 
 
 ### 背景
 
-5/8 の v1→v2 cut-over 以降、3 週間 (60 営業日) の data accumulation を経て月末
-レビュー (5/29) を実施した。weekly metrics は表面上良好 (UGH dir rate 60-80%、
-close error 13-15 bp、range hit 100%) だが、forecast.csv の **engine 内部値**
-を仕様 (`docs/specs/fx_ugh_engine_v2.md`) およびコード
+5/8 の v1→v2 cut-over 以降、3 週間 (15 営業日 × 4 変種 = **60 サンプル**) の
+data accumulation を経て月末レビュー (5/29) を実施した。weekly metrics は
+表面上良好 (UGH dir rate 60-80%、close error 13-15 bp、range hit 100%) だが、
+forecast.csv の **engine 内部値**を仕様 (`docs/specs/fx_ugh_engine_v2.md`)
+およびコード
 (`src/ugh_quantamental/engine/projection.py`, `engine/state.py`,
 `fx_protocol/forecasting.py`) と照合した結果、**メトリクス解釈を歪めうる構造的
 問題が複数存在**することが確認された。
@@ -593,9 +594,17 @@ direction_hit_rate が混合データのまま集計される。
       されている (`5/week` の表示になる)
 - [ ] state classifier の dominant_state 遷移で winner margin が 0.05+
       観測される頻度が 50% を超える (現状 0%)
-- [ ] 60 サンプル (= 5/8-5/29 期間の 15 営業日 × 4 変種) replay で `fire` 観測が 5+ 件
-      (現状 1/60 = 1.7%。観測領域が `fire` の sample × variant ベースである
-      ことを §1 と整合させる)
+- [ ] 60 サンプル (= 5/8-5/29 期間の 15 営業日 × 4 変種) replay で `fire` 観測
+      が **以下のいずれも満たす**:
+  - **fire-event 日**: 1/15 → **3+/15** に増加 (engine が `fire` を出す
+    "日" が他にもあることが確認できる、event-day ベース)
+  - **fire variant 記録**: 3/60 (=5%) → **10+/60** (=16%+) に増加
+    (§1 と整合する sample × variant 基準、変種が独立に fire 判定する)
+
+  > **重要**: 単独の変種が同じ fire-event 日に追加で fire しただけで target
+  > を満たしてしまう loophole を避けるため、**event-day 軸 + variant-record
+  > 軸の両方**を criterion とする。両方満たして初めて「fire が実用領域に
+  > 入った」と判定する。
 - [ ] FLAT direction が「動かない日」で観測される (5/26 type の日で UP/DOWN
       の代わりに FLAT)
 
