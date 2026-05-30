@@ -820,12 +820,17 @@ auto-detect を拡張し、以後の毎フェーズで bump のみ**。
    採用する。
 4. **engine_version bump の影響範囲**: v2 → v2.1 (Phase 2) → v2.2
    (Phase 3 FLAT epsilon) → v2.3 (Phase 3 range per-variant) が
-   weekly / monthly pipeline で `engine_version_filter` を介してどう
-   振る舞うか確認。`stratify_observations_by_versions` の auto-detect
-   は `theory_version` のみ対象で `engine_version` は explicit filter
-   が必要なため、bump のたびに caller (`run_weekly_report_v2` /
-   `run_monthly_review` の filter 設定) を更新する必要がある。  
-   → spec §7.5 の auto-detect 挙動 + caller 側の filter 渡し方の確認。
+   weekly / monthly pipeline で正しく分離されることを確認。**§10 / §4.3
+   / §4.4 の方針として、Phase 2 PR 内で `stratify_observations_by_versions`
+   の auto-detect を `engine_version` にも拡張する** ため、production
+   caller (`analytics_rebuild` / `monthly_review_exports`) 側の
+   `engine_version_filter` plumbing 改修は **不要** (Phase 3/B の
+   target.yaml でも `report_window` を再掲する必要はない)。  
+   → Phase 2 着手前に、auto-detect 拡張で latest 1 つに stratify される
+   挙動が weekly + monthly の両 pipeline でテストされていることを
+   確認する (`tests/fx_protocol/test_report_window.py` の新 fixture)。
+   spec §7.5 の文言も `theory_version` 同様 `engine_version` でも
+   auto-detect が走るよう更新する。
 
 ---
 
