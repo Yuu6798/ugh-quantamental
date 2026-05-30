@@ -311,7 +311,7 @@ fire = config.fire_weight * _clamp(
 ### 4.3 `target.yaml`
 
 ```yaml
-intent: "Sharpen state classifier discrimination: lower softmax_temperature default from 1.0 to 0.5 and relax fire's multiplicative gate to a weighted sum to make fire state operationally reachable."
+intent: "Sharpen state classifier discrimination: lower softmax_temperature default from 1.0 to 0.5 and relax fire's multiplicative gate to a weighted sum to make fire state operationally reachable. Extend report_window auto-detect to also stratify mixed engine_versions so the v2 → v2.1 bump is honored at all production callers."
 change:
   primary_kind: feature  # spec §5.3 を触るため refactor ではない
   allowed_secondary_kinds: [test_update, doc_update]
@@ -321,6 +321,7 @@ change:
       - ugh_quantamental.engine.state_models
       - ugh_quantamental.fx_protocol.forecasting
       - ugh_quantamental.fx_protocol.automation_models  # engine_version default を v2 → v2.1 に bump
+      - ugh_quantamental.fx_protocol.report_window  # auto-detect に engine_version を追加 (§4.4)
     files:
       - docs/specs/fx_ugh_engine_v2.md  # §5.3 fire_probability redefinition の更新が必須 (§4.4)
 authorship:
@@ -329,6 +330,7 @@ api_surface:
   allow_changes:
     - fqn: "engine.state_models.StateConfig.softmax_temperature"  # default 変更
     - fqn: "fx_protocol.automation_models.FxDailyAutomationConfig.engine_version"  # default v2 → v2.1
+    - fqn: "fx_protocol.report_window.stratify_observations_by_versions"  # auto-detect 挙動拡張 (§4.4)
 constraints: []
 ```
 
@@ -348,6 +350,24 @@ constraints: []
 - **`engine_version` の bump**: v2 → **v2.1**。`dominant_state` の出力が
   同一入力で変わるため、weekly / monthly pipeline で pre/post を分離する
   必要がある (詳細 §10)。
+- **`stratify_observations_by_versions` の auto-detect 拡張** (`fx_protocol/
+  report_window.py:84-94`): 現状 auto-detect は `theory_version` の混在
+  しか分離しない。production callers (`analytics_rebuild.
+  rebuild_analytics_and_weekly_report` @ `analytics_rebuild.py:166-171`、
+  `monthly_review_exports.run_monthly_review_export` @ `monthly_review
+  _exports.py:656-664`) は `engine_version_filter` を渡していないため、
+  Phase 2 で v2 → v2.1 を bump しても **mid-month roll-out 時に v2 と v2.1
+  の `dominant_state` が同じ weekly / monthly 報告バケットに混在**してしまう。
+  本 Phase 2 PR で同関数の auto-detect 経路を **`engine_version` 混在も
+  同様に latest 1 つに stratify する** よう拡張する (`theory_version` と
+  同じパターン: `present = {row.get("engine_version", "") for row in rows} - {""}`
+  → 複数なら latest を選択)。これにより以後のすべての bump phase
+  (Phase 3 FLAT、Phase B range) で caller plumbing 変更なしに pre/post
+  分離が機能する。
+- **`stratify_observations_by_versions` 拡張の test**: 
+  `tests/fx_protocol/test_report_window.py` に
+  「mixed engine_version 行を渡すと latest 1 つに stratify される」
+  fixture を追加し、auto-detect の対称性を assert。
 
 ## 5. P1 Fix #1 — FLAT Direction の epsilon 閾値
 
@@ -711,16 +731,25 @@ spec §7 で `dominant_state → expected_close_change_bp` の damping rule が
 | Phase 4 (§7 spec 明文化) | なし (doc のみ) | ❌ |
 
 **理由**: `fx_protocol/report_window.stratify_observations_by_versions` の
-auto-detect は `theory_version` の混在しか分離せず、`engine_version` は
-明示的に指定された場合のみ filter する (`engine/state.py` 周辺の挙動も
-同等)。**`engine_version` を bump しないまま Phase 3 を mid-month で
-roll-out すると、同じ v2 報告バケット内に pre-epsilon と post-epsilon の
-両方の `forecast_direction` が混在**し、weekly / monthly metrics の
-direction_hit_rate が混合データのまま集計される。
+auto-detect は **本書 Phase 2 着手前は `theory_version` の混在しか分離せず**、
+`engine_version` は明示的に指定された場合のみ filter していた。production
+callers (`analytics_rebuild.rebuild_analytics_and_weekly_report`、
+`monthly_review_exports.run_monthly_review_export`) は `engine_version_filter`
+を渡していないため、bump しても pre/post が同じ報告バケットに混在する
+リスクがあった。
 
-**代替案**: bump を避けたい場合は weekly / monthly pipeline 側で
-`engine_version_filter` を明示するか、roll-out 日を月初に固定して
-切り出すこと。本書のデフォルト推奨は**毎フェーズで bump**。
+**Phase 2 の付帯改修 (§4.3 / §4.4)**: 本書では Phase 2 PR 内で
+`stratify_observations_by_versions` の auto-detect を `engine_version`
+にも拡張する (`theory_version` と対称な実装、latest 1 つに stratify)。
+これにより**以後のすべての bump phase (Phase 3 FLAT、Phase B range) で
+caller plumbing 変更なしに pre/post 分離が機能する**。Phase 3 以降の
+target.yaml に `report_window` を再掲する必要はない。
+
+**代替案 (もし auto-detect 拡張をやらない選択をする場合)**: weekly /
+monthly pipeline の caller (`analytics_rebuild` / `monthly_review_exports`)
+側で `engine_version_filter` を明示的に渡すよう改修するか、roll-out 日を
+月初に固定して切り出すこと。本書のデフォルト推奨は**Phase 2 で
+auto-detect を拡張し、以後の毎フェーズで bump のみ**。
 
 `schema_version` (CSV 列スキーマ) は本書のスコープ内で不変、v1 維持。
 
