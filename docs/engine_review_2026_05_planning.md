@@ -27,7 +27,8 @@ forecast.csv の **engine 内部値**を仕様 (`docs/specs/fx_ugh_engine_v2.md`
   multiplicative gating)。dominant_state の遷移が ±0.001〜0.013 のマージン
   で flip する knife-edge 設計。
 - **FLAT direction が事実上出ない** (`forecasting.py:41-46`、`expected_close
-  _change_bp == 0` でしか発火しない)。60 日 × 4 変種で FLAT 0 件、無動作日
+  _change_bp == 0` でしか発火しない)。**15 営業日 × 4 変種 = 60 サンプル**
+  中 FLAT 0 件、無動作日
   (5/26 = -0.6 bp) も engine は強気予測を出した。
 - **fire 状態が multiplicative gate で出にくい** (`state.py:88`、
   `catalyst × prior.fire × urgency × follow_through` の積)。60 サンプル中
@@ -83,7 +84,7 @@ forecast.csv の **engine 内部値**を仕様 (`docs/specs/fx_ugh_engine_v2.md`
 | 🔴 **P0** | [§3] **`expected_range` の variant 分離 + range_hit 集計修正** | 評価指標の正当性 (`range_hit` 4× インフレ) | `fx_protocol/forecasting.py:53-55, 314-317`, `fx_protocol/reporting.py`, `fx_protocol/weekly_reports_v2.py` | 中 |
 | 🔴 **P0** | [§4] **State classifier の sharpening** (softmax_temperature 0.5 化 + fire gate 緩和) | `dominant_state` の knife-edge 遷移を解消、`fire` を観測可能領域へ | `engine/state.py:60-117, 140-156`, `engine/state_models.py:29` | 大 (test impact 大) |
 | 🟡 **P1** | [§5] **FLAT direction の epsilon 閾値導入** | engine が「no-opinion / flat」を表明可能に | `fx_protocol/forecasting.py:41-46` | 小 |
-| 🟡 **P1** | [§6] **per-variant scoreboard の集計整理** | redundant な state-shared メトリクスを per-batch に集約 | `fx_protocol/reporting.py`, `fx_protocol/weekly_reports_v2.py` | 中 |
+| 🟡 **P1** | [§6] **per-variant scoreboard の集計整理** | `range_hit` (variant 共有) のみ per-batch 化、`state_proxy_hit` / `dominant_state` は variant 依存のため per-variant 維持 | `fx_protocol/reporting.py`, `fx_protocol/weekly_reports_v2.py` | 中 |
 | 🟢 P2 | [§7] conviction の二重役割 (reliability × magnitude scaler) を spec に明文化 | 命名混乱の根治 | `docs/specs/fx_ugh_engine_v2.md` §6, `engine/projection.py` docstring | 小 |
 | 🟢 P2 | [§8] dormant state ↔ forecast magnitude の整合性ルール定義 | 売買 system 設計時の入力品質 | spec §5/§7 と impl の整合 | 小 |
 | 🟢 P3 | state transition driver の observability 拡張 | 月次レビュー効率 | `fx_protocol/observability.py` | 小 |
@@ -632,9 +633,12 @@ direction_hit_rate が混合データのまま集計される。
 ## 12. Open Questions
 
 1. **§4 fire gate の数式**: spec §5.3 の "fire_probability redefinition"
-   の意図 (多重ゲートで偽 fire 抑制) を保ったまま、fire 観測頻度を 1/60
-   から 5-10/60 に上げる balanced 数式は何か？  
-   → Phase 2 着手前に spec author と相談。
+   の意図 (多重ゲートで偽 fire 抑制) を保ったまま、§11.2 の dual criterion
+   (**fire-event 日 1/15 → 3+/15** かつ **fire variant 記録 3/60 → 10+/60**、
+   詳細は §11.2 参照) を満たす balanced 数式は何か？単純な weighted-sum
+   化だと 1 event-day 上の variant fire 数だけが増えて event-day 軸が
+   伸びないリスクがある (round 4 で指摘された loophole 経路と同じ)。  
+   → Phase 2 着手前に spec author と相談、replay で両軸の改善を確認。
 2. **§3.2.2 range の per-variant 化**: `build_projection_snapshot` が既に
    range を計算しているのに forecasting.py が baseline_context から別途
    計算している重複の経緯は？  
