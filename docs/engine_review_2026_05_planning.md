@@ -151,6 +151,7 @@ def _build_range_from_projection(
     conviction: float,
     config: ProjectionConfig,
     trailing_mean_range_price: float,
+    trailing_mean_abs_close_change_bp: float,
 ) -> ExpectedRange:
     # engine 予測 (e_star) を中心、信頼度 (conviction) で帯幅を調整
     center_bp = e_star * trailing_mean_abs_close_change_bp * (0.5 + 0.5 * conviction)
@@ -161,6 +162,20 @@ def _build_range_from_projection(
 
 これにより range も variant ごとに differ、range_hit が**意味のある engine
 評価メトリクス**になる。
+
+呼び出し側 (`build_ugh_variant_forecast`) は両方の trailing 値を `baseline
+_context` から渡す:
+
+```python
+expected_range = _build_range_from_projection(
+    current_spot=ctx.current_spot,
+    e_star=projection_res.e_star,
+    conviction=projection_res.conviction,
+    config=variant_config,
+    trailing_mean_range_price=ctx.trailing_mean_range_price,
+    trailing_mean_abs_close_change_bp=ctx.trailing_mean_abs_close_change_bp,
+)
+```
 
 > **設計議論**: Phase B の式は仮案。`bounds_base_width`, `bounds_mismatch
 > _coef` 等 (`build_projection_snapshot` L194-201) で既に projection layer
@@ -294,8 +309,9 @@ constraints: []
 - **既存 test の更新**: `tests/engine/test_state.py` の prob 数値 fixture を
   新 default で再生成。
 - **Spec §5.3 の整合性**: fire gate 緩和の数式を spec に反映、§5.3 を更新。
-- **`spec_version` の bump**: engine_version v2 → v2.1 (semantic-ci の
-  `theory_version_filter` で v2 と v2.1 を分離可能にするため)。
+- **`engine_version` の bump**: v2 → **v2.1**。`dominant_state` の出力が
+  同一入力で変わるため、weekly / monthly pipeline で pre/post を分離する
+  必要がある (詳細 §10)。
 
 ## 5. P1 Fix #1 — FLAT Direction の epsilon 閾値
 
@@ -350,6 +366,10 @@ forecasting.py に hardcode するか、要議論。
 - evaluation での FLAT 扱い: spec §9 / `evaluation_record` のスキーマ
   で FLAT 行を direction_hit としてどう扱うか規定 (既に flat 扱いはあるが
   集計挙動の確認)。
+- **`engine_version` の bump**: v2.1 → **v2.2**。`forecast_direction` が
+  同一入力で変わる (UP/DOWN ↔ FLAT 境界) ため、Phase 3 を mid-month で
+  roll-out すると pre/post の direction_hit が同じ v2.1 報告バケットに
+  混在する。詳細 §10。
 
 ### 5.4 `target.yaml`
 
@@ -471,8 +491,8 @@ spec §7 で `dominant_state → expected_close_change_bp` の damping rule が
 | Phase | 内容 | 想定 PR 数 | 依存 |
 |---|---|---|---|
 | **Phase 1 (P0 短期止血)** | §3.2.1 (range_hit 集計修正) + §6 (scoreboard 整理) | 1-2 | なし、即着手可 |
-| **Phase 2 (P0 sharpening)** | §4 (softmax + fire gate)、spec §5.3 改訂 | 1 | engine_version v2 → v2.1 bump、replay 必要 |
-| **Phase 3 (P1)** | §5 (FLAT epsilon)、§3.2.2 (range の per-variant 化) | 2 | Phase 2 後 |
+| **Phase 2 (P0 sharpening)** | §4 (softmax + fire gate)、spec §5.3 改訂 | 1 | engine_version v2 → **v2.1** bump、replay 必要 |
+| **Phase 3 (P1)** | §5 (FLAT epsilon → v2.1 → **v2.2**)、§3.2.2 (range の per-variant 化 → v2.2 → **v2.3**) | 2 | Phase 2 後、各 sub-PR で個別 bump |
 | **Phase 4 (P2)** | §7 spec 改訂、§8 議論 | 1 | いつでも |
 
 **Phase 1 から着手**を推奨。これだけで range_hit の解釈が正されるので、
@@ -491,9 +511,32 @@ spec §7 で `dominant_state → expected_close_change_bp` の damping rule が
    - Phase 2 (`primary_kind: feature`): `effects_unchanged` 違反は expected (state engine 内部に新ロジック追加)
 6. PR description で satisfied / flagged-as-expected を明記
 
-**`engine_version` の bump タイミング**: Phase 2 (§4) で v2 → v2.1。
-それ以前の Phase 1 / Phase 3 (FLAT epsilon) は v2 のまま、`schema_version`
-も v1 維持。
+**`engine_version` の bump タイミング**: 出力されるラベル
+(`forecast_direction` / `dominant_state` / `expected_range`) のいずれかが
+**同一入力に対して異なる結果になる Phase は、`engine_version` を bump
+する**。
+
+| Phase | 出力ラベル変化 | bump 必要か |
+|---|---|---|
+| Phase 1 (§3 集計修正、§6 scoreboard) | なし (forecast.csv 不変、集計層のみ) | ❌ v2 維持 |
+| Phase 2 (§4 state sharpening) | `dominant_state` 変化 | ✅ v2 → **v2.1** |
+| Phase 3 (§5 FLAT epsilon) | `forecast_direction` 変化 (UP/DOWN ↔ FLAT 境界) | ✅ v2.1 → **v2.2** |
+| Phase 3 (§3.2.2 range per-variant) | `expected_range_low/high` 変化 | ✅ v2.2 → **v2.3** (Phase 3 を 2 PR に分けるなら別々に bump) |
+| Phase 4 (§7 spec 明文化) | なし (doc のみ) | ❌ |
+
+**理由**: `fx_protocol/report_window.stratify_observations_by_versions` の
+auto-detect は `theory_version` の混在しか分離せず、`engine_version` は
+明示的に指定された場合のみ filter する (`engine/state.py` 周辺の挙動も
+同等)。**`engine_version` を bump しないまま Phase 3 を mid-month で
+roll-out すると、同じ v2 報告バケット内に pre-epsilon と post-epsilon の
+両方の `forecast_direction` が混在**し、weekly / monthly metrics の
+direction_hit_rate が混合データのまま集計される。
+
+**代替案**: bump を避けたい場合は weekly / monthly pipeline 側で
+`engine_version_filter` を明示するか、roll-out 日を月初に固定して
+切り出すこと。本書のデフォルト推奨は**毎フェーズで bump**。
+
+`schema_version` (CSV 列スキーマ) は本書のスコープ内で不変、v1 維持。
 
 ## 11. Acceptance Criteria
 
@@ -535,9 +578,14 @@ spec §7 で `dominant_state → expected_close_change_bp` の damping rule が
 3. **§5 epsilon の値**: 5 bp は適当に置いた値。trailing_mean_abs_close
    _change_bp の 10-25% に動的に置く設計もありうる。  
    → 60 サンプル統計を見て決定。
-4. **engine_version bump の影響範囲**: v2 → v2.1 が weekly / monthly
-   pipeline で `theory_version_filter` を介してどう振る舞うか確認。  
-   → spec §7.5 の auto-detect 挙動の動作確認。
+4. **engine_version bump の影響範囲**: v2 → v2.1 (Phase 2) → v2.2
+   (Phase 3 FLAT epsilon) → v2.3 (Phase 3 range per-variant) が
+   weekly / monthly pipeline で `engine_version_filter` を介してどう
+   振る舞うか確認。`stratify_observations_by_versions` の auto-detect
+   は `theory_version` のみ対象で `engine_version` は explicit filter
+   が必要なため、bump のたびに caller (`run_weekly_report_v2` /
+   `run_monthly_review` の filter 設定) を更新する必要がある。  
+   → spec §7.5 の auto-detect 挙動 + caller 側の filter 渡し方の確認。
 
 ---
 
