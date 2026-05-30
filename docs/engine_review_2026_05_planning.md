@@ -1,0 +1,567 @@
+# Engine Review 2026-05 — End-of-Month Planning
+
+Status: **PLANNING (open)** — 2026-05-29 月末レビューで観測された engine 内部の
+構造的問題を整理し、6 月着手する fix を P0/P1/P2 にラベル付けする計画書。
+スタイル convention は `Yuu6798/semantic-ci-code/docs/*_planning.md` に準拠
+(status banner / 定量現状 / non-goals / cross-ref / 各 fix の target.yaml 雛形)。
+
+## 0. 背景と Goal
+
+### 背景
+
+5/8 の v1→v2 cut-over 以降、3 週間 (60 営業日) の data accumulation を経て月末
+レビュー (5/29) を実施した。weekly metrics は表面上良好 (UGH dir rate 60-80%、
+close error 13-15 bp、range hit 100%) だが、forecast.csv の **engine 内部値**
+を仕様 (`docs/specs/fx_ugh_engine_v2.md`) およびコード
+(`src/ugh_quantamental/engine/projection.py`, `engine/state.py`,
+`fx_protocol/forecasting.py`) と照合した結果、**メトリクス解釈を歪めうる構造的
+問題が複数存在**することが確認された。
+
+要点:
+
+- **expected_range が全 4 variants で完全共有** (`forecasting.py:53-55`,
+  `314-317`)。`range_hit 20/20 = 100%` の実体は 1 予測の 4 重カウント、
+  3 週累計 60/60 は実質 15/15。
+- **state classifier の prob 分布が一様に近い** (softmax T=1.0 + evidence
+  multiplicative gating)。dominant_state の遷移が ±0.001〜0.013 のマージン
+  で flip する knife-edge 設計。
+- **FLAT direction が事実上出ない** (`forecasting.py:41-46`、`expected_close
+  _change_bp == 0` でしか発火しない)。60 日 × 4 変種で FLAT 0 件、無動作日
+  (5/26 = -0.6 bp) も engine は強気予測を出した。
+- **fire 状態が multiplicative gate で出にくい** (`state.py:88`、
+  `catalyst × prior.fire × urgency × follow_through` の積)。60 サンプル中
+  1 件 (5/8 alpha/delta/gamma) のみ。
+- conviction の役割 (reliability スコア兼 magnitude scaler、
+  `forecasting.py:302-305`) は仕様通り動作しているが、命名が誤解を招く。
+
+これらは前回のレビュー報告 (5/29) で表面化したが、本書はそれを **コード
+レベル裏取り + fix の優先順位 + semantic-ci 越しのゲート設計** に落とし込む。
+
+### Primary Goal
+
+**6 月の data accumulation を「信用できる評価指標」のもとで進められる状態を
+作る** こと。具体的には:
+
+- range_hit メトリクスがインフレしている件を、まず **集計修正 (短期)** で
+  止血、続いて **range の意味付け再定義 (中期)** で根治。
+- state classifier の dominant_state 遷移が knife-edge である件を、
+  **softmax sharpening + evidence formula 見直し** で discrimination を回復。
+- 売買システム構築時に「state ベースのポジションサイジング」「FLAT 認識」が
+  実用可能な engine output 形に整える。
+
+### Non-Goals
+
+- **既存の v1 互換性破壊は行わない**。v1 は retired 済み (`spec §5.2`)、
+  本書の fix はすべて v2 onward。
+- **CSV / JSON 公開スキーマの破壊は行わない**。`forecast.csv` の列追加は
+  許容、列削除 / 列の意味変更は別 phase。
+- **`compute_e_raw` / `compute_u` / `compute_alignment` の数式は変更しない**
+  (本書は spec §6.1 の v2 数式は固定として扱う)。本書のスコープは「engine が
+  出した値の事後処理 + state classifier の正規化」に限定。
+- **conviction の二重役割問題** (reliability × magnitude scaler) は議論待ち、
+  本書では P2 として記録するのみで実装変更はしない。
+
+## 1. 定量的現状 (3 週間 / 60 サンプルの観測)
+
+| 観測項目 | 値 | コメント |
+|---|---|---|
+| UGH 4 変種 ensemble direction hit rate | 37/60 = 62% | trending 偏り、choppy 未経験 |
+| UGH 4 変種 mean close error | 13-15 bp | random_walk (28-29 bp) 比で良好 |
+| **range_hit (報告値)** | **60/60 = 100%** | **実体は 15/15** (variant 共有) |
+| `dominant_state` 遷移回数 | 4 回 (setup⇄dormant) | すべて prob margin ≤ 0.013 |
+| `fire` 観測回数 | 1 日 × 3 変種 (5/8) | 60 サンプル中 5% |
+| `FLAT` direction 観測回数 | **0** | UGH 仕様上ほぼ不可能 |
+| 4 変種の prob_dormant 分散 | range 0.04% | state は variant 非依存 |
+| 4 変種の `expected_close_change_bp` 分散 | range 13-23% | direction signal は variant 依存 ✅ |
+| 4 変種の `expected_range` 分散 | **0%** (完全一致) | **未差別化バグ** |
+
+## 2. P0 / P1 / P2 整理
+
+| Pri | 項目 | 影響 | コード場所 | 工数感 |
+|---|---|---|---|---|
+| 🔴 **P0** | [§3] **`expected_range` の variant 分離 + range_hit 集計修正** | 評価指標の正当性 (`range_hit` 4× インフレ) | `fx_protocol/forecasting.py:53-55, 314-317`, `fx_protocol/reporting.py`, `fx_protocol/weekly_reports_v2.py` | 中 |
+| 🔴 **P0** | [§4] **State classifier の sharpening** (softmax_temperature 0.5 化 + fire gate 緩和) | `dominant_state` の knife-edge 遷移を解消、`fire` を観測可能領域へ | `engine/state.py:60-117, 140-156`, `engine/state_models.py:29` | 大 (test impact 大) |
+| 🟡 **P1** | [§5] **FLAT direction の epsilon 閾値導入** | engine が「no-opinion / flat」を表明可能に | `fx_protocol/forecasting.py:41-46` | 小 |
+| 🟡 **P1** | [§6] **per-variant scoreboard の集計整理** | redundant な state-shared メトリクスを per-batch に集約 | `fx_protocol/reporting.py`, `fx_protocol/weekly_reports_v2.py` | 中 |
+| 🟢 P2 | [§7] conviction の二重役割 (reliability × magnitude scaler) を spec に明文化 | 命名混乱の根治 | `docs/specs/fx_ugh_engine_v2.md` §6, `engine/projection.py` docstring | 小 |
+| 🟢 P2 | [§8] dormant state ↔ forecast magnitude の整合性ルール定義 | 売買 system 設計時の入力品質 | spec §5/§7 と impl の整合 | 小 |
+| 🟢 P3 | state transition driver の observability 拡張 | 月次レビュー効率 | `fx_protocol/observability.py` | 小 |
+
+## 3. P0 Fix #1 — `expected_range` の variant 分離 + range_hit 集計修正
+
+### 3.1 現状
+
+`forecasting.py:53-55`:
+
+```python
+def _build_range_from_baseline_context(current_spot, trailing_mean_range_price):
+    band_half = trailing_mean_range_price / 2.0
+    return _shared_range(current_spot - band_half, current_spot + band_half)
+```
+
+`build_ugh_variant_forecast` (L314-317) はこのヘルパーを呼ぶ際 **variant の
+ProjectionConfig を渡していない**。結果として 4 variants 全てが
+`baseline_context` 由来の同一 range を出力する。
+
+データ実証 (5/27 USDJPY):
+
+```
+ugh_v2_alpha: range_lo=158.745, range_hi=159.835
+ugh_v2_beta:  range_lo=158.745, range_hi=159.835
+ugh_v2_delta: range_lo=158.745, range_hi=159.835
+ugh_v2_gamma: range_lo=158.745, range_hi=159.835
+```
+
+派生問題:
+
+1. **メトリクス水増し**: weekly report の `range_hit_count=20` は実質 `5`。
+2. **engine 評価指標として不適切**: range は `current_spot ± trailing_mean
+   _range_price/2` という統計バンドで、e_star や conviction を一切参照
+   していない。「engine が立てた予測」ではない。
+3. **spec §5.2 の variant exploration 趣旨と乖離**: 4 variants は
+   "different parameter spaces を探索する" のが目的だが、range 出力では
+   差別化されていない。
+
+### 3.2 提案 (二段階)
+
+#### 3.2.1 Phase A (短期、止血): 集計修正のみ
+
+`fx_protocol/reporting.py` および `weekly_reports_v2.py` の range_hit 集計を
+**per-batch (snapshot 単位) で 1 度だけカウント** するよう変更する。同じ
+`forecast_batch_id` 内の UGH variants は range が共有なので、4 重カウント
+ではなく 1 度のヒット / ミスとして集計。
+
+`MetricsRow` の意味付け:
+
+- before: `range_hit_count = sum over (variant, day) of range_hit`
+- after:  `range_hit_count = sum over (forecast_batch_id) of (UGH range_hit any)`
+
+ただし `forecast_csv` レベルの個別レコードはこれまで通り (per-variant) で
+emit する (downstream 互換性のため)。集計層だけ修正。
+
+#### 3.2.2 Phase B (中期、根治): variant ごとに range を生成
+
+`_build_range_from_baseline_context` に variant の ProjectionConfig を渡し、
+**variant 別のスケーリングで range を組み立てる**。具体的には:
+
+```python
+def _build_range_from_projection(
+    current_spot: float,
+    e_star: float,
+    conviction: float,
+    config: ProjectionConfig,
+    trailing_mean_range_price: float,
+) -> ExpectedRange:
+    # engine 予測 (e_star) を中心、信頼度 (conviction) で帯幅を調整
+    center_bp = e_star * trailing_mean_abs_close_change_bp * (0.5 + 0.5 * conviction)
+    center_price = current_spot * (1 + center_bp / 10000)
+    band_half = trailing_mean_range_price / 2.0 * (1.0 - 0.5 * conviction)  # 高 conviction → 狭い帯
+    return ExpectedRange(center_price - band_half, center_price + band_half)
+```
+
+これにより range も variant ごとに differ、range_hit が**意味のある engine
+評価メトリクス**になる。
+
+> **設計議論**: Phase B の式は仮案。`bounds_base_width`, `bounds_mismatch
+> _coef` 等 (`build_projection_snapshot` L194-201) で既に projection layer
+> が range を計算しているので、それを直接使う案もある。両者を比較した上で
+> spec に書き起こすのは Phase B 着手時に決定。
+
+### 3.3 `target.yaml` (Phase A)
+
+```yaml
+intent: "Fix range_hit metric inflation: aggregate range_hit per-batch instead of per-variant, since v2 UGH variants share the same expected_range output."
+change:
+  primary_kind: refactor
+  allowed_secondary_kinds: [test_update]
+  scope:
+    modules:
+      - ugh_quantamental.fx_protocol.reporting
+      - ugh_quantamental.fx_protocol.weekly_reports_v2
+      - ugh_quantamental.fx_protocol.monthly_review
+api_surface:
+  allow_changes: []  # 集計ロジックの変更のみ、公開関数の signature 不変
+constraints: []
+```
+
+### 3.4 検証
+
+- 既存 weekly report の `range_hit_rate` が 100% → 100% (UGH range が
+  共有のため値そのものは変わらない) のはず。
+- ただし scoreboard CSV の `range_hit_count` 列は 1/4 になる。
+- `tests/fx_protocol/test_weekly_report_v2.py` の golden fixture を更新。
+- Phase B 着手は Phase A merge 後、別 PR。
+
+## 4. P0 Fix #2 — State Classifier Sharpening
+
+### 4.1 現状
+
+`engine/state_models.py:29`:
+
+```python
+softmax_temperature: FiniteFloat = Field(default=1.0, ge=1e-8)
+```
+
+`engine/state.py:140-156` (softmax 正規化) は temperature 1.0 で各 state
+evidence score を確率化する。
+
+`compute_state_evidence` (L65-117) の各 state 式:
+
+```python
+dormant = w_d * clamp((1-conv) * (1-urg) * (1-cat) * (1-ft))
+setup   = w_s * clamp(pos_e * (1-sat) * (1-p_fire) * (1-cat + 0.4*cat))
+fire    = w_f * clamp(cat * prior.fire * urg * ft)
+expansion = w_e * clamp(pos_e * conv * ft * (0.6 + 0.4*(p_fire + p_exp)))
+exhaustion = w_x * clamp(pos_e * sat * mismatch_shrink * (0.5 + 0.5*ft))
+failure = w_F * clamp(max(neg_e, disconfirmation, regime_shock))
+```
+
+各 state スコアが multiplicative + `_clamp(., 0, 1)` で [0, 1] に押し込ま
+れるため、生スコアが 0.1〜0.4 のレンジに集中。softmax T=1.0 だとこの差が
+exp で増幅されず、結果として 6 状態の prob が 0.10〜0.23 のほぼ均一分布
+になる。
+
+データ実証 (5/27 alpha):
+
+| state | dormant | setup | fire | expansion | exhaustion | failure |
+|---|---:|---:|---:|---:|---:|---:|
+| prob | **0.213** | 0.209 | 0.107 | 0.171 | 0.105 | 0.195 |
+
+uniform (1/6 = 0.167) との偏差は ±0.06 程度。dormant が setup を上回る
+マージンは **0.004** で knife-edge。
+
+### 4.2 提案 (2 軸 fix)
+
+#### 4.2.1 軸 1 — softmax_temperature を 0.5 に下げる
+
+`StateConfig.softmax_temperature` の default を `1.0 → 0.5` に変更。
+これだけで evidence の差が exp で 2 乗的に増幅され、winner state の
+prob が 0.21 → 0.30+ に伸びる (推定)。dominant_state の knife-edge 性が
+緩和される。
+
+> 副作用: 既存 test fixture の prob 数値が変わる。test 側 acceptable
+> range の更新が必要。
+
+#### 4.2.2 軸 2 — fire の multiplicative gate を緩和
+
+現状の `fire = catalyst × prior.fire × urgency × follow_through` は
+4 因子の積で、どれか 1 つが 0 近くだと fire が 0 に落ちる。これを
+**weighted sum** に変更:
+
+```python
+# 提案: weighted sum + minimum activation guard
+fire = config.fire_weight * _clamp(
+    0.35 * catalyst
+    + 0.35 * prior.fire
+    + 0.15 * urgency
+    + 0.15 * follow_through
+)
+```
+
+これにより catalyst 単独が高い日 (event-driven) でも fire が出やすくなる。
+
+> 議論: 軸 2 は spec §5.3 の "fire_probability redefinition" と直接干渉
+> するため、spec の更新も同 PR で必要。**spec §5.3 の意図** (multiplicative
+> gate で choppy 相場の偽 fire を抑制する) を保ちつつ、現状の「実用上 fire
+> が一度しか出ない」状態を改善する妥協点を探る。
+
+### 4.3 `target.yaml`
+
+```yaml
+intent: "Sharpen state classifier discrimination: lower softmax_temperature default from 1.0 to 0.5 and relax fire's multiplicative gate to a weighted sum to make fire state operationally reachable."
+change:
+  primary_kind: feature  # spec §5.3 を触るため refactor ではない
+  allowed_secondary_kinds: [test_update]
+  scope:
+    modules:
+      - ugh_quantamental.engine.state
+      - ugh_quantamental.engine.state_models
+      - ugh_quantamental.fx_protocol.forecasting
+authorship:
+  authors: [{identity: "claude-code-engine-review-2026-05"}]
+api_surface:
+  allow_changes:
+    - fqn: "engine.state_models.StateConfig.softmax_temperature"  # default 変更
+constraints: []
+```
+
+### 4.4 検証
+
+- **Replay**: 直近 60 サンプル (5/8-5/29) を新 config で replay し、
+  dominant_state の遷移パターンが目的通り変化することを確認:
+  - winner margin が 0.001-0.013 → 0.05+ に拡大
+  - fire 観測回数が 1 → 5-10 (推定) に増加
+- **既存 test の更新**: `tests/engine/test_state.py` の prob 数値 fixture を
+  新 default で再生成。
+- **Spec §5.3 の整合性**: fire gate 緩和の数式を spec に反映、§5.3 を更新。
+- **`spec_version` の bump**: engine_version v2 → v2.1 (semantic-ci の
+  `theory_version_filter` で v2 と v2.1 を分離可能にするため)。
+
+## 5. P1 Fix #1 — FLAT Direction の epsilon 閾値
+
+### 5.1 現状
+
+`fx_protocol/forecasting.py:41-46`:
+
+```python
+def _direction_from_bp(change_bp: float) -> ForecastDirection:
+    if change_bp > 0: return ForecastDirection.up
+    if change_bp < 0: return ForecastDirection.down
+    return ForecastDirection.flat  # change_bp == 0 でしか発火しない
+```
+
+UGH variants が `expected_close_change_bp = e_star × trailing_mean_abs ×
+(0.5 + 0.5 × conviction)` で算出する値が浮動小数点的に 0.0 になることは
+ほぼないため、FLAT は実質出ない。
+
+5/26 (実現 -0.6 bp = 動かない日) で UGH 全 4 変種が +11〜+14 bp の UP を
+出したのが症状。
+
+### 5.2 提案
+
+epsilon 閾値を導入:
+
+```python
+_DIRECTION_FLAT_EPSILON_BP: float = 5.0  # tune
+
+def _direction_from_bp(change_bp: float) -> ForecastDirection:
+    if change_bp > _DIRECTION_FLAT_EPSILON_BP:
+        return ForecastDirection.up
+    if change_bp < -_DIRECTION_FLAT_EPSILON_BP:
+        return ForecastDirection.down
+    return ForecastDirection.flat
+```
+
+5 bp は **trailing_mean_abs_close_change_bp** (= 通常日 20-30 bp) の
+1/4 程度。本当に「動きの大きさが小さい」と engine が判断した日のみ
+FLAT が出る、というセマンティクス。
+
+閾値の決定は spec 上 ProjectionConfig に新 field として持たせるべきか、
+forecasting.py に hardcode するか、要議論。
+
+> ProjectionConfig に置く案: `direction_flat_epsilon_bp: float = 5.0`
+> ↑ variant ごとに変えられるので「conservative variant ほど FLAT を出し
+> やすい」設計が可能。
+
+### 5.3 検証
+
+- 60 サンプル replay で FLAT 観測回数を測定 (推定 5-10 件)。
+- 5/26 (実現 -0.6 bp) で UGH 全変種が FLAT を出すことを確認。
+- evaluation での FLAT 扱い: spec §9 / `evaluation_record` のスキーマ
+  で FLAT 行を direction_hit としてどう扱うか規定 (既に flat 扱いはあるが
+  集計挙動の確認)。
+
+### 5.4 `target.yaml`
+
+```yaml
+intent: "Add epsilon threshold so UGH variants can emit FLAT direction when expected magnitude is small, restoring the no-opinion output capability."
+change:
+  primary_kind: feature
+  allowed_secondary_kinds: [test_update]
+  scope:
+    modules:
+      - ugh_quantamental.fx_protocol.forecasting
+      - ugh_quantamental.engine.projection_models  # epsilon を config に置く場合
+api_surface:
+  allow_changes:
+    - fqn: "engine.projection_models.ProjectionConfig.direction_flat_epsilon_bp"
+constraints: []
+```
+
+## 6. P1 Fix #2 — per-variant Scoreboard の集計整理
+
+### 6.1 現状
+
+`weekly_report_v2.md` / `slice_scoreboard.csv` 等で、variant 別に
+`state_proxy_hit_count` / `range_hit_count` を計上しているが、これらは
+variant 非依存 (state classifier は snapshot 由来、range は §3 で確定)
+なので、4 重カウントになっている。
+
+### 6.2 提案
+
+per-batch (snapshot) で集計するメトリクス群と per-variant 集計するメト
+リクス群を明確に分ける:
+
+| メトリクス | 集計レベル | 理由 |
+|---|---|---|
+| `direction_hit_count` | per-variant | direction は variant 依存 |
+| `close_error_bp` | per-variant | exp_bp は variant 依存 |
+| `magnitude_error_bp` | per-variant | exp_bp 依存 |
+| `range_hit_count` | per-batch | range が variant 共有 |
+| `state_proxy_hit_count` | per-batch | state も variant 共有 |
+| `dominant_state` 分布 | per-batch | 同上 |
+
+これにより:
+- `weekly_strategy_metrics.csv` の `range_hit_count` 列は variant 別では
+  なく "UGH-as-a-whole" の指標として表示。
+- monthly review の "regime / volatility / intervention" slice も整理。
+
+### 6.3 検証
+
+- 既存 test fixture の更新 (集計数の変化)。
+- `weekly_report.md` の出力例で `range_hit_count: 5/5` のような形に
+  なることを目視確認。
+
+### 6.4 `target.yaml`
+
+P0 Fix #1 Phase A と同じスコープで併合可能。または別 PR でも OK。
+
+## 7. P2 — conviction の二重役割の spec 明文化
+
+### 7.1 現状
+
+`compute_conviction` の数式 (`projection.py:157-166`) は仕様通り動作している
+ことを 5/8/26/27/29 の 4 サンプルで検算済み (implied evidence_confidence
+≈ 0.92-0.99 で安定)。ただし:
+
+1. **意味的に**: conviction は「prediction reliability (予測の信頼性)」で
+   あって「signal strength (シグナルの強さ)」ではない。
+2. **役割上**: `expected_close_change_bp` の magnitude scaler としても使われる
+   (`forecasting.py:302-305`)。
+3. **命名上**: 「conviction」という単語は強気/弱気のニュアンスを持つため
+   誤解を招く。
+
+### 7.2 提案 (実装変更なし、spec 改訂のみ)
+
+`docs/specs/fx_ugh_engine_v2.md` §6 に以下を追記:
+
+> **`conviction` の意味**: 本 engine における `conviction` は **prediction
+> reliability** (= e_star を信用してよい度合い) を意味する。`fire` 状態の
+> 信号強度とは別軸の独立な指標であり、両者は逆相関しうる (例: 5/8 fire +
+> conviction=0.37)。
+>
+> **`conviction` の使用箇所**: (1) ProjectionEngineResult のフィールドとして
+> downstream に渡される、(2) `expected_close_change_bp = e_star × trailing
+> _mean_abs × (0.5 + 0.5 × conviction)` で magnitude scaler としても使われ
+> る (PR #87 由来)。2 つの役割を持つ理由は "現状の reliability スコアは
+> realized-volatility との掛け合わせで実用 magnitude として機能する" と
+> いう経験則による。将来的に分離する場合は spec を更新。
+
+### 7.3 検証
+
+doc-only change、コード影響なし、`semantic-ci check` の `primary_kind:
+docs` (該当する kind がなければ refactor + allow_changes 空) で通る想定。
+
+## 8. P2 — dormant State ↔ Magnitude の整合性ルール
+
+### 8.1 現状
+
+5/27 dormant + exp_bp = +21 bp (週内最大値)、5/29 dormant + exp_bp = +6 bp
+(小さい) の二例で、dormant でも magnitude が大きく出るケースがある。
+spec §7 で `dominant_state → expected_close_change_bp` の damping rule が
+明示されていない。
+
+### 8.2 提案 (議論ベース、実装変更なし)
+
+選択肢 (議論待ち):
+
+- **Option A**: `dormant` 状態のとき expected_close_change_bp を multiplier
+  で減衰させる (例: 0.5 倍)。実装は `forecasting.py:302-305` の 1 行追加。
+- **Option B**: 現状維持。state と magnitude は decoupled 情報として運用、
+  売買 system 側で state ベースのポジションサイジングを実装。
+- **Option C**: state を bp ではなく conviction の補助 modifier として
+  使う (= state が dormant なら conviction を別途下げる)。
+
+### 8.3 検証
+
+実装決定後に別 phase で着手。本書では選択肢の整理に留める。
+
+## 9. Phase 化と着手順序
+
+| Phase | 内容 | 想定 PR 数 | 依存 |
+|---|---|---|---|
+| **Phase 1 (P0 短期止血)** | §3.2.1 (range_hit 集計修正) + §6 (scoreboard 整理) | 1-2 | なし、即着手可 |
+| **Phase 2 (P0 sharpening)** | §4 (softmax + fire gate)、spec §5.3 改訂 | 1 | engine_version v2 → v2.1 bump、replay 必要 |
+| **Phase 3 (P1)** | §5 (FLAT epsilon)、§3.2.2 (range の per-variant 化) | 2 | Phase 2 後 |
+| **Phase 4 (P2)** | §7 spec 改訂、§8 議論 | 1 | いつでも |
+
+**Phase 1 から着手**を推奨。これだけで range_hit の解釈が正されるので、
+6 月の data accumulation が始まる前にメトリクスを修正できる。
+
+## 10. semantic-ci の運用パターン
+
+各 Phase で:
+
+1. branch off main: `claude/engine-review-phase{N}-<topic>`
+2. spec 改訂が必要なら同 PR に含める
+3. `target.yaml` を本書記載のテンプレートから組む
+4. 実装 → `ruff check . && pytest -q`
+5. `semantic-ci check --baseline-rev main --candidate-rev HEAD ...` で gate
+   - Phase 1 (`primary_kind: refactor`): 全 4 constraints satisfied 期待
+   - Phase 2 (`primary_kind: feature`): `effects_unchanged` 違反は expected (state engine 内部に新ロジック追加)
+6. PR description で satisfied / flagged-as-expected を明記
+
+**`engine_version` の bump タイミング**: Phase 2 (§4) で v2 → v2.1。
+それ以前の Phase 1 / Phase 3 (FLAT epsilon) は v2 のまま、`schema_version`
+も v1 維持。
+
+## 11. Acceptance Criteria
+
+### 11.1 Ship criteria (operational gate)
+
+- [ ] `ruff check .` clean
+- [ ] `pytest -q` 1344 passing (各 Phase で fixture 更新は許容)
+- [ ] `semantic-ci check` の API surface constraints satisfied
+- [ ] 既存の forecast.csv / outcome.csv / evaluation.csv 列スキーマ不変
+- [ ] `data/csv/observability/` の publisher 経路で error 0
+
+### 11.2 Knowledge criteria (the actual goal)
+
+- [ ] 6/1 以降の weekly report で `range_hit_count` が **1/day** ベースに修正
+      されている (`5/week` の表示になる)
+- [ ] state classifier の dominant_state 遷移で winner margin が 0.05+
+      観測される頻度が 50% を超える (現状 0%)
+- [ ] 60 営業日 replay で `fire` 観測が 5+ 件
+- [ ] FLAT direction が「動かない日」で観測される (5/26 type の日で UP/DOWN
+      の代わりに FLAT)
+
+### 11.3 Out of scope (deferred、本書では触らない)
+
+- conviction の reliability と magnitude scaler の分離 (§7、議論待ち)
+- dormant ↔ magnitude の整合性ルール (§8、選択肢の整理のみ)
+- engine_version v3 への移行検討
+- 売買システム本体の構築 (本書はその前提条件整備)
+
+## 12. Open Questions
+
+1. **§4 fire gate の数式**: spec §5.3 の "fire_probability redefinition"
+   の意図 (多重ゲートで偽 fire 抑制) を保ったまま、fire 観測頻度を 1/60
+   から 5-10/60 に上げる balanced 数式は何か？  
+   → Phase 2 着手前に spec author と相談。
+2. **§3.2.2 range の per-variant 化**: `build_projection_snapshot` が既に
+   range を計算しているのに forecasting.py が baseline_context から別途
+   計算している重複の経緯は？  
+   → blame で経緯を確認、unify するか別系で残すか決定。
+3. **§5 epsilon の値**: 5 bp は適当に置いた値。trailing_mean_abs_close
+   _change_bp の 10-25% に動的に置く設計もありうる。  
+   → 60 サンプル統計を見て決定。
+4. **engine_version bump の影響範囲**: v2 → v2.1 が weekly / monthly
+   pipeline で `theory_version_filter` を介してどう振る舞うか確認。  
+   → spec §7.5 の auto-detect 挙動の動作確認。
+
+---
+
+## Appendix A. 月末レビューで使った観測データの出所
+
+| データ | コミット | 日時 (UTC) |
+|---|---|---|
+| 5/8 v2 first run | `4a1b313` | 2026-05-08 06:55 |
+| 5/8 v2 late retry | `2ed570c` | 2026-05-08 12:06 |
+| 5/11 outcome of 5/8 forecast | `59c8c77` | 2026-05-11 13:42 |
+| 5/26 setup state | `b481783` | 2026-05-26 13:51 |
+| 5/27 dormant state shift | `6a4cc6a` | 2026-05-27 14:23 |
+| 5/29 conviction drop | `41c6ae9` | 2026-05-29 13:54 |
+| Weekly report 5/11-5/15 | `2506e93` | 2026-05-18 05:02 |
+| Weekly report 5/18-5/22 | `8269446` | 2026-05-25 05:15 |
+
+## Appendix B. コード裏取りの根拠ファイル
+
+| 観察 | 該当コード |
+|---|---|
+| expected_range が variant 共有 | `fx_protocol/forecasting.py:53-55, 314-317` |
+| `_direction_from_bp` が epsilon なし | `fx_protocol/forecasting.py:41-46` |
+| conviction = ec × align × (1 - 0.5·pen) | `engine/projection.py:157-166` |
+| conviction が magnitude scaler | `fx_protocol/forecasting.py:302-305` |
+| state evidence の multiplicative gating | `engine/state.py:65-117` |
+| softmax_temperature default = 1.0 | `engine/state_models.py:29` |
+| 変種別 ProjectionConfig 適用箇所 | `fx_protocol/forecasting.py:185-216, 230-266` |
