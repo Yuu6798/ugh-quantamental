@@ -364,34 +364,58 @@ UGH variants が `expected_close_change_bp = e_star × trailing_mean_abs ×
 
 ### 5.2 提案
 
-epsilon 閾値を導入:
+epsilon 閾値を **regime volatility に応じて動的にスケール**して導入:
 
 ```python
-_DIRECTION_FLAT_EPSILON_BP: float = 5.0  # tune
+# ProjectionConfig に新 field として追加 (variant ごとに調整可能)
+direction_flat_epsilon_ratio: float = 0.5  # 通常日想定振幅の何 % 以下を FLAT とみなすか
+direction_flat_epsilon_floor_bp: float = 5.0  # trailing が極小の朝向けの最小閾値
 
-def _direction_from_bp(change_bp: float) -> ForecastDirection:
-    if change_bp > _DIRECTION_FLAT_EPSILON_BP:
+def _direction_from_bp(
+    change_bp: float,
+    trailing_mean_abs_close_change_bp: float,
+    config: ProjectionConfig,
+) -> ForecastDirection:
+    epsilon_bp = max(
+        config.direction_flat_epsilon_ratio * trailing_mean_abs_close_change_bp,
+        config.direction_flat_epsilon_floor_bp,
+    )
+    if change_bp > epsilon_bp:
         return ForecastDirection.up
-    if change_bp < -_DIRECTION_FLAT_EPSILON_BP:
+    if change_bp < -epsilon_bp:
         return ForecastDirection.down
     return ForecastDirection.flat
 ```
 
-5 bp は **trailing_mean_abs_close_change_bp** (= 通常日 20-30 bp) の
-1/4 程度。本当に「動きの大きさが小さい」と engine が判断した日のみ
-FLAT が出る、というセマンティクス。
+**動的閾値の根拠**:
 
-閾値の決定は spec 上 ProjectionConfig に新 field として持たせるべきか、
-forecasting.py に hardcode するか、要議論。
+- trailing_mean_abs_close_change_bp は当該通貨ペアの「通常日の絶対値振幅」
+  (= 20-30 bp が典型) を表し、regime によって変動する (低 volatility 期は
+  10 bp 程度、event-driven 期は 50+ bp)。
+- `ratio = 0.5` で「通常日振幅の半分以下を `FLAT`」とすると、低 vol 期は
+  小幅な閾値、event-driven 期は大きめの閾値に自動追従。
+- 静的な 5 bp だと **当文書の 5/26 サンプル (UGH 予測 +11〜+14 bp、実現
+  -0.6 bp) で `|11| > 5` のため依然 UP を出してしまう**。動的閾値なら
+  trailing ≈ 25 bp の通常期で epsilon ≈ 12.5 bp → +11 bp は FLAT、
+  +14 bp は依然 UP、という variant 間の境界が現れる (§5.3 検証参照)。
+- `floor_bp = 5.0` は trailing が極端に小さい朝 (warm-up 期間内) の
+  divide-by-noise を防ぐ最低限の保証。
 
-> ProjectionConfig に置く案: `direction_flat_epsilon_bp: float = 5.0`
-> ↑ variant ごとに変えられるので「conservative variant ほど FLAT を出し
-> やすい」設計が可能。
+> ProjectionConfig 配置案を採るのは、variant ごとに ratio を差別化でき
+> 「conservative variant (高 ratio = FLAT 出やすい)」と「aggressive variant
+> (低 ratio = UP/DOWN 出やすい)」の探索が可能になるため。Phase 3
+> 着手時に静的 hardcode (forecasting.py) か config 化かは spec author と
+> 議論。
 
 ### 5.3 検証
 
 - 60 サンプル replay で FLAT 観測回数を測定 (推定 5-10 件)。
-- 5/26 (実現 -0.6 bp) で UGH 全変種が FLAT を出すことを確認。
+- 5/26 (実現 -0.6 bp) で UGH **少なくとも一部の変種** (conservative ratio
+  の alpha 等) が FLAT を出すことを確認 (+11 bp 程度の小幅予測変種が
+  epsilon ≈ 12.5 bp 下回り FLAT 化、+14 bp 寄りの aggressive 変種は
+  ratio を 0.6+ にしないと UP のままになりうる)。**全変種一律 FLAT を
+  要求しない** — variant 間で direction signal が割れるのが本仕様の意図
+  (variant exploration 趣旨と整合)。
 - evaluation での FLAT 扱い: spec §9 / `evaluation_record` のスキーマ
   で FLAT 行を direction_hit としてどう扱うか規定 (既に flat 扱いはあるが
   集計挙動の確認)。
@@ -414,7 +438,8 @@ change:
       - ugh_quantamental.fx_protocol.automation_models  # engine_version default を v2.1 → v2.2 に bump
 api_surface:
   allow_changes:
-    - fqn: "engine.projection_models.ProjectionConfig.direction_flat_epsilon_bp"
+    - fqn: "engine.projection_models.ProjectionConfig.direction_flat_epsilon_ratio"
+    - fqn: "engine.projection_models.ProjectionConfig.direction_flat_epsilon_floor_bp"
     - fqn: "fx_protocol.automation_models.FxDailyAutomationConfig.engine_version"  # default v2.1 → v2.2
 constraints: []
 ```
@@ -641,8 +666,12 @@ direction_hit_rate が混合データのまま集計される。
   > を満たしてしまう loophole を避けるため、**event-day 軸 + variant-record
   > 軸の両方**を criterion とする。両方満たして初めて「fire が実用領域に
   > 入った」と判定する。
-- [ ] FLAT direction が「動かない日」で観測される (5/26 type の日で UP/DOWN
-      の代わりに FLAT)
+- [ ] FLAT direction が「動かない日」で観測される。5/26 type の日 (実現
+      -0.6 bp、UGH 変種予測 +11〜+14 bp) で **少なくとも 1 変種** が FLAT
+      を出す (動的閾値 `0.5 × trailing ≈ 12.5 bp` で +11 bp 変種 → FLAT、
+      +14 bp 変種 → UP のままになるのは仕様通り — §5.3 参照)。**全変種
+      一律 FLAT は要求しない** (variant exploration 趣旨で direction
+      disagreement が出るのが正常)。
 
 ### 11.3 Out of scope (deferred、本書では触らない)
 
@@ -664,9 +693,17 @@ direction_hit_rate が混合データのまま集計される。
    range を計算しているのに forecasting.py が baseline_context から別途
    計算している重複の経緯は？  
    → blame で経緯を確認、unify するか別系で残すか決定。
-3. **§5 epsilon の値**: 5 bp は適当に置いた値。trailing_mean_abs_close
-   _change_bp の 10-25% に動的に置く設計もありうる。  
-   → 60 サンプル統計を見て決定。
+3. **§5 epsilon の動的閾値パラメータ**: §5.2 提案では
+   `direction_flat_epsilon_ratio = 0.5` (通常日振幅の半分以下を FLAT) と
+   `direction_flat_epsilon_floor_bp = 5.0` (trailing 極小時の最低保証) を
+   暫定値とした。5/26 サンプル (UGH +11〜+14 bp / trailing ≈ 25 bp で
+   epsilon ≈ 12.5 bp) を想定すると ratio 0.5 で **一部変種のみ FLAT** に
+   落ちる挙動になる。variant 探索趣旨から direction disagreement は
+   許容するが、`ratio` を 0.3 / 0.5 / 0.7 のどこに置くかで「FLAT 頻度」が
+   大きく変わる。  
+   → 60 サンプル replay で各 ratio 候補の FLAT 観測率 (目安 5-10/60)
+   と direction_hit 影響をスイープし、§11.2 acceptance を満たす最小値を
+   採用する。
 4. **engine_version bump の影響範囲**: v2 → v2.1 (Phase 2) → v2.2
    (Phase 3 FLAT epsilon) → v2.3 (Phase 3 range per-variant) が
    weekly / monthly pipeline で `engine_version_filter` を介してどう
