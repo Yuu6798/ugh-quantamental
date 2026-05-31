@@ -31,5 +31,6 @@ sweep して `## 直近 merged` へ移送する（wrap-up step 4）。
 最新 5 件のみ inline。超過分は `archive/STATUS_MERGED_LOG.md` 末尾へ移送
 （wrap-up step 5、step 4 sweep の後に実行）。
 
+- **PR #106** (2026-05-31) — semantic-ci-code の dev-flow / session-end protocol / 設計・実装分離スキームをローカライズ移植（AGENTS.md handoff protocol、CLAUDE.md tiered reading + 8-step wrap-up、STATUS.md、`/wrap-up` + `/new-brief` skills、session-start hook、`tests/discipline/` 3 gates）。Codex P2 review 3 件（全て「継続行を走査しない」系）対応。
 - **PR #105** (2026-05-30) — wrap-up session memory for 2026-05-30。`.claude/memory/2026-05-30.md` + `_index.md` 追記。
 - **PR #104** (2026-05-30) — `docs/engine_review_2026_05_planning.md`（870+ 行、計画書のみ・コード変更ゼロ）。Codex P2 review 13 rounds / 22 threads 全対応。本リポジトリ最多 round の base case。
