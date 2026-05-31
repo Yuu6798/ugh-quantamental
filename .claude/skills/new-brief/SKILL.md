@@ -37,22 +37,23 @@ inventing context (documented recurring failure mode).
 Every module path, function name, ORM column, schema field, CSV column, or
 constant you name in the brief MUST be verified to exist in the implementation
 by grep, not from memory. Canonical files to grep (paths are repo-root
-relative; the package lives under `src/ugh_quantamental/`):
+relative — the source package lives under `src/ugh_quantamental/`):
 
-- `schemas/` — Pydantic contracts: enums, SSVSnapshot, Omega, MarketSVP,
-  ProjectionSnapshot (field names + validators)
-- `engine/projection.py` / `engine/state.py` / `engine/review_audit.py`
+- `src/ugh_quantamental/schemas/` — Pydantic contracts: enums, SSVSnapshot,
+  Omega, MarketSVP, ProjectionSnapshot (field names + validators)
+- `src/ugh_quantamental/engine/{projection,state,review_audit}.py`
   (+ `*_models.py`) — pure function names + signatures, `__all__`
-- `persistence/` — ORM models, repositories, serializers (column names,
-  `_normalize_created_at` boundary)
-- `workflows/models.py` (SQLAlchemy-free) vs `workflows/runners.py` (DB) —
-  import-isolation boundary
-- `query/models.py` vs `query/readers.py` — rehydration attribute names
-- `replay/` — `models` / `runners` / `batch` / `suites` / `baselines`
-  (zero-run guard, per-`(group, name)` delta)
-- `fx_protocol/` — contracts (`calendar` / `ids` / `data_models` /
-  `data_sources` / `request_builders`), `market_ugh_builder`, schemas
-  (`models` / `forecast_models` / `outcome_models` / `report_models`),
+- `src/ugh_quantamental/persistence/` — ORM models, repositories, serializers
+  (column names, `_normalize_created_at` boundary)
+- `src/ugh_quantamental/workflows/models.py` (SQLAlchemy-free) vs
+  `.../workflows/runners.py` (DB) — import-isolation boundary
+- `src/ugh_quantamental/query/models.py` vs `.../query/readers.py` —
+  rehydration attribute names
+- `src/ugh_quantamental/replay/` — `models` / `runners` / `batch` / `suites` /
+  `baselines` (zero-run guard, per-`(group, name)` delta)
+- `src/ugh_quantamental/fx_protocol/` — contracts (`calendar` / `ids` /
+  `data_models` / `data_sources` / `request_builders`), `market_ugh_builder`,
+  schemas (`models` / `forecast_models` / `outcome_models` / `report_models`),
   application (`forecasting` / `outcomes` / `csv_exports` / `reporting` /
   `automation`). CSV column names (`forecast_batch_id`, `range_hit_count`,
   `ugh_v2_ensemble` row) are a permanent foot-gun — quote them verbatim from
