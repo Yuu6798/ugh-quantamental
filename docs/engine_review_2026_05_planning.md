@@ -216,7 +216,14 @@ change:
   allowed_secondary_kinds: [test_update]
   scope:
     modules:
-      - ugh_quantamental.fx_protocol.reporting
+      # NOTE (2026-05-31, Phase 1A brief 起草時): fx_protocol.reporting は本 Phase A
+      # から外し、別 follow-up brief で扱う。reporting.py は v1 DB weekly path
+      # (M16) で StrategyWeeklyMetrics.strategy_kind が typed StrategyKind enum
+      # (reporting.py:326-375) のため、§3.2.1/§6 の string-keyed `ugh_v2_ensemble`
+      # 行機構を載せられない (enum member 追加が必要、本書は回避方針)。かつ
+      # per-variant typed 行は既に非合算で 4× inflation を起こさない。Phase 1A は
+      # string-keyed CSV path (weekly_reports_v2 + monthly_review) のみに絞る。
+      # - ugh_quantamental.fx_protocol.reporting  # → 別 follow-up brief へ移送
       - ugh_quantamental.fx_protocol.weekly_reports_v2
       - ugh_quantamental.fx_protocol.monthly_review
       - ugh_quantamental.fx_protocol.models  # is_ugh_kind に ugh_v2_ensemble を追加 (§6.2)
