@@ -18,6 +18,70 @@ Guidelines for AI assistants working in this repository.
 
 Milestones 1–17 complete. Phase 1 (M1–12): core engine→baselines. Phase 2 (M13–17): `fx_protocol`. See `docs/specs/`.
 
+## Current status
+
+The day-to-day project snapshot (current phase, recently merged PRs, and the
+`次の発行順序` action queue) lives in `.claude/memory/STATUS.md` so this policy
+doc stays stable while the snapshot can be edited freely.
+
+- Live status: [`.claude/memory/STATUS.md`](.claude/memory/STATUS.md)
+- Per-session log: [`.claude/memory/_index.md`](.claude/memory/_index.md) + the
+  dated `YYYY-MM-DD.md` files
+- Canonical milestone table: `PLANS.md`; phase plan:
+  `docs/engine_review_2026_05_planning.md` / `docs/specs/`
+
+When another doc needs to point at the live tracker, link to
+`.claude/memory/STATUS.md` § 次の発行順序 — not to this file.
+
+## Workflow (design / implementation split)
+
+This repository separates design and implementation (handoff format in
+`AGENTS.md`):
+
+- **Claude Code**: design, specification, review judgment, phase planning
+- **Codex**: implementation, tests, PR creation, Completion Summary
+- **User**: final approval and handoff trigger
+
+Default cycle:
+
+1. Claude issues a Task Brief using `AGENTS.md` (via `/new-brief`).
+2. User gives the brief to Codex.
+3. Codex implements on `codex/<topic>`, runs checks, prepares a PR with a
+   Completion Summary.
+4. User shares the PR back to Claude.
+5. Claude reviews and either approves, requests repair, or emits the next brief.
+
+This split was already in use before being formalized: PR #104 ran the full
+Claude-design → Codex-review loop (13 rounds). Solo Claude work and small fixes
+need not round-trip, but anything ≈ 1 day or larger should go through a brief.
+
+## Required reading (tiered)
+
+Read up to the tier that matches your task scope, to keep startup attention
+bounded.
+
+### Tier A — always at startup
+1. **This file (`CLAUDE.md`)** — policy, architecture invariants, session memory
+2. **`.claude/memory/STATUS.md` § `## Phase` + § `次の発行順序`** — current
+   state + active queue (skip `## 直近 merged` unless investigating a PR)
+3. **`.claude/memory/_index.md` の直近 5 entries** — 1–2 line index form
+4. **`AGENTS.md` §1–§4** — Message Flow + Task Brief / Completion Summary +
+   Escalation + Branch Rules
+
+### Tier B — before drafting a new brief
+1. **`AGENTS.md` §5** — Experience Externalization Discipline
+2. **The relevant phase plan** — `docs/engine_review_2026_05_planning.md` or the
+   milestone spec under `docs/specs/`
+3. **`.claude/memory/` の直近 3 dated session logs**
+
+### Tier C — on-demand for the task
+- Full read of the relevant `docs/specs/<milestone>.md`
+- `alembic/versions/` head before any ORM column change
+- Related dated session log in full
+
+If a required doc is stale or incomplete, surface that in the response rather
+than acting without it.
+
 ## Validation commands
 
 Always run before considering any change done:
@@ -127,8 +191,9 @@ Non-negotiable for core packages. `fx_protocol` has intentional side effects (HT
 
 ### 終了時ルール (自動トリガー)
 
-ユーザーが終了意図を示すフレーズを発したら、確認なしで即座に `/wrap-up` 相当の
-処理 (memory への振り返りサマリー保存 + `_index.md` 追記) を実行する。
+ユーザーが終了意図を示すフレーズを発したら、確認なしで即座に `/wrap-up`
+を実行する。`/wrap-up` skill が**実行系**、本セクションが**方針の source of
+truth** で、両者が乖離したら本セクションが勝つ (skill を直す)。
 
 トリガーフレーズの例:
 - 「今日はここまで」「今日は終わり」「今日はおわり」
@@ -137,10 +202,44 @@ Non-negotiable for core packages. `fx_protocol` has intentional side effects (HT
 - 「done for today」「that's all」
 - 手動: `/wrap-up`
 
-実行内容:
-- 会話の振り返りサマリーを `.claude/memory/YYYY-MM-DD.md` に保存
-- `_index.md` に 1 行サマリーを追記
-- `CLAUDE.md` への更新候補があればユーザーに提案する
+実行内容 (この順序を守る — step 4 は step 5 より先、step 8 は push より先):
+
+1. 会話の振り返りサマリーを `.claude/memory/YYYY-MM-DD.md` に保存 (新規 file
+   or 同日 `## Session N` として追記)
+2. `_index.md` § エントリ に **1–2 行** bullet を追記
+   (`- YYYY-MM-DD: <主題> (PR #NNN, ...)`、最新が下、≤ 500 chars)
+3. **30 日以上前の dated entries を `archive/YYYY-MM/` に移送** (原文保存、
+   `_index.md` 該当行は 1 行 summary + archive path に書換、`archive/INDEX.md`
+   更新)
+4. **`STATUS.md 次の発行順序` の sweep** ⚠️ step 5 より先。完走/merged した
+   Phase / Brief / Milestone を `## 直近 merged` の新 entry に移送する。
+   `tests/discipline/test_status_md_next_queue_no_completed.py` で enforce
+5. **`STATUS.md ## 直近 merged` を最新 5 entries に compact**。超過分 (古い順)
+   を `archive/STATUS_MERGED_LOG.md` 末尾に原文移送。step 4 の後に行うことで
+   「sweep が cap 超過を再導入する」 race を回避
+6. **`STATUS.md ## Phase` の単一段落 check**。新 paragraph 追加時は旧
+   paragraph を必ず削除。`tests/discipline/test_status_md_phase_single_paragraph.py`
+   で enforce
+7. **5+ round 論点の encode check**。当 session で review / 壁打ちが 5 round
+   以上に達した曖昧 spec があれば、その解決を docs / tests に encode 済か確認し、
+   未 encode なら externalize する (round 数の test 化はしない — fragile proxy。
+   `tests/discipline/README.md` 参照)。`CLAUDE.md` / `AGENTS.md` への更新候補が
+   あればユーザーに提案する
+8. **memory 直 push 前に `python -m pytest tests/discipline/` を実行し全 test
+   pass を確認** ⚠️ gate。fail があれば step 4–6 の drift が残っているので push
+   せず修正。memory exception (`.claude/memory/` 直 main push 許可) は
+   **post-hoc 検出のみ** なので、discipline test 違反があると main が直接 red に
+   なる。step 8 (数秒) で構造的に抑止する
+
+### Archive policy (compaction TTL)
+
+| Artifact | TTL | 移送先 | 移送後の本体 |
+|---|---|---|---|
+| dated session log `YYYY-MM-DD.md` | 30 日 | `archive/YYYY-MM/` | 原文保存 (情報損失ゼロ) |
+| `_index.md` の対応 entry | 同上 | inline → 1 行 summary + archive path | archive file 経由で参照可 |
+| `STATUS.md ## 直近 merged` entry | 直近 5 超過時 | `archive/STATUS_MERGED_LOG.md` 末尾 | 原文保存 |
+| `STATUS.md 次の発行順序` の完走 entry | merge と同時 | `## 直近 merged` の新 entry | 完走宣言として保存 |
+| `STATUS.md ## Phase` paragraph | 上書き時 | (保存しない、1 paragraph 厳守) | history は dated log / `_index.md` に分散 |
 
 ### サマリーの構成 (慣例フォーマット)
 
@@ -158,4 +257,23 @@ Non-negotiable for core packages. `fx_protocol` has intentional side effects (HT
 ### Git Workflow の例外
 
 `.claude/memory/` の運用ログのみ、main 直 push の唯一の例外として認められている。
-これ以外の変更はすべて feature branch + PR の通常フローを守る。
+これ以外の変更はすべて feature branch + PR の通常フローを守る。直 push の前に
+`/wrap-up` step 8 gate (`python -m pytest tests/discipline/`) を必ず通すこと。
+
+## Experience Externalization (経験値の外部化)
+
+AI 開発 (Claude / Codex / 並列 agent 運用) は session 跨ぎの暗黙知を継承しない:
+Claude は long-term memory を持たず、Codex は PR 単位の review trail 以外を学習
+しない。user の壁打ち経験も永続化しない限り消失する。この制約下で再現性を維持
+する唯一の方法は、経験値を **明示 artifact** に強制外部化することである:
+
+- **docs** に encode (`docs/specs/` / `docs/*_planning.md`)
+- **test** に encode (`tests/discipline/` の構造規律 test、engine の決定性 test)
+- **checklist** に encode (`/new-brief` の §1 grounding gate)
+- **STATUS / memory** に encode (`.claude/memory/`)
+
+review round 数は leading quality indicator として運用する (詳細は `AGENTS.md`
+§5)。PR #104 (13 rounds) はその base case で、planning doc を grounding 前に
+起草した churn を吸収しきった経験を `/new-brief` の pre-flight gate に encode
+した。新 brief 起草前 / 新 architectural pattern 導入前は `AGENTS.md` §5 を
+逐語参照する。
