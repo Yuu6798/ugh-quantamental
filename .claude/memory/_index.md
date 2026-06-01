@@ -1,23 +1,19 @@
 # Session Memory Index
 
-`Yuu6798/semantic-ci-code` から移植した永続記憶ワークフローの索引ファイル。
-詳細な convention は `CLAUDE.md` の「Session Memory / 永続記憶ワークフロー」
-セクションを参照。
+`Yuu6798/semantic-ci-code` から移植した永続記憶ワークフローの索引ファイル。詳細な convention は `CLAUDE.md` の Session Memory セクションを参照する。
 
 ## 構成
 
-各エントリは 1 行サマリー形式 — `- YYYY-MM-DD: <セッションの主題> (PR #NNN, #NNN, ...)`。
-詳細サマリーは同じディレクトリの `YYYY-MM-DD.md` に保存。
+各エントリは 1 行サマリー形式。詳細サマリーは同じディレクトリの `YYYY-MM-DD.md` に保存する。
 
 ## エントリ
 
-(セッションが終了 (wrap-up トリガー) するごとに 1 行ずつ追記される。最新が下。)
-
-- 2026-05-08: FX 通知メール改善 + `fx_protocol` リファクタ Phase 1〜3b 完走 + テストカバレッジ整理 spike (白紙化) + 永続記憶 convention 移植 (PR #92 / #93 / #94 / #95 / #96 / #97 / #98 / #99 / #100 / #103、#101 #102 close)
-- 2026-05-30: 月末 engine review → 構造的問題 5 件を P0/P1/P2 で整理した planning doc 作成、Codex P2 review 13 rounds で 22 threads 全対応してマージ (PR #104)
-- 2026-05-31: semantic-ci-code の dev-flow / session-end protocol / 設計・実装分離スキームを ugh-quantamental にローカライズ移植 (AGENTS.md handoff + CLAUDE.md tiered reading/8-step wrap-up + STATUS.md + wrap-up/new-brief skills + session-start hook + tests/discipline 3 gates)、Codex P2 review 3 件全対応してマージ (PR #106)
+- 2026-05-08: FX 通知メール改善、`fx_protocol` refactor Phase 1、DB 完走、テストカバレッジ整理、spike 白紙化、永続記憶 convention 移植 (PR #92-#100 / #103、#101 #102 close)
+- 2026-05-30: 月末 engine review の構造的問題 5 件を P0/P1/P2 で整理し planning doc を作成。Codex P2 review 13 rounds / 22 threads を処理 (PR #104)
+- 2026-05-31: semantic-ci-code の dev-flow / session-end protocol / 設計を ugh-quantamental に移植。AGENTS.md handoff、CLAUDE.md tiered reading、wrap-up/new-brief skills、session-start hook、discipline gates を追加 (PR #106)
+- 2026-06-01: ENGINE-P1A/P2A/P2B/P3A を小 PR で処理し、range_hit ensemble (#107)、report_window stratify (#108)、state v2.1 (#109)、rare FLAT epsilon v2.2 (#110) を main に反映。P2B/P3A の長期論点は spec/tests に外部化。
 
 <!--
 新規エントリのテンプレート:
-- YYYY-MM-DD: <主題 1〜2 文> (PR #NNN: <タイトル>, ...)
+- YYYY-MM-DD: <主題 1-2 文> (PR #NNN: <タイトル>, ...)
 -->
