@@ -55,6 +55,16 @@ def is_in_window(date_str: str, start: str, end: str) -> bool:
     return start <= date_str <= end
 
 
+def _engine_version_sort_key(version: str) -> tuple[int, tuple[int, ...] | str]:
+    """Return a numeric sort key for dotted engine versions like ``v2.10``."""
+    value = version.removeprefix("v")
+    parts = value.split(".")
+    try:
+        return (1, tuple(int(part) for part in parts))
+    except ValueError:
+        return (0, version)
+
+
 def stratify_observations_by_versions(
     rows: list[dict[str, str]],
     *,
@@ -74,8 +84,9 @@ def stratify_observations_by_versions(
       are ``None``, **auto-detect**: when the input rows contain more
       than one distinct ``theory_version`` the latest one (lexicographic
       max across the v1/v2/... sequence) is selected and a warning is
-      logged. The same latest-version stratification is then applied to
-      ``engine_version`` on the surviving rows; single-version data is
+      logged. Latest-version stratification is then applied to
+      ``engine_version`` on the surviving rows using numeric comparison
+      for dotted versions such as ``v2.10``; single-version data is
       returned unchanged.
     * If either filter is non-None, rows whose corresponding column
       does not match are dropped.
@@ -99,7 +110,7 @@ def stratify_observations_by_versions(
 
         present_engine = {row.get("engine_version", "") for row in filtered} - {""}
         if len(present_engine) > 1:
-            latest_engine = max(present_engine)
+            latest_engine = max(present_engine, key=_engine_version_sort_key)
             logger.warning(
                 "auto-stratifying mixed engine_versions %s; filtering to latest=%s",
                 sorted(present_engine),

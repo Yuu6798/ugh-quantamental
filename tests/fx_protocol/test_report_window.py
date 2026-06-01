@@ -25,6 +25,18 @@ def test_auto_detect_filters_mixed_engine_version_to_latest(
     assert any("mixed engine_versions" in rec.message for rec in caplog.records)
 
 
+def test_auto_detect_orders_dotted_engine_versions_numerically() -> None:
+    rows = [
+        {"id": "v29", "theory_version": "v2", "engine_version": "v2.9"},
+        {"id": "v210", "theory_version": "v2", "engine_version": "v2.10"},
+        {"id": "v23", "theory_version": "v2", "engine_version": "v2.3"},
+    ]
+
+    out = stratify_observations_by_versions(rows)
+
+    assert [row["id"] for row in out] == ["v210"]
+
+
 def test_auto_detect_filters_mixed_theory_then_engine_versions(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -77,4 +89,4 @@ def test_stratify_docstring_frames_theory_and_engine_version_symmetrically() -> 
 
     assert "Spec" in doc
     assert "``theory_version`` and ``engine_version``" in doc
-    assert "same latest-version stratification" in doc
+    assert "numeric comparison" in doc
