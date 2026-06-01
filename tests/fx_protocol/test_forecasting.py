@@ -10,6 +10,7 @@ import pytest
 
 from ugh_quantamental.engine.projection_models import (
     AlignmentInputs,
+    ProjectionConfig,
     ProjectionEngineResult,
     QuestionDirectionSign,
     QuestionFeatures,
@@ -55,15 +56,19 @@ HAS_SQLALCHEMY = importlib.util.find_spec("sqlalchemy") is not None
 
 if HAS_SQLALCHEMY:
     from ugh_quantamental.fx_protocol.forecasting import (
+        _direction_from_bp_with_epsilon,
         build_prev_day_direction_forecast,
         build_random_walk_forecast,
         build_simple_technical_forecast,
+        build_ugh_variant_forecast,
         run_daily_forecast_workflow,
     )
 else:
+    _direction_from_bp_with_epsilon = None
     build_prev_day_direction_forecast = None
     build_random_walk_forecast = None
     build_simple_technical_forecast = None
+    build_ugh_variant_forecast = None
     run_daily_forecast_workflow = None
 
 
@@ -228,6 +233,39 @@ def db_session():
         session.close()
 
 
+def _projection_result(*, e_star: float, conviction: float) -> ProjectionEngineResult:
+    return ProjectionEngineResult(
+        u_score=e_star,
+        alignment=0.8,
+        e_raw=e_star,
+        gravity_bias=0.0,
+        e_star=e_star,
+        mismatch_px=0.0,
+        mismatch_sem=0.0,
+        conviction=conviction,
+        urgency=0.5,
+        projection_snapshot=ProjectionSnapshot(
+            projection_id="Will USDJPY close higher?",
+            horizon_days=1,
+            point_estimate=e_star,
+            lower_bound=e_star - 0.1,
+            upper_bound=e_star + 0.1,
+            confidence=conviction,
+        ),
+    )
+
+
+def _state_result(req: DailyForecastWorkflowRequest) -> StateEngineResult:
+    return StateEngineResult(
+        evidence_scores=req.ugh_request.state.snapshot.phi.probabilities,
+        updated_probabilities=req.ugh_request.state.snapshot.phi.probabilities,
+        updated_phi=req.ugh_request.state.snapshot.phi,
+        updated_market_svp=req.ugh_request.state.omega.market_svp,
+        dominant_state=LifecycleState.setup,
+        transition_confidence=0.5,
+    )
+
+
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
 def test_baseline_construction_rules_are_deterministic() -> None:
     request = _request()
@@ -249,6 +287,73 @@ def test_baseline_construction_rules_are_deterministic() -> None:
     assert st.forecast_direction == ForecastDirection.up
     assert st.expected_close_change_bp == 20.0
     assert st.expected_range is None
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_ugh_variant_flat_epsilon_zeroes_record_bp(monkeypatch) -> None:
+    from ugh_quantamental.fx_protocol import forecasting
+
+    req = _request()
+    projection_result = _projection_result(e_star=0.2, conviction=0.0)
+    state_result = _state_result(req)
+
+    def _fake_full_workflow(session, request):
+        del session, request
+        return FullWorkflowResult(
+            projection=ProjectionWorkflowResult("proj-1", projection_result, None),
+            state=StateWorkflowResult("state-1", state_result, None),
+        )
+
+    monkeypatch.setattr(forecasting, "run_full_workflow", _fake_full_workflow)
+
+    rec = build_ugh_variant_forecast(
+        object(),
+        req,
+        make_forecast_batch_id(req.pair, req.as_of_jst, req.protocol_version),
+        datetime(2026, 3, 16, 8, 0, 0),
+        variant=StrategyKind.ugh_v2_alpha,
+    )
+
+    assert rec.forecast_direction == ForecastDirection.flat
+    assert rec.expected_close_change_bp == 0.0
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_ugh_flat_epsilon_preserves_direction_outside_band() -> None:
+    config = ProjectionConfig()
+
+    up_dir, up_bp = _direction_from_bp_with_epsilon(3.1, 20.0, config)
+    down_dir, down_bp = _direction_from_bp_with_epsilon(-3.1, 20.0, config)
+
+    assert up_dir == ForecastDirection.up
+    assert up_bp == pytest.approx(3.1)
+    assert down_dir == ForecastDirection.down
+    assert down_bp == pytest.approx(-3.1)
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_baseline_directions_ignore_ugh_flat_epsilon() -> None:
+    req = _request(
+        baseline_context=BaselineContext(
+            current_spot=150.0,
+            previous_close_change_bp=2.0,
+            trailing_mean_range_price=1.2,
+            trailing_mean_abs_close_change_bp=2.0,
+            sma5=150.1,
+            sma20=150.0,
+            warmup_window_count=20,
+        )
+    )
+    batch_id = make_forecast_batch_id(req.pair, req.as_of_jst, req.protocol_version)
+    window_end = datetime(2026, 3, 16, 8, 0, 0)
+
+    pd = build_prev_day_direction_forecast(req, batch_id, window_end)
+    st = build_simple_technical_forecast(req, batch_id, window_end)
+
+    assert pd.forecast_direction == ForecastDirection.up
+    assert pd.expected_close_change_bp == pytest.approx(2.0)
+    assert st.forecast_direction == ForecastDirection.up
+    assert st.expected_close_change_bp == pytest.approx(2.0)
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")

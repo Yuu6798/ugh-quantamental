@@ -89,6 +89,28 @@ def test_projection_config_accepts_finite_values() -> None:
     assert config.u_weight == pytest.approx(0.7)
 
 
+def test_projection_config_flat_epsilon_defaults() -> None:
+    config = ProjectionConfig()
+
+    assert config.direction_flat_epsilon_ratio == pytest.approx(0.0)
+    assert config.direction_flat_epsilon_floor_bp == pytest.approx(3.0)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("direction_flat_epsilon_ratio", -0.01),
+        ("direction_flat_epsilon_floor_bp", -0.01),
+    ],
+)
+def test_projection_config_rejects_negative_flat_epsilon_fields(
+    field: str,
+    value: float,
+) -> None:
+    with pytest.raises(ValidationError):
+        ProjectionConfig(**{field: value})
+
+
 def test_alignment_inputs_accepts_finite_values() -> None:
     inputs = AlignmentInputs(
         d_qf=0.1,

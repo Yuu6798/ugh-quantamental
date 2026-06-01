@@ -114,6 +114,8 @@ fields that v1 computed but did not consume.
 |---|---|---|
 | `p_weight` | `0.20` (matches `ugh_v2_alpha`) | Weight of `price_implied_score` in direction signal (new) |
 | `conviction_floor` | `0.5` (matches `ugh_v2_alpha`) | Multiplier when `fire_probability == 0`; also sets the `fire_probability == 0.5` shrink. Default value reproduces the alpha variant's behavior. |
+| `direction_flat_epsilon_ratio` | `0.0` | Optional volatility-scaled FLAT threshold ratio for UGH variant forecast labels. Default is disabled after replay showed ratio-scaled thresholds over-flatten UGH outputs. |
+| `direction_flat_epsilon_floor_bp` | `3.0` | Fixed minimum FLAT threshold in bp for UGH variants. With the default ratio of `0.0`, v2.2 uses a fixed 3.0 bp epsilon. |
 
 The defaults are chosen so that `ProjectionConfig()` (no-argument
 construction) keeps working everywhere it is currently called — most
@@ -131,6 +133,40 @@ its conviction-shaping role is taken over by `conviction_floor`.
 Direction normalization is explicit in the formula: the weighted sum is
 divided by `u_weight + t_weight + p_weight`. No constraint that the three
 direction weights sum to any particular value.
+
+### 5.1.1 UGH-only FLAT direction epsilon
+
+v2.2 adds a post-projection direction-label threshold for UGH variants:
+
+`epsilon_bp = max(direction_flat_epsilon_ratio * trailing_mean_abs_close_change_bp, direction_flat_epsilon_floor_bp)`
+
+After `expected_close_change_bp` is computed from
+`e_star * trailing_mean_abs_close_change_bp * (0.5 + 0.5 * conviction)`,
+the UGH variant forecast label is:
+
+- `FLAT` when `abs(expected_close_change_bp) <= epsilon_bp`
+- otherwise `UP` / `DOWN` by sign
+
+When the label is `FLAT`, the persisted `expected_close_change_bp` is set
+to `0.0` so the forecast record remains schema-valid.
+
+This threshold is **UGH-variant only**. Baselines keep the zero-threshold
+rule: `baseline_prev_day_direction` and `baseline_simple_technical` emit
+`FLAT` only when their own expected change is exactly zero. This preserves
+baselines as fixed comparison rulers.
+
+Although the field supports a volatility-scaled dynamic threshold, replay
+in May 2026 showed that dynamic `ratio * trailing` is not suitable as the
+default for UGH: UGH magnitude is already scaled by trailing volatility,
+so applying a second trailing-scaled threshold flattened too many records
+(`ratio=0.1` still produced 16/60 FLAT records). Therefore v2.2 defaults
+to fixed rare operation with `direction_flat_epsilon_ratio=0.0` and
+`direction_flat_epsilon_floor_bp=3.0`, producing a 3.0 bp threshold.
+
+The 2026-05-26 pattern (a strong +11 to +14 bp UGH forecast followed by a
+near-flat realized day) is explicitly **not** a FLAT-epsilon target. It is
+a magnitude-calibration problem and belongs to a later calibration phase,
+not to this small-prediction labeling threshold.
 
 ### 5.2 Parallel variant deployment
 
@@ -423,6 +459,13 @@ The conviction distribution lens is what tells us whether `fire` carries
 discriminative power (Framing B feasibility check). If most v2 days have
 fire ≈ 0.5, the additive formula is producing constant noise; if fire is
 spread across [0, 1], it is encoding something.
+
+FLAT rows are included in the direction lens exactly like UP/DOWN rows:
+`direction_hit=True` only when `forecast_direction` equals
+`outcome.realized_direction`. Since outcome direction remains exact
+open-vs-close (`FLAT` only when realized close equals realized open), a
+UGH FLAT forecast does not receive partial credit for a small non-zero
+move. It is counted as a normal miss against realized UP or DOWN.
 
 ### 9.6 Closure
 
