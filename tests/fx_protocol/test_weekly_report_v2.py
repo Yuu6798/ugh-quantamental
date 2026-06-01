@@ -10,6 +10,8 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from ugh_quantamental.fx_protocol.weekly_reports_v2 import (
+    WEEKLY_SLICE_METRICS_FIELDNAMES,
+    WEEKLY_STRATEGY_METRICS_FIELDNAMES,
     build_annotation_coverage,
     build_annotation_field_coverage,
     build_event_tag_source_summary,
@@ -41,6 +43,7 @@ def _write_csv(path: str, rows: list[dict[str, str]], fieldnames: list[str]) -> 
 def _make_observation(
     *,
     as_of_jst: str = "2026-03-18T08:00:00+09:00",
+    forecast_batch_id: str = "batch_001",
     strategy_kind: str = "ugh",
     direction_hit: str = "True",
     range_hit: str = "True",
@@ -55,7 +58,7 @@ def _make_observation(
 ) -> dict[str, str]:
     return {
         "as_of_jst": as_of_jst,
-        "forecast_batch_id": "batch_001",
+        "forecast_batch_id": forecast_batch_id,
         "outcome_id": "outcome_001",
         "strategy_kind": strategy_kind,
         "forecast_direction": "up",
@@ -73,6 +76,35 @@ def _make_observation(
         "event_tags": event_tags,
         "annotation_status": annotation_status,
     }
+
+
+_UGH_V2_VARIANTS = (
+    "ugh_v2_alpha",
+    "ugh_v2_beta",
+    "ugh_v2_gamma",
+    "ugh_v2_delta",
+)
+
+
+def _make_v2_variant_week() -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    range_hits = ["True", "True", "False", "True", "False"]
+    for day_index, range_hit in enumerate(range_hits, start=1):
+        for strategy_kind in _UGH_V2_VARIANTS:
+            row = _make_observation(
+                as_of_jst=f"2026-03-{day_index + 15:02d}T08:00:00+09:00",
+                forecast_batch_id=f"batch_{day_index:03d}",
+                strategy_kind=strategy_kind,
+                range_hit=range_hit,
+                regime_label="trending",
+                volatility_label="normal",
+                intervention_risk="low",
+                event_tags="fomc",
+            )
+            row["annotation_source"] = "ai"
+            row["effective_event_tags"] = row["event_tags"]
+            rows.append(row)
+    return rows
 
 
 def _labeled_observation_fieldnames() -> list[str]:
@@ -174,6 +206,37 @@ class TestAnnotationCoverageUnlabeled:
 # ---------------------------------------------------------------------------
 
 
+def test_weekly_scoreboard_fieldnames_unchanged() -> None:
+    assert WEEKLY_STRATEGY_METRICS_FIELDNAMES == (
+        "strategy_kind",
+        "observation_count",
+        "direction_hit_count",
+        "direction_hit_rate",
+        "range_hit_count",
+        "range_hit_rate",
+        "state_proxy_hit_count",
+        "state_proxy_hit_rate",
+        "mean_close_error_bp",
+        "median_close_error_bp",
+        "mean_magnitude_error_bp",
+    )
+    assert WEEKLY_SLICE_METRICS_FIELDNAMES == (
+        "slice_dimension",
+        "strategy_kind",
+        "label",
+        "observation_count",
+        "direction_hit_count",
+        "direction_hit_rate",
+        "range_hit_count",
+        "range_hit_rate",
+        "state_proxy_hit_count",
+        "state_proxy_hit_rate",
+        "mean_close_error_bp",
+        "median_close_error_bp",
+        "mean_magnitude_error_bp",
+    )
+
+
 class TestStrategyMetrics:
     def test_basic_strategy_grouping(self) -> None:
         obs = [
@@ -186,6 +249,37 @@ class TestStrategyMetrics:
         ugh = next(m for m in metrics if m["strategy_kind"] == "ugh")
         assert ugh["observation_count"] == 2
         assert ugh["direction_hit_count"] == 1
+
+    def test_v2_range_hit_aggregated_once_per_forecast_batch(self) -> None:
+        obs = _make_v2_variant_week()
+        obs.extend(
+            _make_observation(
+                forecast_batch_id="",
+                strategy_kind=strategy_kind,
+                range_hit="True",
+            )
+            for strategy_kind in _UGH_V2_VARIANTS
+        )
+
+        metrics = build_strategy_metrics(obs)
+
+        ensemble_rows = [
+            m for m in metrics if m["strategy_kind"] == "ugh_v2_ensemble"
+        ]
+        assert len(ensemble_rows) == 1
+        assert ensemble_rows[0]["range_hit_count"] == 3
+        assert ensemble_rows[0]["range_hit_rate"] == "0.6"
+        for field, value in ensemble_rows[0].items():
+            if field not in {"strategy_kind", "range_hit_count", "range_hit_rate"}:
+                assert value == ""
+
+        variant_rows = [
+            m for m in metrics if m["strategy_kind"] in _UGH_V2_VARIANTS
+        ]
+        assert {m["strategy_kind"] for m in variant_rows} == set(_UGH_V2_VARIANTS)
+        for row in variant_rows:
+            assert row["range_hit_count"] == ""
+            assert row["range_hit_rate"] == ""
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +353,41 @@ class TestSliceMetrics:
         vol_slices = [s for s in slices if s["slice_dimension"] == "volatility_label"]
         assert len(vol_slices) >= 1
         assert vol_slices[0]["label"] == "high"
+
+    def test_v2_range_hit_ensemble_rows_per_slice(self) -> None:
+        obs = _make_v2_variant_week()
+
+        slices = build_slice_metrics(obs)
+
+        expected_labels = {
+            "regime_label": "trending",
+            "volatility_label": "normal",
+            "intervention_risk": "low",
+            "event_tag": "fomc",
+        }
+        for dimension, label in expected_labels.items():
+            ensemble_rows = [
+                s
+                for s in slices
+                if s["slice_dimension"] == dimension
+                and s["label"] == label
+                and s["strategy_kind"] == "ugh_v2_ensemble"
+            ]
+            assert len(ensemble_rows) == 1
+            assert ensemble_rows[0]["range_hit_count"] == 3
+            assert ensemble_rows[0]["range_hit_rate"] == "0.6"
+
+            variant_rows = [
+                s
+                for s in slices
+                if s["slice_dimension"] == dimension
+                and s["label"] == label
+                and s["strategy_kind"] in _UGH_V2_VARIANTS
+            ]
+            assert {s["strategy_kind"] for s in variant_rows} == set(_UGH_V2_VARIANTS)
+            for row in variant_rows:
+                assert row["range_hit_count"] == ""
+                assert row["range_hit_rate"] == ""
 
     def test_intervention_risk_slice(self) -> None:
         obs = [
