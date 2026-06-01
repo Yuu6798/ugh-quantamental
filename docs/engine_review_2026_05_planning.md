@@ -314,13 +314,31 @@ fire = config.fire_weight * _clamp(
 > するため、spec の更新も同 PR で必要。**spec §5.3 の意図** (multiplicative
 > gate で choppy 相場の偽 fire を抑制する) を保ちつつ、現状の「実用上 fire
 > が一度しか出ない」状態を改善する妥協点を探る。
+>
+> **NOTE (2026-06-01, P2B brief 起草時の訂正)**: 上記の「spec §5.3」参照は
+> **軸ずれ**。`fx_ugh_engine_v2.md §5.3` の `fire_probability` は
+> `market_ugh_builder.py` の **signal feature** (`compute_e_raw` に入る別概念)
+> であり、本 §4 が触る **state classifier の fire evidence**
+> (`engine/state.py:98` `compute_state_evidence`) とは別物。Phase 2 が更新
+> すべき spec は **`docs/specs/ugh_state_engine_v1.md`** (line ~33 fire
+> evidence 記述 + ~39 softmax)。`fx_ugh_engine_v2.md §5.3` は触らない。
+> 本訂正は §4.3 target.yaml / §4.4 検証 / §9 Phase 表にも反映済み。
 
 ### 4.3 `target.yaml`
 
 ```yaml
 intent: "Sharpen state classifier discrimination: lower softmax_temperature default from 1.0 to 0.5 and relax fire's multiplicative gate to a weighted sum to make fire state operationally reachable. Extend report_window auto-detect to also stratify mixed engine_versions so the v2 → v2.1 bump is honored at all production callers."
 change:
-  primary_kind: feature  # spec §5.3 を触るため refactor ではない
+  # NOTE (2026-06-01, P2B brief 起草時): Phase 2 は P2A (report_window
+  # engine_version auto-stratify、PR #108 merged) と P2B (engine sharpening
+  # + bump) の 2 PR に分割済み。下記 target.yaml は P2B 用に読み替える:
+  #   - report_window モジュールは P2A で完了 → P2B scope から除外
+  #   - spec ファイルは ugh_state_engine_v1.md (state classifier fire) に訂正
+  #     (fx_ugh_engine_v2.md §5.3 は market_ugh_builder の別 fire、触らない)
+  #   - bump 対象 3 源: automation_models.py:22 / run_fx_daily_protocol.py:58
+  #     (+ docstring:19) / fx-daily-protocol.yml:39。fx-analysis-pipeline.yml は
+  #     reporting 専用で engine_version を持たない (当初の「workflow 2 つ」は誤り)
+  primary_kind: feature  # state classifier 挙動を変えるため refactor ではない
   allowed_secondary_kinds: [test_update, doc_update]
   scope:
     modules:
@@ -328,9 +346,10 @@ change:
       - ugh_quantamental.engine.state_models
       - ugh_quantamental.fx_protocol.forecasting
       - ugh_quantamental.fx_protocol.automation_models  # engine_version default を v2 → v2.1 に bump
-      - ugh_quantamental.fx_protocol.report_window  # auto-detect に engine_version を追加 (§4.4)
+      # - ugh_quantamental.fx_protocol.report_window  # → P2A (PR #108) で完了、P2B scope 外
     files:
-      - docs/specs/fx_ugh_engine_v2.md  # §5.3 fire_probability redefinition の更新が必須 (§4.4)
+      - docs/specs/ugh_state_engine_v1.md  # state classifier の fire evidence + softmax を更新 (§4.4 訂正)
+      # - docs/specs/fx_ugh_engine_v2.md  # §5.3 は market_ugh_builder の別 fire、触らない
 authorship:
   authors: [{identity: "claude-code-engine-review-2026-05"}]
 api_surface:
@@ -353,7 +372,11 @@ constraints: []
       軸だけ伸ばす loophole は不可。詳細 §11.2 参照。
 - **既存 test の更新**: `tests/engine/test_state.py` の prob 数値 fixture を
   新 default で再生成。
-- **Spec §5.3 の整合性**: fire gate 緩和の数式を spec に反映、§5.3 を更新。
+- **Spec の整合性**: fire gate 緩和の数式を spec に反映。**訂正
+  (2026-06-01)**: 更新先は `docs/specs/ugh_state_engine_v1.md` (state
+  classifier の fire evidence ~line 33 + softmax ~line 39)。当初書いていた
+  `fx_ugh_engine_v2.md §5.3` は `market_ugh_builder.fire_probability`
+  (別概念) なので**触らない** (§4.2.2 NOTE 参照)。
 - **`engine_version` の bump**: v2 → **v2.1**。`dominant_state` の出力が
   同一入力で変わるため、weekly / monthly pipeline で pre/post を分離する
   必要がある (詳細 §10)。
@@ -704,7 +727,7 @@ spec §7 で `dominant_state → expected_close_change_bp` の damping rule が
 | Phase | 内容 | 想定 PR 数 | 依存 |
 |---|---|---|---|
 | **Phase 1 (P0 短期止血)** | §3.2.1 (range_hit 集計修正) + §6 (scoreboard 整理) | 1-2 | なし、即着手可 |
-| **Phase 2 (P0 sharpening)** | §4 (softmax + fire gate)、spec §5.3 改訂 | 1 | engine_version v2 → **v2.1** bump、replay 必要 |
+| **Phase 2 (P0 sharpening)** | §4 (softmax + fire gate)、spec 改訂 (`ugh_state_engine_v1.md`) | **2** (P2A: report_window auto-detect = PR #108 merged / P2B: engine sharpening + v2.1 bump) | engine_version v2 → **v2.1** bump、replay 必要 |
 | **Phase 3 (P1)** | §5 (FLAT epsilon → v2.1 → **v2.2**)、§3.2.2 (range の per-variant 化 → v2.2 → **v2.3**) | 2 | Phase 2 後、各 sub-PR で個別 bump |
 | **Phase 4 (P2)** | §7 spec 改訂、§8 議論 | 1 | いつでも |
 
