@@ -316,6 +316,32 @@ Key properties:
 - **All directional inputs are independent**: `price_implied_score` enters
   e_raw directly, no longer trapped in mismatch_px.
 
+### 6.1.1 Conviction semantics: prediction reliability, not signal strength
+
+`conviction` is a prediction-reliability score: it estimates how much the
+engine should trust the current `e_star` after evidence confidence,
+alignment, and mismatch penalties are applied. It is not a raw signal
+strength measure and should not be read as fire intensity. The concepts
+are distinct, but the pipeline is not statistically independent:
+`fire_probability` helps shape `e_star` through `compute_e_raw`, and
+`e_star` then enters `mismatch_px`, which is one input to
+`compute_conviction`. As a result, fire and conviction can co-move or
+diverge depending on mismatch. In particular, high catalyst / fire days
+can still have modest conviction when price or semantic mismatch is high
+(for example, the 2026-05-08 fire cases had conviction around 0.37).
+
+Downstream forecast construction also uses conviction as the magnitude
+scaler introduced in PR #87:
+
+`expected_close_change_bp = e_star * trailing_mean_abs_close_change_bp * (0.5 + 0.5 * conviction)`
+
+This dual use is intentional in v2.x: a reliable projection is allowed to
+move the close estimate more, while an unreliable projection is damped
+toward half size without changing sign. The range layer has its own
+related use of conviction for uncertainty width; see §5.1.2. If future
+work separates "reliability" from "magnitude scaler", this spec must be
+updated before any code change lands.
+
 ### 6.2 `compute_u` (unchanged)
 
 The directional utility function works correctly for trending markets and
@@ -526,7 +552,7 @@ therefore report `range_hit_count` and `range_hit_rate` on the
 v2 closes successfully when:
 1. The May data unambiguously selects one row of the matrix.
 2. A follow-up spec for the documented next step is started.
-3. Variant-level reports for all five lenses are persisted in
+3. Variant-level reports for all six lenses are persisted in
    `csv/analytics/monthly/202606/`.
 
 If §9.6 condition 1 cannot be met (mixed pattern row), the spec extends
@@ -563,6 +589,21 @@ evidence from extreme prev_close_change magnitudes, or u_score versus
 realized momentum disagreement) and promote fire to Framing B. This is
 the eventual target — fire should be a quantity whose value *means*
 something specific — but premature promotion is rejected.
+
+## 9B. Dormant state and magnitude policy (Option B)
+
+State and magnitude remain intentionally decoupled in v2.x. A
+`dominant_state=dormant` forecast is not automatically damped inside the
+engine; the engine emits state probabilities and the point/range forecast
+as separate pieces of information.
+
+This adopts planning Option B. Option A (engine-side dormant damping) is
+not used because it would hide the independent magnitude signal before a
+trading system exists to evaluate it. Option C (feeding state back into
+conviction) is also deferred because it would blur `conviction`'s meaning
+as prediction reliability. Position sizing or risk throttling based on
+`dominant_state` belongs in the future trading-system layer, not in this
+forecast engine.
 
 ## 10. Out of scope (deferred)
 

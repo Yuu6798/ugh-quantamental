@@ -160,7 +160,12 @@ def compute_conviction(
     mismatch_px: float,
     mismatch_sem: float,
 ) -> float:
-    """Compute confidence-like conviction score in [0, 1]."""
+    """Compute prediction reliability, not raw signal strength, in [0, 1].
+
+    Downstream FX forecasting also uses this reliability score as a magnitude
+    scaler for ``expected_close_change_bp``; the engine math here remains only
+    the reliability estimate.
+    """
     mismatch_penalty = 0.5 * (abs(mismatch_px) + abs(mismatch_sem))
     raw = signal_features.evidence_confidence * alignment * (1.0 - 0.5 * mismatch_penalty)
     return _clamp(raw, 0.0, 1.0)
