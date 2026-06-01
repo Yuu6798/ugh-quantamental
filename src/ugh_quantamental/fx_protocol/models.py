@@ -49,6 +49,8 @@ _UGH_V2_STRATEGY_KINDS: tuple[StrategyKind, ...] = (
     StrategyKind.ugh_v2_delta,
 )
 
+UGH_V2_ENSEMBLE_KIND = "ugh_v2_ensemble"
+
 #: Single source of truth for the strategies emitted on every daily run under
 #: v2: 4 UGH variants + 3 baselines. Order is the canonical batch order.
 #: Used by daily-batch completeness checks (forecasting / outcomes / automation)
@@ -69,7 +71,7 @@ EXPECTED_DAILY_BATCH_SIZE: int = len(_ACTIVE_STRATEGY_KINDS)
 
 
 def is_ugh_kind(kind: StrategyKind | str) -> bool:
-    """Return True if `kind` is any UGH-class strategy (legacy v1 or v2 variants).
+    """Return True if `kind` is any UGH-class strategy or aggregate row.
 
     Accepts either a `StrategyKind` enum value or its string form, mirroring
     the mixed enum/string comparisons that pre-v2 code relied on. Unknown
@@ -79,9 +81,11 @@ def is_ugh_kind(kind: StrategyKind | str) -> bool:
     if isinstance(kind, StrategyKind):
         return kind == StrategyKind.ugh or kind in _UGH_V2_STRATEGY_KINDS
     if isinstance(kind, str):
-        return kind == StrategyKind.ugh.value or kind in {
-            k.value for k in _UGH_V2_STRATEGY_KINDS
-        }
+        return (
+            kind == UGH_V2_ENSEMBLE_KIND
+            or kind == StrategyKind.ugh.value
+            or kind in {k.value for k in _UGH_V2_STRATEGY_KINDS}
+        )
     return False
 
 

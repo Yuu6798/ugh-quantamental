@@ -31,8 +31,13 @@ from ugh_quantamental.fx_protocol.metrics_utils import (
     safe_median,
     safe_rate,
 )
-from ugh_quantamental.fx_protocol.models import is_ugh_kind
+from ugh_quantamental.fx_protocol.models import UGH_V2_ENSEMBLE_KIND, is_ugh_kind
 from ugh_quantamental.fx_protocol.report_window import stratify_observations_by_versions
+from ugh_quantamental.fx_protocol.weekly_reports_v2 import (
+    _dedupe_ugh_v2_rows_by_forecast_batch_id,
+    _is_ugh_v2_variant_kind,
+    _rows_with_empty_range_hit,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +114,65 @@ def _select_canonical_ugh_metrics(
 # ---------------------------------------------------------------------------
 
 
+def _compute_monthly_metrics_for_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
+    n = len(rows)
+    dir_hits = count_bool_rows(rows, "direction_hit")
+    range_evaluable = [r for r in rows if r.get("range_hit", "") != ""]
+    range_hits = count_bool_rows(range_evaluable, "range_hit")
+    state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]
+    state_hits = count_bool_rows(state_evaluable, "state_proxy_hit")
+    close_errors = [abs(v) for v in collect_floats(rows, "close_error_bp")]
+    mag_errors = [abs(v) for v in collect_floats(rows, "magnitude_error_bp")]
+
+    return {
+        "forecast_count": n,
+        "direction_hit_count": dir_hits,
+        "direction_hit_rate": safe_rate(dir_hits, n),
+        "range_hit_count": range_hits,
+        "range_hit_rate": (
+            safe_rate(range_hits, len(range_evaluable)) if range_evaluable else None
+        ),
+        "state_proxy_hit_count": state_hits,
+        "state_proxy_hit_rate": (
+            safe_rate(state_hits, len(state_evaluable)) if state_evaluable else None
+        ),
+        "mean_abs_close_error_bp": safe_mean(close_errors),
+        "median_abs_close_error_bp": safe_median(close_errors),
+        "mean_abs_magnitude_error_bp": safe_mean(mag_errors),
+        "median_abs_magnitude_error_bp": safe_median(mag_errors),
+    }
+
+
+def _blank_range_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    metrics["range_hit_count"] = ""
+    metrics["range_hit_rate"] = ""
+    return metrics
+
+
+def _monthly_ensemble_range_metrics(
+    observations: list[dict[str, str]],
+) -> dict[str, Any] | None:
+    deduped_rows = _dedupe_ugh_v2_rows_by_forecast_batch_id(observations)
+    if not deduped_rows:
+        return None
+
+    range_metrics = _compute_monthly_metrics_for_rows(deduped_rows)
+    return {
+        "strategy_kind": UGH_V2_ENSEMBLE_KIND,
+        "forecast_count": "",
+        "direction_hit_count": "",
+        "direction_hit_rate": "",
+        "range_hit_count": range_metrics["range_hit_count"],
+        "range_hit_rate": range_metrics["range_hit_rate"],
+        "state_proxy_hit_count": "",
+        "state_proxy_hit_rate": "",
+        "mean_abs_close_error_bp": "",
+        "median_abs_close_error_bp": "",
+        "mean_abs_magnitude_error_bp": "",
+        "median_abs_magnitude_error_bp": "",
+    }
+
+
 def compute_monthly_strategy_metrics(
     observations: list[dict[str, str]],
 ) -> list[dict[str, Any]]:
@@ -124,70 +188,33 @@ def compute_monthly_strategy_metrics(
     groups: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in observations:
         sk = row.get("strategy_kind", "")
-        if sk:
+        if sk and sk != UGH_V2_ENSEMBLE_KIND:
             groups[sk].append(row)
 
     result: list[dict[str, Any]] = []
     for sk in STRATEGY_KINDS:
         rows = groups.get(sk, [])
-        n = len(rows)
-        dir_hits = count_bool_rows(rows, "direction_hit")
-        range_evaluable = [r for r in rows if r.get("range_hit", "") != ""]
-        range_hits = count_bool_rows(range_evaluable, "range_hit")
-        state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]
-        state_hits = count_bool_rows(state_evaluable, "state_proxy_hit")
-        close_errors = [abs(v) for v in collect_floats(rows, "close_error_bp")]
-        mag_errors = [abs(v) for v in collect_floats(rows, "magnitude_error_bp")]
-
+        if _is_ugh_v2_variant_kind(sk):
+            rows = _rows_with_empty_range_hit(rows)
+        metrics = _compute_monthly_metrics_for_rows(rows)
+        if _is_ugh_v2_variant_kind(sk):
+            metrics = _blank_range_metrics(metrics)
         result.append({
             "strategy_kind": sk,
-            "forecast_count": n,
-            "direction_hit_count": dir_hits,
-            "direction_hit_rate": safe_rate(dir_hits, n),
-            "range_hit_count": range_hits,
-            "range_hit_rate": safe_rate(range_hits, len(range_evaluable))
-            if range_evaluable
-            else None,
-            "state_proxy_hit_count": state_hits,
-            "state_proxy_hit_rate": safe_rate(state_hits, len(state_evaluable))
-            if state_evaluable
-            else None,
-            "mean_abs_close_error_bp": safe_mean(close_errors),
-            "median_abs_close_error_bp": safe_median(close_errors),
-            "mean_abs_magnitude_error_bp": safe_mean(mag_errors),
-            "median_abs_magnitude_error_bp": safe_median(mag_errors),
+            **metrics,
         })
+
+    ensemble = _monthly_ensemble_range_metrics(observations)
+    if ensemble is not None:
+        result.append(ensemble)
 
     # Also include any extra strategies present in data but not in STRATEGY_KINDS
     for sk in sorted(groups.keys()):
         if sk not in STRATEGY_KINDS:
             rows = groups[sk]
-            n = len(rows)
-            dir_hits = count_bool_rows(rows, "direction_hit")
-            range_evaluable = [r for r in rows if r.get("range_hit", "") != ""]
-            range_hits = count_bool_rows(range_evaluable, "range_hit")
-            state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]
-            state_hits = count_bool_rows(state_evaluable, "state_proxy_hit")
-            close_errors = [abs(v) for v in collect_floats(rows, "close_error_bp")]
-            mag_errors = [abs(v) for v in collect_floats(rows, "magnitude_error_bp")]
-
             result.append({
                 "strategy_kind": sk,
-                "forecast_count": n,
-                "direction_hit_count": dir_hits,
-                "direction_hit_rate": safe_rate(dir_hits, n),
-                "range_hit_count": range_hits,
-                "range_hit_rate": safe_rate(range_hits, len(range_evaluable))
-                if range_evaluable
-                else None,
-                "state_proxy_hit_count": state_hits,
-                "state_proxy_hit_rate": safe_rate(state_hits, len(state_evaluable))
-                if state_evaluable
-                else None,
-                "mean_abs_close_error_bp": safe_mean(close_errors),
-                "median_abs_close_error_bp": safe_median(close_errors),
-                "mean_abs_magnitude_error_bp": safe_mean(mag_errors),
-                "median_abs_magnitude_error_bp": safe_median(mag_errors),
+                **_compute_monthly_metrics_for_rows(rows),
             })
 
     return result

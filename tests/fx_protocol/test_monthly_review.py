@@ -14,6 +14,7 @@ from ugh_quantamental.fx_protocol.monthly_review import (
     compute_monthly_event_tag_metrics,
     compute_monthly_intervention_metrics,
     compute_monthly_regime_metrics,
+    compute_monthly_slice_metrics,
     compute_monthly_state_metrics,
     compute_monthly_strategy_metrics,
     compute_monthly_volatility_metrics,
@@ -35,6 +36,7 @@ _REVIEW_DATE = datetime(2026, 4, 1, 8, 0, 0, tzinfo=_JST)
 def _make_obs(
     *,
     as_of_jst: str = "2026-03-18T08:00:00+09:00",
+    forecast_batch_id: str = "batch_001",
     strategy_kind: str = "ugh",
     direction_hit: str = "True",
     range_hit: str = "True",
@@ -54,6 +56,7 @@ def _make_obs(
 ) -> dict[str, str]:
     return {
         "as_of_jst": as_of_jst,
+        "forecast_batch_id": forecast_batch_id,
         "strategy_kind": strategy_kind,
         "direction_hit": direction_hit,
         "range_hit": range_hit,
@@ -71,6 +74,35 @@ def _make_obs(
         "expected_close_change_bp": expected_close_change_bp,
         "realized_close_change_bp": realized_close_change_bp,
     }
+
+
+_UGH_V2_VARIANTS = (
+    "ugh_v2_alpha",
+    "ugh_v2_beta",
+    "ugh_v2_gamma",
+    "ugh_v2_delta",
+)
+
+
+def _make_v2_variant_month() -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    range_hits = ["True", "True", "False", "True", "False"]
+    for day_index, range_hit in enumerate(range_hits, start=1):
+        for strategy_kind in _UGH_V2_VARIANTS:
+            row = _make_obs(
+                as_of_jst=f"2026-03-{day_index + 15:02d}T08:00:00+09:00",
+                forecast_batch_id=f"batch_{day_index:03d}",
+                strategy_kind=strategy_kind,
+                range_hit=range_hit,
+                regime_label="trending",
+                volatility_label="normal",
+                intervention_risk="low",
+                event_tags="fomc",
+            )
+            row["annotation_source"] = "ai"
+            row["effective_event_tags"] = row["event_tags"]
+            rows.append(row)
+    return rows
 
 
 def _make_health(
@@ -128,6 +160,37 @@ class TestMonthlyStrategyMetrics:
         assert ugh["mean_abs_close_error_bp"] == 15.0
         assert ugh["mean_abs_magnitude_error_bp"] == 10.0
 
+    def test_v2_range_hit_aggregated_once_per_forecast_batch(self) -> None:
+        obs = _make_v2_variant_month()
+        obs.extend(
+            _make_obs(
+                forecast_batch_id="",
+                strategy_kind=strategy_kind,
+                range_hit="True",
+            )
+            for strategy_kind in _UGH_V2_VARIANTS
+        )
+
+        metrics = compute_monthly_strategy_metrics(obs)
+
+        ensemble_rows = [
+            m for m in metrics if m["strategy_kind"] == "ugh_v2_ensemble"
+        ]
+        assert len(ensemble_rows) == 1
+        assert ensemble_rows[0]["range_hit_count"] == 3
+        assert ensemble_rows[0]["range_hit_rate"] == pytest.approx(0.6, abs=0.001)
+        for field, value in ensemble_rows[0].items():
+            if field not in {"strategy_kind", "range_hit_count", "range_hit_rate"}:
+                assert value == ""
+
+        variant_rows = [
+            m for m in metrics if m["strategy_kind"] in _UGH_V2_VARIANTS
+        ]
+        assert {m["strategy_kind"] for m in variant_rows} == set(_UGH_V2_VARIANTS)
+        for row in variant_rows:
+            assert row["range_hit_count"] == ""
+            assert row["range_hit_rate"] == ""
+
 
 # ---------------------------------------------------------------------------
 # Tests: baseline comparisons
@@ -170,6 +233,16 @@ class TestMonthlyBaselineComparisons:
             c for c in comparisons if c["baseline_strategy_kind"] == "baseline_random_walk"
         )
         assert rw["direction_accuracy_delta_vs_ugh"] is None
+
+    def test_ugh_v2_ensemble_is_not_a_baseline_comparison_row(self) -> None:
+        strategy_metrics = compute_monthly_strategy_metrics(_make_v2_variant_month())
+
+        comparisons = compute_monthly_baseline_comparisons(strategy_metrics)
+
+        assert all(
+            c["baseline_strategy_kind"] != "ugh_v2_ensemble"
+            for c in comparisons
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +326,41 @@ class TestEventTagMetrics:
         tag_names = {t["event_tag"] for t in tags}
         assert "fomc" in tag_names
         assert "cpi_us" in tag_names
+
+
+class TestMonthlySliceMetrics:
+    def test_v2_range_hit_ensemble_rows_per_slice(self) -> None:
+        slices = compute_monthly_slice_metrics(_make_v2_variant_month())
+
+        expected_labels = {
+            "regime_label": "trending",
+            "volatility_label": "normal",
+            "intervention_risk": "low",
+            "event_tag": "fomc",
+        }
+        for dimension, label in expected_labels.items():
+            ensemble_rows = [
+                s
+                for s in slices
+                if s["slice_dimension"] == dimension
+                and s["label"] == label
+                and s["strategy_kind"] == "ugh_v2_ensemble"
+            ]
+            assert len(ensemble_rows) == 1
+            assert ensemble_rows[0]["range_hit_count"] == 3
+            assert ensemble_rows[0]["range_hit_rate"] == "0.6"
+
+            variant_rows = [
+                s
+                for s in slices
+                if s["slice_dimension"] == dimension
+                and s["label"] == label
+                and s["strategy_kind"] in _UGH_V2_VARIANTS
+            ]
+            assert {s["strategy_kind"] for s in variant_rows} == set(_UGH_V2_VARIANTS)
+            for row in variant_rows:
+                assert row["range_hit_count"] == ""
+                assert row["range_hit_rate"] == ""
 
 
 # ---------------------------------------------------------------------------

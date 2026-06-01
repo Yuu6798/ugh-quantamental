@@ -8,8 +8,12 @@ import os
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from ugh_quantamental.fx_protocol.monthly_review import run_monthly_review
+from ugh_quantamental.fx_protocol.monthly_review import (
+    compute_monthly_slice_metrics,
+    run_monthly_review,
+)
 from ugh_quantamental.fx_protocol.monthly_review_exports import (
+    MONTHLY_STRATEGY_METRICS_FIELDNAMES,
     _enrich_observations_with_forecast_data,
     _filter_observations_by_pair,
     build_monthly_review_md,
@@ -17,6 +21,7 @@ from ugh_quantamental.fx_protocol.monthly_review_exports import (
     export_monthly_review_flags_csv,
     export_monthly_review_json,
     export_monthly_review_md,
+    export_monthly_slice_metrics_csv,
     export_monthly_strategy_metrics_csv,
     rebuild_monthly_review,
 )
@@ -35,6 +40,7 @@ _REVIEW_DATE = datetime(2026, 4, 1, 8, 0, 0, tzinfo=_JST)
 def _make_obs(
     *,
     as_of_jst: str = "2026-03-18T08:00:00+09:00",
+    forecast_batch_id: str = "batch_001",
     strategy_kind: str = "ugh",
     direction_hit: str = "True",
     range_hit: str = "True",
@@ -54,6 +60,7 @@ def _make_obs(
 ) -> dict[str, str]:
     return {
         "as_of_jst": as_of_jst,
+        "forecast_batch_id": forecast_batch_id,
         "strategy_kind": strategy_kind,
         "direction_hit": direction_hit,
         "range_hit": range_hit,
@@ -71,6 +78,35 @@ def _make_obs(
         "expected_close_change_bp": expected_close_change_bp,
         "realized_close_change_bp": realized_close_change_bp,
     }
+
+
+_UGH_V2_VARIANTS = (
+    "ugh_v2_alpha",
+    "ugh_v2_beta",
+    "ugh_v2_gamma",
+    "ugh_v2_delta",
+)
+
+
+def _make_v2_variant_month() -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    range_hits = ["True", "True", "False", "True", "False"]
+    for day_index, range_hit in enumerate(range_hits, start=1):
+        for strategy_kind in _UGH_V2_VARIANTS:
+            row = _make_obs(
+                as_of_jst=f"2026-03-{day_index + 15:02d}T08:00:00+09:00",
+                forecast_batch_id=f"batch_{day_index:03d}",
+                strategy_kind=strategy_kind,
+                range_hit=range_hit,
+                regime_label="trending",
+                volatility_label="normal",
+                intervention_risk="low",
+                event_tags="fomc",
+            )
+            row["annotation_source"] = "ai"
+            row["effective_event_tags"] = row["event_tags"]
+            rows.append(row)
+    return rows
 
 
 def _make_health(
@@ -102,11 +138,12 @@ def _write_csv_file(
 
 def _labeled_observation_fieldnames() -> list[str]:
     return [
-        "as_of_jst", "strategy_kind", "direction_hit", "range_hit",
+        "as_of_jst", "forecast_batch_id", "strategy_kind", "direction_hit", "range_hit",
         "state_proxy_hit", "close_error_bp", "magnitude_error_bp",
-        "regime_label", "event_tags", "volatility_label", "intervention_risk",
-        "annotation_status", "dominant_state", "forecast_direction",
-        "realized_direction", "expected_close_change_bp", "realized_close_change_bp",
+        "regime_label", "event_tags", "effective_event_tags", "volatility_label",
+        "intervention_risk", "annotation_source", "annotation_status", "dominant_state",
+        "forecast_direction", "realized_direction", "expected_close_change_bp",
+        "realized_close_change_bp",
     ]
 
 
@@ -179,6 +216,23 @@ class TestExportMarkdown:
 # ---------------------------------------------------------------------------
 
 
+def test_monthly_strategy_metrics_fieldnames_unchanged() -> None:
+    assert MONTHLY_STRATEGY_METRICS_FIELDNAMES == (
+        "strategy_kind",
+        "forecast_count",
+        "direction_hit_count",
+        "direction_hit_rate",
+        "range_hit_count",
+        "range_hit_rate",
+        "state_proxy_hit_count",
+        "state_proxy_hit_rate",
+        "mean_abs_close_error_bp",
+        "median_abs_close_error_bp",
+        "mean_abs_magnitude_error_bp",
+        "median_abs_magnitude_error_bp",
+    )
+
+
 class TestExportCsv:
     def test_strategy_metrics_csv(self, tmp_path: str) -> None:
         review = _build_review()
@@ -191,6 +245,54 @@ class TestExportCsv:
         assert rows[0]["strategy_kind"] in (
             "ugh", "baseline_random_walk",
             "baseline_prev_day_direction", "baseline_simple_technical",
+        )
+
+    def test_strategy_metrics_csv_writes_v2_ensemble_range_row(self, tmp_path: str) -> None:
+        review = run_monthly_review(
+            _make_v2_variant_month(),
+            [_make_health()],
+            review_generated_at_jst=_REVIEW_DATE,
+        )
+
+        path = export_monthly_strategy_metrics_csv(review, str(tmp_path))
+
+        with open(path, encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        ensemble = next(r for r in rows if r["strategy_kind"] == "ugh_v2_ensemble")
+        assert ensemble["range_hit_count"] == "3"
+        assert ensemble["range_hit_rate"] == "0.6"
+        for field, value in ensemble.items():
+            if field not in {"strategy_kind", "range_hit_count", "range_hit_rate"}:
+                assert value == ""
+
+        variant_rows = [r for r in rows if r["strategy_kind"] in _UGH_V2_VARIANTS]
+        assert {r["strategy_kind"] for r in variant_rows} == set(_UGH_V2_VARIANTS)
+        for row in variant_rows:
+            assert row["range_hit_count"] == ""
+            assert row["range_hit_rate"] == ""
+
+    def test_slice_metrics_csv_writes_v2_ensemble_range_rows(self, tmp_path: str) -> None:
+        obs = _make_v2_variant_month()
+        review = run_monthly_review(
+            obs,
+            [_make_health()],
+            review_generated_at_jst=_REVIEW_DATE,
+        )
+        review["monthly_slice_metrics"] = compute_monthly_slice_metrics(obs)
+
+        path = export_monthly_slice_metrics_csv(review, str(tmp_path))
+
+        with open(path, encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        ensemble_rows = [
+            r for r in rows if r["strategy_kind"] == "ugh_v2_ensemble"
+        ]
+        assert any(
+            r["slice_dimension"] == "regime_label"
+            and r["label"] == "trending"
+            and r["range_hit_count"] == "3"
+            and r["range_hit_rate"] == "0.6"
+            for r in ensemble_rows
         )
 
     def test_review_flags_csv(self, tmp_path: str) -> None:

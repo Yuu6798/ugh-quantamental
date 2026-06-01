@@ -825,7 +825,7 @@ class TestSqlitePathHandling:
             data_dir = os.environ.get("FX_DATA_DIR", "./data").strip()
             sqlite_path = os.path.join(data_dir, sqlite_filename)
 
-        assert sqlite_path == "/repo/data/protocol.db"
+        assert os.path.normpath(sqlite_path) == os.path.normpath("/repo/data/protocol.db")
 
     def test_default_sqlite_path_used_when_no_env(self, monkeypatch) -> None:
         """Defaults are used when no env vars are set."""
