@@ -257,7 +257,7 @@ def _build_variant_request(
 
     overrides = _UGH_V2_VARIANT_CONFIGS[variant]
     base_proj = base_request.ugh_request.projection
-    variant_config = ProjectionConfig(**overrides)
+    variant_config = ProjectionConfig(**(base_proj.config.model_dump() | overrides))
     variant_projection = ProjectionWorkflowRequest(
         projection_id=base_proj.projection_id,
         horizon_days=base_proj.horizon_days,

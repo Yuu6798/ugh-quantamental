@@ -319,6 +319,46 @@ def test_ugh_variant_flat_epsilon_zeroes_record_bp(monkeypatch) -> None:
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_ugh_variant_preserves_caller_flat_epsilon_overrides(monkeypatch) -> None:
+    from ugh_quantamental.fx_protocol import forecasting
+
+    base_ugh_request = _full_request()
+    projection = base_ugh_request.projection.model_copy(
+        update={
+            "config": ProjectionConfig(
+                direction_flat_epsilon_ratio=0.0,
+                direction_flat_epsilon_floor_bp=0.0,
+            )
+        }
+    )
+    req = _request(
+        ugh_request=base_ugh_request.model_copy(update={"projection": projection})
+    )
+    projection_result = _projection_result(e_star=0.2, conviction=0.0)
+    state_result = _state_result(req)
+
+    def _fake_full_workflow(session, request):
+        del session, request
+        return FullWorkflowResult(
+            projection=ProjectionWorkflowResult("proj-1", projection_result, None),
+            state=StateWorkflowResult("state-1", state_result, None),
+        )
+
+    monkeypatch.setattr(forecasting, "run_full_workflow", _fake_full_workflow)
+
+    rec = build_ugh_variant_forecast(
+        object(),
+        req,
+        make_forecast_batch_id(req.pair, req.as_of_jst, req.protocol_version),
+        datetime(2026, 3, 16, 8, 0, 0),
+        variant=StrategyKind.ugh_v2_alpha,
+    )
+
+    assert rec.forecast_direction == ForecastDirection.up
+    assert rec.expected_close_change_bp == pytest.approx(2.0)
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
 def test_ugh_flat_epsilon_preserves_direction_outside_band() -> None:
     config = ProjectionConfig()
 
