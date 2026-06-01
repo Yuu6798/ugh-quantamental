@@ -64,7 +64,7 @@ def stratify_observations_by_versions(
     """Stratify observations by ``theory_version`` and ``engine_version``.
 
     Spec §7.5: weekly / monthly aggregations must stratify by
-    ``theory_version`` (and ideally ``engine_version``) to avoid mixing
+    ``theory_version`` and ``engine_version`` to avoid mixing
     v1 and v2 records under shared ``strategy_kind`` values across the
     boundary week.
 
@@ -74,7 +74,9 @@ def stratify_observations_by_versions(
       are ``None``, **auto-detect**: when the input rows contain more
       than one distinct ``theory_version`` the latest one (lexicographic
       max across the v1/v2/... sequence) is selected and a warning is
-      logged; single-version data is returned unchanged.
+      logged. The same latest-version stratification is then applied to
+      ``engine_version`` on the surviving rows; single-version data is
+      returned unchanged.
     * If either filter is non-None, rows whose corresponding column
       does not match are dropped.
     * Rows missing the version column entirely are kept under the
@@ -82,16 +84,31 @@ def stratify_observations_by_versions(
       an explicit filter (no silent inclusion).
     """
     if theory_version_filter is None and engine_version_filter is None:
-        present = {row.get("theory_version", "") for row in rows} - {""}
-        if len(present) <= 1:
-            return rows
-        latest = max(present)
-        logger.warning(
-            "auto-stratifying mixed theory_versions %s; filtering to latest=%s",
-            sorted(present),
-            latest,
-        )
-        return [r for r in rows if r.get("theory_version", "") == latest]
+        filtered = rows
+        present_theory = {row.get("theory_version", "") for row in filtered} - {""}
+        if len(present_theory) > 1:
+            latest_theory = max(present_theory)
+            logger.warning(
+                "auto-stratifying mixed theory_versions %s; filtering to latest=%s",
+                sorted(present_theory),
+                latest_theory,
+            )
+            filtered = [
+                r for r in filtered if r.get("theory_version", "") == latest_theory
+            ]
+
+        present_engine = {row.get("engine_version", "") for row in filtered} - {""}
+        if len(present_engine) > 1:
+            latest_engine = max(present_engine)
+            logger.warning(
+                "auto-stratifying mixed engine_versions %s; filtering to latest=%s",
+                sorted(present_engine),
+                latest_engine,
+            )
+            filtered = [
+                r for r in filtered if r.get("engine_version", "") == latest_engine
+            ]
+        return filtered
 
     filtered = rows
     if theory_version_filter is not None:
