@@ -103,7 +103,10 @@ def test_state_config_bounds_enforced() -> None:
 def test_state_config_defaults_sharpen_state_classifier() -> None:
     cfg = StateConfig()
 
+    assert cfg.prior_weight == pytest.approx(0.55)
+    assert cfg.evidence_weight == pytest.approx(0.45)
     assert cfg.softmax_temperature == pytest.approx(0.5)
+    assert cfg.final_softmax_temperature == pytest.approx(0.12)
     assert cfg.catalyst_floor_coef == pytest.approx(0.3)
 
 
@@ -123,9 +126,20 @@ def test_state_config_rejects_too_small_softmax_temperature() -> None:
         StateConfig(softmax_temperature=1e-323)
 
 
+@pytest.mark.parametrize("value", [0.0, 1e-323])
+def test_state_config_rejects_too_small_final_softmax_temperature(value: float) -> None:
+    with pytest.raises(ValidationError):
+        StateConfig(final_softmax_temperature=value)
+
+
 def test_state_config_accepts_min_safe_softmax_temperature() -> None:
     config = StateConfig(softmax_temperature=1e-8)
     assert config.softmax_temperature == pytest.approx(1e-8)
+
+
+def test_state_config_accepts_min_safe_final_softmax_temperature() -> None:
+    config = StateConfig(final_softmax_temperature=1e-8)
+    assert config.final_softmax_temperature == pytest.approx(1e-8)
 
 
 def test_state_config_rejects_zero_sum_blend_weights() -> None:

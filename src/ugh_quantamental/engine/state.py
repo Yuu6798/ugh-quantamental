@@ -43,13 +43,29 @@ def _to_probabilities(values: dict[LifecycleState, float]) -> StateProbabilities
     return StateProbabilities(**{state.value: values[state] for state in _STATES})
 
 
-def _normalize_simple(values: dict[LifecycleState, float]) -> StateProbabilities:
+def _normalize_simple(
+    values: dict[LifecycleState, float],
+    config: StateConfig,
+) -> StateProbabilities:
     clipped = {state: _clamp(values[state]) for state in _STATES}
     total = sum(clipped.values())
     if total <= 0.0:
         uniform = 1.0 / len(_STATES)
         return _to_probabilities({state: uniform for state in _STATES})
-    return _to_probabilities({state: clipped[state] / total for state in _STATES})
+
+    scaled = {
+        state: clipped[state] / config.final_softmax_temperature
+        for state in _STATES
+    }
+    if not all(math.isfinite(value) for value in scaled.values()):
+        raise ValueError("scaled final state scores must be finite")
+    max_value = max(scaled.values())
+    exps = {state: math.exp(scaled[state] - max_value) for state in _STATES}
+    exp_total = sum(exps.values())
+    if exp_total <= 0.0:
+        uniform = 1.0 / len(_STATES)
+        return _to_probabilities({state: uniform for state in _STATES})
+    return _to_probabilities({state: exps[state] / exp_total for state in _STATES})
 
 
 def compute_block_quality(omega: Omega, event_features: StateEventFeatures) -> float:
@@ -247,7 +263,7 @@ def run_state_engine(
     evidence_probs = normalize_state_probabilities(evidence_raw, cfg)
 
     blended = blend_with_prior(snapshot.phi.probabilities, evidence_raw, cfg)
-    updated_probs = _normalize_simple(blended)
+    updated_probs = _normalize_simple(blended, cfg)
     updated_phi = build_phi(updated_probs, snapshot.phi.dominant_state, cfg)
 
     prior_probs = _to_map(snapshot.phi.probabilities)

@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from ugh_quantamental.engine.projection_models import ProjectionEngineResult
 from ugh_quantamental.engine.state import (
+    _normalize_simple,
     build_market_svp,
     build_phi,
     blend_with_prior,
@@ -420,6 +421,7 @@ def test_blend_with_prior_rejects_zero_sum_weights_runtime_guard() -> None:
         prior_weight=0.0,
         evidence_weight=0.0,
         softmax_temperature=1.0,
+        final_softmax_temperature=0.12,
         tie_break_epsilon=1e-8,
         catalyst_floor_coef=0.3,
         dormant_weight=1.0,
@@ -434,6 +436,23 @@ def test_blend_with_prior_rejects_zero_sum_weights_runtime_guard() -> None:
 
     with pytest.raises(ValueError, match="must be positive"):
         blend_with_prior(prior, evidence_scores, bypass_cfg)
+
+
+def test_final_normalization_softmax_widens_top_two_margin() -> None:
+    values = {
+        LifecycleState.dormant: 0.24,
+        LifecycleState.setup: 0.20,
+        LifecycleState.fire: 0.18,
+        LifecycleState.expansion: 0.16,
+        LifecycleState.exhaustion: 0.12,
+        LifecycleState.failure: 0.10,
+    }
+    linear_margin = values[LifecycleState.dormant] - values[LifecycleState.setup]
+
+    probs = _normalize_simple(values, StateConfig(final_softmax_temperature=0.12))
+
+    assert probs.dormant - probs.setup > linear_margin
+
 
 def test_market_svp_update_preserves_regime_and_replaces_phi() -> None:
     snapshot = _make_snapshot(prior_dominant=LifecycleState.setup)

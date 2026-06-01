@@ -42,7 +42,7 @@ The v1 state engine consumes:
 
 3. `normalize_state_probabilities(scores, config)`
    - Applies temperature softmax to map any finite score vector to a valid `StateProbabilities` simplex.
-   - Default `softmax_temperature` is `0.5` to sharpen state discrimination.
+   - Default evidence-layer `softmax_temperature` is `0.5` to sharpen raw state evidence before prior blending.
    - Rejects non-finite scaled values, and config constrains temperature away from unsafe near-zero values (`softmax_temperature >= 1e-8`).
 
 4. `blend_with_prior(prior_probabilities, evidence_scores, config)`
@@ -70,7 +70,17 @@ Given prior distribution `P_prior` and normalized evidence distribution `P_evide
 
 `P_blended[s] = prior_w * P_prior[s] + evidence_w * P_evidence[s]`
 
-- renormalize the blended non-negative vector to sum to `1.0` for a stable valid output distribution.
+- apply a second, final softmax over the blended non-negative vector using
+  `final_softmax_temperature` (default `0.12`) to widen the winner margin at
+  the actual `dominant_state` decision layer.
+- if the blended vector has no positive mass, fall back to a uniform
+  distribution.
+
+The two temperatures are intentionally independent: `softmax_temperature=0.5`
+sharpens the evidence side before prior blending, while
+`final_softmax_temperature=0.12` sharpens only the final state-probability
+distribution. This preserves the default `0.55/0.45` prior/evidence blend
+needed to keep `fire` reachable while reducing knife-edge final-state ties.
 
 ## Tie-break rule
 
