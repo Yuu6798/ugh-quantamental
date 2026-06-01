@@ -13,8 +13,8 @@ def test_auto_detect_filters_mixed_engine_version_to_latest(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     rows = [
-        {"id": "old", "theory_version": "v2", "engine_version": "v2"},
-        {"id": "new", "theory_version": "v2", "engine_version": "v2.1"},
+        {"id": "old", "theory_version": "v2", "engine_version": "v2.2"},
+        {"id": "new", "theory_version": "v2", "engine_version": "v2.3"},
         {"id": "missing", "theory_version": "v2"},
     ]
 

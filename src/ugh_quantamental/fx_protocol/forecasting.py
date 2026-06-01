@@ -26,6 +26,7 @@ from ugh_quantamental.schemas.enums import QuestionDirection
 from ugh_quantamental.workflows.runners import run_full_workflow
 
 if TYPE_CHECKING:
+    from ugh_quantamental.schemas.projection import ProjectionSnapshot
     from sqlalchemy.orm import Session
     from ugh_quantamental.engine.projection_models import ProjectionConfig
 
@@ -65,9 +66,31 @@ def _shared_range(low: float, high: float) -> ExpectedRange:
     return ExpectedRange(low_price=low, high_price=high)
 
 
-def _build_range_from_baseline_context(current_spot: float, trailing_mean_range_price: float) -> ExpectedRange:
-    band_half = trailing_mean_range_price / 2.0
-    return _shared_range(current_spot - band_half, current_spot + band_half)
+def _build_range_from_projection_width(
+    *,
+    current_spot: float,
+    expected_close_change_bp: float,
+    trailing_mean_abs_close_change_bp: float,
+    projection_snapshot: "ProjectionSnapshot",
+    config: "ProjectionConfig",
+) -> ExpectedRange:
+    """Convert projection snapshot uncertainty into a forecast price range."""
+    center_price = current_spot * (1.0 + expected_close_change_bp / 10000.0)
+    point = projection_snapshot.point_estimate
+    width_score = max(
+        0.0,
+        abs(projection_snapshot.upper_bound - point),
+        abs(point - projection_snapshot.lower_bound),
+    )
+    width_bp = width_score * trailing_mean_abs_close_change_bp * config.range_width_scale
+    floor_bp = trailing_mean_abs_close_change_bp * config.range_width_floor_ratio
+    half_width_price = current_spot * max(width_bp, floor_bp) / 10000.0
+    low_price = center_price - half_width_price
+    high_price = center_price + half_width_price
+    if low_price <= 0.0:
+        low_price = 1e-9
+        high_price = low_price + 2.0 * half_width_price
+    return _shared_range(low_price, high_price)
 
 
 def _make_base_record(
@@ -331,9 +354,12 @@ def build_ugh_variant_forecast(
         strategy_kind=variant,
         forecast_direction=forecast_direction,
         expected_close_change_bp=record_close_change_bp,
-        expected_range=_build_range_from_baseline_context(
-            request.baseline_context.current_spot,
-            request.baseline_context.trailing_mean_range_price,
+        expected_range=_build_range_from_projection_width(
+            current_spot=ctx.current_spot,
+            expected_close_change_bp=record_close_change_bp,
+            trailing_mean_abs_close_change_bp=ctx.trailing_mean_abs_close_change_bp,
+            projection_snapshot=projection_res.projection_snapshot,
+            config=projection_req.config,
         ),
         primary_question=projection_req.projection_id,
         disconfirmers=(),

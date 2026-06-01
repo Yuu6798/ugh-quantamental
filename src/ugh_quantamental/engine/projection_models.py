@@ -117,6 +117,8 @@ class ProjectionConfig(BaseModel):
     bounds_low_conf_coef: FiniteFloat = Field(default=0.25, ge=0.0)
     bounds_urgency_coef: FiniteFloat = Field(default=0.15, ge=0.0)
     bounds_max_width: FiniteFloat = Field(default=1.0, gt=0.0)
+    range_width_scale: FiniteFloat = Field(default=2.0, ge=0.0)
+    range_width_floor_ratio: FiniteFloat = Field(default=0.25, ge=0.0)
 
 
 class ProjectionEngineResult(BaseModel):

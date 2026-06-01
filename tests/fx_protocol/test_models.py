@@ -19,9 +19,9 @@ from ugh_quantamental.fx_protocol.models import (
     MarketDataProvenance,
     OutcomeRecord,
     StrategyKind,
-    UGH_V2_ENSEMBLE_KIND,
     is_ugh_kind,
 )
+from ugh_quantamental.fx_protocol import models as fx_models
 from ugh_quantamental.schemas.enums import LifecycleState, QuestionDirection
 from ugh_quantamental.schemas.market_svp import StateProbabilities
 
@@ -210,9 +210,8 @@ def test_strategy_kind_all_values() -> None:
     assert {s.value for s in StrategyKind} == expected
 
 
-def test_is_ugh_kind_recognizes_variants_and_synthetic_ensemble() -> None:
-    assert UGH_V2_ENSEMBLE_KIND == "ugh_v2_ensemble"
-    assert UGH_V2_ENSEMBLE_KIND not in {s.value for s in StrategyKind}
+def test_is_ugh_kind_recognizes_variants_and_not_synthetic_ensemble() -> None:
+    assert not hasattr(fx_models, "UGH_V2_ENSEMBLE_KIND")
 
     for kind in (
         StrategyKind.ugh,
@@ -225,12 +224,12 @@ def test_is_ugh_kind_recognizes_variants_and_synthetic_ensemble() -> None:
         "ugh_v2_beta",
         "ugh_v2_gamma",
         "ugh_v2_delta",
-        UGH_V2_ENSEMBLE_KIND,
     ):
         assert is_ugh_kind(kind)
 
     assert not is_ugh_kind(StrategyKind.baseline_random_walk)
     assert not is_ugh_kind("baseline_random_walk")
+    assert not is_ugh_kind("ugh_v2_ensemble")
     assert not is_ugh_kind("not_a_strategy")
 
 

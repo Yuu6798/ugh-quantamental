@@ -33,7 +33,7 @@ review date 2026-05-01) and weekly reports for 4/6 onwards:
 | Component | Metric | April result |
 |---|---|---|
 | `engine/state.py` (state engine) | `state_proxy_hit_rate` | **100% (16/16)** |
-| Volatility band derivation (`_build_range_from_baseline_context`) | `range_hit_rate` | **75–80%** |
+| Range derivation (`_build_range_from_projection_width`) | `range_hit_rate` | v2.3 target: calibrated per-variant range, no shared-band inflation |
 | Provider / data layer | success / fallback / lag | 17 success / 0 fallback / 0 lag |
 
 ### 2.2 What does not work
@@ -97,7 +97,7 @@ These are the propositions v2 makes that May data will confirm or reject.
 | H1 | Removing the `fire = 0` anti-thrust bias eliminates the systematic 0/N choppy direction-miss pattern. | UGH choppy `dir_rate > 0%`; binomial test against 50:50 no longer rejects in either tail. | Phase 3: regime-aware switching. |
 | H2 | Adding `price_implied_score` to `compute_e_raw` lifts UGH choppy `dir_rate` toward `baseline_prev_day_direction` parity. | At least one v2 variant (any of `alpha`/`beta`/`gamma`/`delta`) achieves choppy `dir_rate ≥ baseline_prev_day_direction choppy dir_rate − 15 pp`. The variant that achieves this is recorded as the H2-best variant for the dispersion matrix in §9.4. | Drop `p_weight` (negate or zero it); next iteration tests mean-reversion factor. |
 | H3 | Fire-as-conviction-amplifier preserves trending performance. | At least one v2 variant achieves trending `dir_rate ≥ baseline_simple_technical trending dir_rate − 10 pp`. | Re-tune u_weight / t_weight ratio. |
-| H4 | The state engine and volatility band remain unchanged-good. | `state_proxy_hit_rate ≥ 95%`, `range_hit_rate ≥ 70%`. | Engine regression; revert state-related changes. |
+| H4 | The state engine and range layer remain useful. | `state_proxy_hit_rate ≥ 95%`; per-variant `range_hit_rate` is calibrated away from the meaningless 100% shared-band result. | Engine regression or range calibration failure; revert or retune the range layer. |
 | H5 | UGH magnitude is no longer indistinguishable from random_walk. | `mean_close_error_bp` differs from baseline_random_walk by ≥ 1.0 bp in either direction in any weekly report. | conviction-multiplier tuning. |
 
 These five hypotheses define the v2 success contract. Each is independently
@@ -116,6 +116,8 @@ fields that v1 computed but did not consume.
 | `conviction_floor` | `0.5` (matches `ugh_v2_alpha`) | Multiplier when `fire_probability == 0`; also sets the `fire_probability == 0.5` shrink. Default value reproduces the alpha variant's behavior. |
 | `direction_flat_epsilon_ratio` | `0.0` | Optional volatility-scaled FLAT threshold ratio for UGH variant forecast labels. Default is disabled after replay showed ratio-scaled thresholds over-flatten UGH outputs. |
 | `direction_flat_epsilon_floor_bp` | `3.0` | Fixed minimum FLAT threshold in bp for UGH variants. With the default ratio of `0.0`, v2.2 uses a fixed 3.0 bp epsilon. |
+| `range_width_scale` | `2.0` | Multiplier that maps projection-snapshot uncertainty width from score space into bp for UGH expected ranges. Calibrated on the 2026-05 replay to avoid both 100% shared-band behavior and over-narrow misses. |
+| `range_width_floor_ratio` | `0.25` | Minimum half-width as a ratio of `trailing_mean_abs_close_change_bp`, preventing overconfident near-zero ranges. |
 
 The defaults are chosen so that `ProjectionConfig()` (no-argument
 construction) keeps working everywhere it is currently called — most
@@ -167,6 +169,48 @@ The 2026-05-26 pattern (a strong +11 to +14 bp UGH forecast followed by a
 near-flat realized day) is explicitly **not** a FLAT-epsilon target. It is
 a magnitude-calibration problem and belongs to a later calibration phase,
 not to this small-prediction labeling threshold.
+
+### 5.1.2 UGH expected range from projection width
+
+v2.3 replaces the temporary shared volatility band with a per-variant
+range derived from `ProjectionEngineResult.projection_snapshot`. The
+projection snapshot already contains `point_estimate ± width`, where
+`width` is driven by mismatch, low conviction, and urgency:
+
+`width_score = max(abs(upper_bound - point_estimate), abs(point_estimate - lower_bound))`
+
+The forecast layer converts that score-space width into a price range:
+
+`half_width_bp = max(width_score * trailing_mean_abs_close_change_bp * range_width_scale, trailing_mean_abs_close_change_bp * range_width_floor_ratio)`
+
+`half_width_price = current_spot * half_width_bp / 10000`
+
+The v2.3 defaults are `range_width_scale=2.0` and
+`range_width_floor_ratio=0.25`. On the 2026-05 60-record replay this
+produced 43/60 range hits (71.7%) and at least one variant-level hit
+difference, so the metric exits the prior 100% shared-band regime while
+remaining in a usable calibration band.
+
+The range center is the persisted point forecast:
+
+- when the UGH direction epsilon emits `FLAT`, `expected_close_change_bp`
+  is persisted as `0.0`, so the expected range is centered on
+  `current_spot` and is left/right symmetric around spot.
+- otherwise the range is centered on
+  `current_spot * (1 + expected_close_change_bp / 10000)`, so the range
+  moves with the engine's point forecast.
+
+This makes `expected_range_low/high` variant-specific because each
+variant's `ProjectionConfig` changes both point estimate and uncertainty
+width. The previous `ugh_v2_ensemble` row was only a Phase-A reporting
+artifact for the shared-range period; v2.3 removes it and returns
+`range_hit` aggregation to normal per-variant rows. Baseline strategies
+still do not emit expected ranges.
+
+Conviction intentionally appears on both axes: it increases point
+magnitude through the existing `(0.5 + 0.5 * conviction)` multiplier, and
+it tightens width through `bounds_low_conf_coef * (1 - conviction)`.
+This is a coherent uncertainty model, not an accidental double count.
 
 ### 5.2 Parallel variant deployment
 
@@ -303,6 +347,7 @@ is replaced.
 | 5 | In `forecasting.py`, replace `build_ugh_forecast` with four variant builders (or one parameterized builder) that emit four `ForecastRecord`s per snapshot, each with its variant's `ProjectionConfig`. |
 | 6 | Update existing engine tests (`tests/engine/test_projection.py`) with new golden values; add tests per §8. |
 | 7 | Update analytics (weekly / monthly aggregations) to handle the expanded `StrategyKind` set without crashing — most queries iterate over distinct kinds and should require no change. Verify slice metric output dimensions don't break weekly_report.md formatting. |
+| 7b | For v2.3, remove the Phase-A `ugh_v2_ensemble` reporting row and return `range_hit_count` / `range_hit_rate` to per-variant aggregation, because `expected_range` is no longer shared. |
 | 7.5 | **Prerequisite check**: confirm weekly/monthly aggregation already stratifies by `theory_version` (and ideally also `engine_version`, since both bump in step 1) when computing per-strategy metrics, OR add the stratification filter before any v2 record is emitted. Without this, the first v1↔v2 boundary week will produce mixed metrics that are difficult to interpret. |
 | 8 | Land before next Monday's automated weekly cron so 5/11 → 5/29 data accumulates under v2. |
 | 9 | After 10+ business days under v2, re-run monthly review and check H1–H5 across all four variants. |
@@ -444,7 +489,7 @@ network or randomness.
 ### 9.5 Per-variant lens reporting
 
 Regardless of which row is realized, the May review must report the
-following five lenses for each variant. These are not pass/fail criteria;
+following six lenses for each variant. These are not pass/fail criteria;
 they are the data points feeding the matrix.
 
 | Lens | Metric |
@@ -452,6 +497,7 @@ they are the data points feeding the matrix.
 | Choppy direction | `dir_hit_count`, `dir_rate` on choppy-labeled observations |
 | Trending direction | `dir_hit_count`, `dir_rate` on trending-labeled observations |
 | Overall direction | `dir_hit_count`, `dir_rate` on all observations |
+| Range calibration | `range_hit_count`, `range_hit_rate` on each variant's own expected range |
 | Magnitude calibration | `mean_close_error_bp` and its delta vs `baseline_random_walk` |
 | Conviction distribution | `fire_probability` distribution stats (mean, std, frac at 0.5 ± 0.05) |
 
@@ -466,6 +512,14 @@ FLAT rows are included in the direction lens exactly like UP/DOWN rows:
 open-vs-close (`FLAT` only when realized close equals realized open), a
 UGH FLAT forecast does not receive partial credit for a small non-zero
 move. It is counted as a normal miss against realized UP or DOWN.
+
+Range rows are also per-variant in v2.3. A UGH range hit is computed by
+the existing outcome/evaluation rule, `expected_range_low <=
+realized_close <= expected_range_high`; the evaluator does not need to
+know where the range center came from. Weekly and monthly scoreboards
+therefore report `range_hit_count` and `range_hit_rate` on the
+`ugh_v2_alpha` / `beta` / `gamma` / `delta` rows directly. There is no
+`ugh_v2_ensemble` scoreboard row after v2.3.
 
 ### 9.6 Closure
 

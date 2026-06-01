@@ -22,7 +22,6 @@ from typing import Any
 
 from ugh_quantamental.fx_protocol.annotation_coverage import count_by_annotation_status
 from ugh_quantamental.fx_protocol.metrics_utils import collect_floats, count_bool_rows
-from ugh_quantamental.fx_protocol.models import StrategyKind, UGH_V2_ENSEMBLE_KIND
 from ugh_quantamental.fx_protocol.report_window import (
     is_in_window,
     resolve_business_day_window,
@@ -65,14 +64,6 @@ WEEKLY_SLICE_METRICS_FIELDNAMES: tuple[str, ...] = (
     "median_close_error_bp",
     "mean_magnitude_error_bp",
 )
-
-_UGH_V2_VARIANT_KINDS: tuple[str, ...] = (
-    StrategyKind.ugh_v2_alpha.value,
-    StrategyKind.ugh_v2_beta.value,
-    StrategyKind.ugh_v2_gamma.value,
-    StrategyKind.ugh_v2_delta.value,
-)
-
 
 # ---------------------------------------------------------------------------
 # Pure helpers (no I/O)
@@ -122,49 +113,6 @@ def _compute_metrics_for_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
         "median_close_error_bp": _safe_median(close_errors),
         "mean_magnitude_error_bp": _safe_mean(mag_errors),
     }
-
-
-def _is_ugh_v2_variant_kind(strategy_kind: str) -> bool:
-    return strategy_kind in _UGH_V2_VARIANT_KINDS
-
-
-def _rows_with_empty_range_hit(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    return [{**row, "range_hit": ""} for row in rows]
-
-
-def _dedupe_ugh_v2_rows_by_forecast_batch_id(
-    rows: list[dict[str, str]],
-) -> list[dict[str, str]]:
-    """Keep one v2 UGH variant row per non-empty forecast_batch_id."""
-    deduped: list[dict[str, str]] = []
-    seen: set[str] = set()
-    for row in rows:
-        if not _is_ugh_v2_variant_kind(row.get("strategy_kind", "")):
-            continue
-        batch_id = row.get("forecast_batch_id", "").strip()
-        if not batch_id or batch_id in seen:
-            continue
-        seen.add(batch_id)
-        deduped.append(row)
-    return deduped
-
-
-def _build_weekly_ensemble_range_row(
-    rows: list[dict[str, str]],
-    fieldnames: tuple[str, ...],
-    fixed_values: dict[str, str],
-) -> dict[str, Any] | None:
-    deduped_rows = _dedupe_ugh_v2_rows_by_forecast_batch_id(rows)
-    if not deduped_rows:
-        return None
-
-    range_metrics = _compute_metrics_for_rows(deduped_rows)
-    result: dict[str, Any] = {field: "" for field in fieldnames}
-    result.update(fixed_values)
-    result["strategy_kind"] = UGH_V2_ENSEMBLE_KIND
-    result["range_hit_count"] = range_metrics["range_hit_count"]
-    result["range_hit_rate"] = range_metrics["range_hit_rate"]
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -379,24 +327,15 @@ def build_strategy_metrics(
     groups: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in observations:
         sk = row.get("strategy_kind", "")
-        if sk and sk != UGH_V2_ENSEMBLE_KIND:
+        if sk:
             groups[sk].append(row)
 
     result: list[dict[str, Any]] = []
     for sk in sorted(groups.keys()):
         rows = groups[sk]
-        if _is_ugh_v2_variant_kind(sk):
-            rows = _rows_with_empty_range_hit(rows)
         metrics = _compute_metrics_for_rows(rows)
         metrics["strategy_kind"] = sk
         result.append(metrics)
-    ensemble = _build_weekly_ensemble_range_row(
-        observations,
-        WEEKLY_STRATEGY_METRICS_FIELDNAMES,
-        {},
-    )
-    if ensemble is not None:
-        result.append(ensemble)
     return result
 
 
@@ -447,16 +386,12 @@ def build_slice_metrics(
             groups: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
             for row in annotated:
                 sk = row.get("strategy_kind", "")
-                if sk == UGH_V2_ENSEMBLE_KIND:
-                    continue
                 label = row.get(field, "") or "unknown"
                 groups[(sk, label)].append(row)
 
             unlabeled_by_sk: dict[str, list[dict[str, str]]] = defaultdict(list)
             for row in unannotated:
                 sk = row.get("strategy_kind", "")
-                if sk == UGH_V2_ENSEMBLE_KIND:
-                    continue
                 unlabeled_by_sk[sk].append(row)
             for sk, rows in unlabeled_by_sk.items():
                 groups[(sk, "unlabeled")].extend(rows)
@@ -464,49 +399,24 @@ def build_slice_metrics(
             for (sk, label), rows in sorted(groups.items()):
                 if not rows:
                     continue
-                metric_rows = _rows_with_empty_range_hit(rows) if _is_ugh_v2_variant_kind(sk) else rows
-                metrics = _compute_metrics_for_rows(metric_rows)
+                metrics = _compute_metrics_for_rows(rows)
                 metrics["slice_dimension"] = dim_name
                 metrics["strategy_kind"] = sk
                 metrics["label"] = label
                 result.append(metrics)
-            for label in sorted({label for _sk, label in groups}):
-                label_rows = [
-                    row
-                    for (_sk, group_label), rows in groups.items()
-                    if group_label == label
-                    for row in rows
-                ]
-                ensemble = _build_weekly_ensemble_range_row(
-                    label_rows,
-                    WEEKLY_SLICE_METRICS_FIELDNAMES,
-                    {"slice_dimension": dim_name, "label": label},
-                )
-                if ensemble is not None:
-                    result.append(ensemble)
     else:
         for dim_name, _field in dimensions:
             groups_all: dict[str, list[dict[str, str]]] = defaultdict(list)
             for row in observations:
                 sk = row.get("strategy_kind", "")
-                if sk == UGH_V2_ENSEMBLE_KIND:
-                    continue
                 groups_all[sk].append(row)
             for sk in sorted(groups_all.keys()):
                 rows = groups_all[sk]
-                metric_rows = _rows_with_empty_range_hit(rows) if _is_ugh_v2_variant_kind(sk) else rows
-                metrics = _compute_metrics_for_rows(metric_rows)
+                metrics = _compute_metrics_for_rows(rows)
                 metrics["slice_dimension"] = dim_name
                 metrics["strategy_kind"] = sk
                 metrics["label"] = "all"
                 result.append(metrics)
-            ensemble = _build_weekly_ensemble_range_row(
-                observations,
-                WEEKLY_SLICE_METRICS_FIELDNAMES,
-                {"slice_dimension": dim_name, "label": "all"},
-            )
-            if ensemble is not None:
-                result.append(ensemble)
 
     # Event-tag slices use effective_event_tags.  When annotations exist
     # (AI, auto, or manual), only annotated rows are used; otherwise all.
@@ -517,8 +427,6 @@ def build_slice_metrics(
         if not tags_str:
             continue
         sk = row.get("strategy_kind", "")
-        if sk == UGH_V2_ENSEMBLE_KIND:
-            continue
         for tag in tags_str.split("|"):
             tag = tag.strip()
             if tag:
@@ -527,26 +435,11 @@ def build_slice_metrics(
     for (sk, tag), rows in sorted(tag_groups.items()):
         if not rows:
             continue
-        metric_rows = _rows_with_empty_range_hit(rows) if _is_ugh_v2_variant_kind(sk) else rows
-        metrics = _compute_metrics_for_rows(metric_rows)
+        metrics = _compute_metrics_for_rows(rows)
         metrics["slice_dimension"] = "event_tag"
         metrics["strategy_kind"] = sk
         metrics["label"] = tag
         result.append(metrics)
-    for tag in sorted({tag for _sk, tag in tag_groups}):
-        tag_rows = [
-            row
-            for (_sk, group_tag), rows in tag_groups.items()
-            if group_tag == tag
-            for row in rows
-        ]
-        ensemble = _build_weekly_ensemble_range_row(
-            tag_rows,
-            WEEKLY_SLICE_METRICS_FIELDNAMES,
-            {"slice_dimension": "event_tag", "label": tag},
-        )
-        if ensemble is not None:
-            result.append(ensemble)
 
     return result
 
