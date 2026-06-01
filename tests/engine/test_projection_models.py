@@ -85,8 +85,12 @@ def test_projection_config_accepts_finite_values() -> None:
         u_weight=0.7,
         gravity_lock_coef=0.15,
         bounds_max_width=0.9,
+        range_width_scale=3.5,
+        range_width_floor_ratio=0.2,
     )
     assert config.u_weight == pytest.approx(0.7)
+    assert config.range_width_scale == pytest.approx(3.5)
+    assert config.range_width_floor_ratio == pytest.approx(0.2)
 
 
 def test_projection_config_flat_epsilon_defaults() -> None:
@@ -96,14 +100,23 @@ def test_projection_config_flat_epsilon_defaults() -> None:
     assert config.direction_flat_epsilon_floor_bp == pytest.approx(3.0)
 
 
+def test_projection_config_range_width_defaults() -> None:
+    config = ProjectionConfig()
+
+    assert config.range_width_scale == pytest.approx(2.0)
+    assert config.range_width_floor_ratio == pytest.approx(0.25)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
         ("direction_flat_epsilon_ratio", -0.01),
         ("direction_flat_epsilon_floor_bp", -0.01),
+        ("range_width_scale", -0.01),
+        ("range_width_floor_ratio", -0.01),
     ],
 )
-def test_projection_config_rejects_negative_flat_epsilon_fields(
+def test_projection_config_rejects_negative_epsilon_and_range_width_fields(
     field: str,
     value: float,
 ) -> None:

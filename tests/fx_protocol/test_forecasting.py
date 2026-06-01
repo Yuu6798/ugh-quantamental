@@ -56,6 +56,7 @@ HAS_SQLALCHEMY = importlib.util.find_spec("sqlalchemy") is not None
 
 if HAS_SQLALCHEMY:
     from ugh_quantamental.fx_protocol.forecasting import (
+        _build_range_from_projection_width,
         _direction_from_bp_with_epsilon,
         build_prev_day_direction_forecast,
         build_random_walk_forecast,
@@ -64,6 +65,7 @@ if HAS_SQLALCHEMY:
         run_daily_forecast_workflow,
     )
 else:
+    _build_range_from_projection_width = None
     _direction_from_bp_with_epsilon = None
     build_prev_day_direction_forecast = None
     build_random_walk_forecast = None
@@ -233,7 +235,12 @@ def db_session():
         session.close()
 
 
-def _projection_result(*, e_star: float, conviction: float) -> ProjectionEngineResult:
+def _projection_result(
+    *,
+    e_star: float,
+    conviction: float,
+    width_score: float = 0.1,
+) -> ProjectionEngineResult:
     return ProjectionEngineResult(
         u_score=e_star,
         alignment=0.8,
@@ -248,8 +255,8 @@ def _projection_result(*, e_star: float, conviction: float) -> ProjectionEngineR
             projection_id="Will USDJPY close higher?",
             horizon_days=1,
             point_estimate=e_star,
-            lower_bound=e_star - 0.1,
-            upper_bound=e_star + 0.1,
+            lower_bound=e_star - width_score,
+            upper_bound=e_star + width_score,
             confidence=conviction,
         ),
     )
@@ -316,6 +323,10 @@ def test_ugh_variant_flat_epsilon_zeroes_record_bp(monkeypatch) -> None:
 
     assert rec.forecast_direction == ForecastDirection.flat
     assert rec.expected_close_change_bp == 0.0
+    assert rec.expected_range is not None
+    assert rec.expected_range.low_price + rec.expected_range.high_price == pytest.approx(
+        2 * req.baseline_context.current_spot
+    )
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
@@ -356,6 +367,64 @@ def test_ugh_variant_preserves_caller_flat_epsilon_overrides(monkeypatch) -> Non
 
     assert rec.forecast_direction == ForecastDirection.up
     assert rec.expected_close_change_bp == pytest.approx(2.0)
+    assert rec.expected_range is not None
+    range_center = (rec.expected_range.low_price + rec.expected_range.high_price) / 2.0
+    expected_center = req.baseline_context.current_spot * (1.0 + 2.0 / 10000.0)
+    assert range_center == pytest.approx(expected_center)
+    assert range_center != pytest.approx(req.baseline_context.current_spot)
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_projection_width_range_builder_enforces_half_width_floor() -> None:
+    config = ProjectionConfig(range_width_scale=0.0, range_width_floor_ratio=0.5)
+    snapshot = ProjectionSnapshot(
+        projection_id="Will USDJPY close higher?",
+        horizon_days=1,
+        point_estimate=0.2,
+        lower_bound=0.2,
+        upper_bound=0.2,
+        confidence=0.8,
+    )
+
+    expected_range = _build_range_from_projection_width(
+        current_spot=150.0,
+        expected_close_change_bp=10.0,
+        trailing_mean_abs_close_change_bp=20.0,
+        projection_snapshot=snapshot,
+        config=config,
+    )
+
+    center = (expected_range.low_price + expected_range.high_price) / 2.0
+    half_width = (expected_range.high_price - expected_range.low_price) / 2.0
+    assert center == pytest.approx(150.0 * (1.0 + 10.0 / 10000.0))
+    assert half_width == pytest.approx(150.0 * (20.0 * 0.5) / 10000.0)
+    assert expected_range.low_price <= expected_range.high_price
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_projection_width_range_builder_preserves_order_for_extreme_floor() -> None:
+    config = ProjectionConfig(range_width_scale=0.0, range_width_floor_ratio=1.0)
+    snapshot = ProjectionSnapshot(
+        projection_id="Will USDJPY close higher?",
+        horizon_days=1,
+        point_estimate=0.0,
+        lower_bound=0.0,
+        upper_bound=0.0,
+        confidence=0.8,
+    )
+
+    expected_range = _build_range_from_projection_width(
+        current_spot=1.0,
+        expected_close_change_bp=0.0,
+        trailing_mean_abs_close_change_bp=20000.0,
+        projection_snapshot=snapshot,
+        config=config,
+    )
+
+    half_width = (expected_range.high_price - expected_range.low_price) / 2.0
+    assert expected_range.low_price > 0.0
+    assert expected_range.low_price <= expected_range.high_price
+    assert half_width == pytest.approx(1.0 * 20000.0 / 10000.0)
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
@@ -472,6 +541,30 @@ def test_daily_workflow_generates_seven_with_shared_metadata(db_session, monkeyp
     # = 15.0 * 20.0 * (0.5 + 0.5*0.7) = 15.0 * 20.0 * 0.85 = 255.0
     assert ugh_alpha.expected_close_change_bp == pytest.approx(255.0)
     assert ugh_alpha.forecast_direction == ForecastDirection.up
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_ugh_variant_ranges_diverge_with_projection_configs(db_session) -> None:
+    req = _request(engine_version="v2.3")
+
+    result = run_daily_forecast_workflow(db_session, req)
+
+    ugh_ranges = {
+        (
+            round(f.expected_range.low_price, 8),
+            round(f.expected_range.high_price, 8),
+        )
+        for f in result.forecasts
+        if f.strategy_kind
+        in {
+            StrategyKind.ugh_v2_alpha,
+            StrategyKind.ugh_v2_beta,
+            StrategyKind.ugh_v2_gamma,
+            StrategyKind.ugh_v2_delta,
+        }
+        and f.expected_range is not None
+    }
+    assert len(ugh_ranges) >= 2
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
