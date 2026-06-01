@@ -98,6 +98,8 @@ class ProjectionConfig(BaseModel):
     # produces multiplier=conviction_floor (shrink only, never sign flip);
     # fire=1.0 produces multiplier=1.0. See spec §5.3 / §6.1.
     conviction_floor: FiniteFloat = Field(default=0.5, ge=0.0, le=1.0)
+    direction_flat_epsilon_ratio: FiniteFloat = Field(default=0.0, ge=0.0)
+    direction_flat_epsilon_floor_bp: FiniteFloat = Field(default=3.0, ge=0.0)
 
     pair_weight_qf: FiniteFloat = Field(default=1.0, ge=0.0)
     pair_weight_qt: FiniteFloat = Field(default=1.0, ge=0.0)

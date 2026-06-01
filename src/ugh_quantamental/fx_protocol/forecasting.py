@@ -27,6 +27,7 @@ from ugh_quantamental.workflows.runners import run_full_workflow
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+    from ugh_quantamental.engine.projection_models import ProjectionConfig
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -44,6 +45,20 @@ def _direction_from_bp(change_bp: float) -> ForecastDirection:
     if change_bp < 0:
         return ForecastDirection.down
     return ForecastDirection.flat
+
+
+def _direction_from_bp_with_epsilon(
+    change_bp: float,
+    trailing_mean_abs_close_change_bp: float,
+    config: "ProjectionConfig",
+) -> tuple[ForecastDirection, float]:
+    epsilon_bp = max(
+        config.direction_flat_epsilon_ratio * trailing_mean_abs_close_change_bp,
+        config.direction_flat_epsilon_floor_bp,
+    )
+    if abs(change_bp) <= epsilon_bp:
+        return ForecastDirection.flat, 0.0
+    return _direction_from_bp(change_bp), change_bp
 
 
 def _shared_range(low: float, high: float) -> ExpectedRange:
@@ -242,7 +257,7 @@ def _build_variant_request(
 
     overrides = _UGH_V2_VARIANT_CONFIGS[variant]
     base_proj = base_request.ugh_request.projection
-    variant_config = ProjectionConfig(**overrides)
+    variant_config = ProjectionConfig(**(base_proj.config.model_dump() | overrides))
     variant_projection = ProjectionWorkflowRequest(
         projection_id=base_proj.projection_id,
         horizon_days=base_proj.horizon_days,
@@ -303,14 +318,19 @@ def build_ugh_variant_forecast(
     expected_close_change_bp = (
         projection_res.e_star * ctx.trailing_mean_abs_close_change_bp * conviction_factor
     )
+    forecast_direction, record_close_change_bp = _direction_from_bp_with_epsilon(
+        expected_close_change_bp,
+        ctx.trailing_mean_abs_close_change_bp,
+        projection_req.config,
+    )
 
     return _make_base_record(
         request=request,
         forecast_batch_id=forecast_batch_id,
         window_end_jst=window_end_jst,
         strategy_kind=variant,
-        forecast_direction=_direction_from_bp(expected_close_change_bp),
-        expected_close_change_bp=expected_close_change_bp,
+        forecast_direction=forecast_direction,
+        expected_close_change_bp=record_close_change_bp,
         expected_range=_build_range_from_baseline_context(
             request.baseline_context.current_spot,
             request.baseline_context.trailing_mean_range_price,

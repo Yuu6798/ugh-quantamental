@@ -107,10 +107,10 @@ class TestFxDailyAutomationConfig:
     def test_defaults(self) -> None:
         cfg = FxDailyAutomationConfig()
         assert cfg.pair == CurrencyPair.USDJPY
-        # theory_version stays v2; engine_version bumps when state-engine
-        # output semantics change, so new daily runs label themselves correctly.
+        # theory_version stays v2; engine_version bumps when engine output
+        # semantics change, so new daily runs label themselves correctly.
         assert cfg.theory_version == "v2"
-        assert cfg.engine_version == "v2.1"
+        assert cfg.engine_version == "v2.2"
         assert cfg.protocol_version == "v1"
         assert cfg.run_forecast_generation is True
         assert cfg.run_outcome_evaluation is True
