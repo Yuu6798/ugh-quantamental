@@ -30,13 +30,19 @@ The v1 state engine consumes:
    - Produces raw evidence scores for the six lifecycle states:
      - `dormant`: rises when conviction, urgency, catalyst, and follow-through are all weak.
      - `setup`: rises on positive signal with low saturation and still pre-fire conditions.
-     - `fire`: rises with strong catalyst + high prior fire + urgency + follow-through.
+     - `fire`: rises from a weighted evidence sum
+       (`0.35*catalyst + 0.35*prior.fire + 0.15*urgency + 0.15*follow_through`)
+       and a catalyst floor (`catalyst_floor_coef * catalyst`), then uses the
+       larger of the two bounded values. The floor lets strong-catalyst days
+       fire without relying on `prior.fire` history, closing the round-4
+       multiplicative-gate loophole.
      - `expansion`: rises with strong `e_star`, conviction, follow-through, and prior fire/expansion lean.
      - `exhaustion`: rises when signal stays positive but pricing saturation is high and mismatch shrinks.
      - `failure`: rises when `e_star` is negative and/or disconfirmation/regime shock is elevated.
 
 3. `normalize_state_probabilities(scores, config)`
    - Applies temperature softmax to map any finite score vector to a valid `StateProbabilities` simplex.
+   - Default `softmax_temperature` is `0.5` to sharpen state discrimination.
    - Rejects non-finite scaled values, and config constrains temperature away from unsafe near-zero values (`softmax_temperature >= 1e-8`).
 
 4. `blend_with_prior(prior_probabilities, evidence_scores, config)`

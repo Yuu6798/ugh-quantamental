@@ -20,6 +20,11 @@ _STATES: tuple[LifecycleState, ...] = (
     LifecycleState.failure,
 )
 
+_FIRE_EVIDENCE_CATALYST_WEIGHT = 0.35
+_FIRE_EVIDENCE_PRIOR_WEIGHT = 0.35
+_FIRE_EVIDENCE_URGENCY_WEIGHT = 0.15
+_FIRE_EVIDENCE_FOLLOW_THROUGH_WEIGHT = 0.15
+
 
 def _clamp(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
     if not math.isfinite(value):
@@ -95,7 +100,15 @@ def compute_state_evidence(
     setup = config.setup_weight * _clamp(
         positive_e * (1.0 - pricing_sat) * (1.0 - p_fire) * (1.0 - catalyst + 0.4 * catalyst)
     )
-    fire = config.fire_weight * _clamp(catalyst * prior.fire * urgency * follow_through)
+    fire_weighted_sum = (
+        _FIRE_EVIDENCE_CATALYST_WEIGHT * catalyst
+        + _FIRE_EVIDENCE_PRIOR_WEIGHT * p_fire
+        + _FIRE_EVIDENCE_URGENCY_WEIGHT * urgency
+        + _FIRE_EVIDENCE_FOLLOW_THROUGH_WEIGHT * follow_through
+    )
+    fire = config.fire_weight * _clamp(
+        max(fire_weighted_sum, config.catalyst_floor_coef * catalyst)
+    )
     expansion = config.expansion_weight * _clamp(
         positive_e * conviction * follow_through * (0.6 + 0.4 * (p_fire + p_exp))
     )

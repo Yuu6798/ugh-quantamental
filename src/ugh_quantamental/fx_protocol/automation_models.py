@@ -19,7 +19,7 @@ class FxDailyAutomationConfig(BaseModel):
 
     pair: CurrencyPair = CurrencyPair.USDJPY
     theory_version: str = Field(default="v2", min_length=1)
-    engine_version: str = Field(default="v2", min_length=1)
+    engine_version: str = Field(default="v2.1", min_length=1)
     schema_version: str = Field(default="v1", min_length=1)
     protocol_version: str = Field(default="v1", min_length=1)
     data_branch: str = Field(default="fx-daily-data", min_length=1)

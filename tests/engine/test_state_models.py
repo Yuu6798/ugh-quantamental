@@ -100,6 +100,19 @@ def test_state_config_bounds_enforced() -> None:
         StateConfig(softmax_temperature=0.0)
 
 
+def test_state_config_defaults_sharpen_state_classifier() -> None:
+    cfg = StateConfig()
+
+    assert cfg.softmax_temperature == pytest.approx(0.5)
+    assert cfg.catalyst_floor_coef == pytest.approx(0.3)
+
+
+@pytest.mark.parametrize("value", [-0.01, 1.01])
+def test_state_config_rejects_catalyst_floor_coef_out_of_bounds(value: float) -> None:
+    with pytest.raises(ValidationError):
+        StateConfig(catalyst_floor_coef=value)
+
+
 def test_state_config_rejects_too_small_tie_break_epsilon() -> None:
     with pytest.raises(ValidationError):
         StateConfig(tie_break_epsilon=1e-10)
