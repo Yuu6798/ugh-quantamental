@@ -7,9 +7,11 @@ from pydantic import ValidationError
 
 from ugh_quantamental.engine.projection_models import ProjectionEngineResult
 from ugh_quantamental.engine.state import (
+    _normalize_simple,
     build_market_svp,
     build_phi,
     blend_with_prior,
+    compute_state_evidence,
     normalize_state_probabilities,
     resolve_dominant_state,
     run_state_engine,
@@ -225,6 +227,34 @@ def test_strong_catalyst_case_leans_fire(base_config: StateConfig) -> None:
     assert result.dominant_state is LifecycleState.fire
 
 
+def test_fire_evidence_catalyst_floor_lifts_high_catalyst_low_prior_fire() -> None:
+    snapshot = _make_snapshot(prior_dominant=LifecycleState.dormant)
+    config = StateConfig(catalyst_floor_coef=0.7)
+
+    evidence = compute_state_evidence(
+        snapshot=snapshot,
+        projection_result=_projection(
+            e_star=0.2,
+            conviction=0.4,
+            urgency=0.0,
+            mismatch_px=0.2,
+            mismatch_sem=0.2,
+        ),
+        event_features=StateEventFeatures(
+            catalyst_strength=0.9,
+            follow_through=0.0,
+            pricing_saturation=0.2,
+            disconfirmation_strength=0.05,
+            regime_shock=0.05,
+            observation_freshness=0.9,
+        ),
+        config=config,
+    )
+
+    assert evidence[LifecycleState.fire] == pytest.approx(0.63)
+    assert evidence[LifecycleState.fire] > 0.5
+
+
 def test_expansion_case_with_strong_follow_through(base_config: StateConfig) -> None:
     snapshot = _make_snapshot(prior_dominant=LifecycleState.expansion)
     result = run_state_engine(
@@ -391,7 +421,9 @@ def test_blend_with_prior_rejects_zero_sum_weights_runtime_guard() -> None:
         prior_weight=0.0,
         evidence_weight=0.0,
         softmax_temperature=1.0,
+        final_softmax_temperature=0.12,
         tie_break_epsilon=1e-8,
+        catalyst_floor_coef=0.3,
         dormant_weight=1.0,
         setup_weight=1.0,
         fire_weight=1.0,
@@ -404,6 +436,23 @@ def test_blend_with_prior_rejects_zero_sum_weights_runtime_guard() -> None:
 
     with pytest.raises(ValueError, match="must be positive"):
         blend_with_prior(prior, evidence_scores, bypass_cfg)
+
+
+def test_final_normalization_softmax_widens_top_two_margin() -> None:
+    values = {
+        LifecycleState.dormant: 0.24,
+        LifecycleState.setup: 0.20,
+        LifecycleState.fire: 0.18,
+        LifecycleState.expansion: 0.16,
+        LifecycleState.exhaustion: 0.12,
+        LifecycleState.failure: 0.10,
+    }
+    linear_margin = values[LifecycleState.dormant] - values[LifecycleState.setup]
+
+    probs = _normalize_simple(values, StateConfig(final_softmax_temperature=0.12))
+
+    assert probs.dormant - probs.setup > linear_margin
+
 
 def test_market_svp_update_preserves_regime_and_replaces_phi() -> None:
     snapshot = _make_snapshot(prior_dominant=LifecycleState.setup)

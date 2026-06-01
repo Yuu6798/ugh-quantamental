@@ -20,6 +20,11 @@ _STATES: tuple[LifecycleState, ...] = (
     LifecycleState.failure,
 )
 
+_FIRE_EVIDENCE_CATALYST_WEIGHT = 0.35
+_FIRE_EVIDENCE_PRIOR_WEIGHT = 0.35
+_FIRE_EVIDENCE_URGENCY_WEIGHT = 0.15
+_FIRE_EVIDENCE_FOLLOW_THROUGH_WEIGHT = 0.15
+
 
 def _clamp(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
     if not math.isfinite(value):
@@ -38,13 +43,29 @@ def _to_probabilities(values: dict[LifecycleState, float]) -> StateProbabilities
     return StateProbabilities(**{state.value: values[state] for state in _STATES})
 
 
-def _normalize_simple(values: dict[LifecycleState, float]) -> StateProbabilities:
+def _normalize_simple(
+    values: dict[LifecycleState, float],
+    config: StateConfig,
+) -> StateProbabilities:
     clipped = {state: _clamp(values[state]) for state in _STATES}
     total = sum(clipped.values())
     if total <= 0.0:
         uniform = 1.0 / len(_STATES)
         return _to_probabilities({state: uniform for state in _STATES})
-    return _to_probabilities({state: clipped[state] / total for state in _STATES})
+
+    scaled = {
+        state: clipped[state] / config.final_softmax_temperature
+        for state in _STATES
+    }
+    if not all(math.isfinite(value) for value in scaled.values()):
+        raise ValueError("scaled final state scores must be finite")
+    max_value = max(scaled.values())
+    exps = {state: math.exp(scaled[state] - max_value) for state in _STATES}
+    exp_total = sum(exps.values())
+    if exp_total <= 0.0:
+        uniform = 1.0 / len(_STATES)
+        return _to_probabilities({state: uniform for state in _STATES})
+    return _to_probabilities({state: exps[state] / exp_total for state in _STATES})
 
 
 def compute_block_quality(omega: Omega, event_features: StateEventFeatures) -> float:
@@ -95,7 +116,15 @@ def compute_state_evidence(
     setup = config.setup_weight * _clamp(
         positive_e * (1.0 - pricing_sat) * (1.0 - p_fire) * (1.0 - catalyst + 0.4 * catalyst)
     )
-    fire = config.fire_weight * _clamp(catalyst * prior.fire * urgency * follow_through)
+    fire_weighted_sum = (
+        _FIRE_EVIDENCE_CATALYST_WEIGHT * catalyst
+        + _FIRE_EVIDENCE_PRIOR_WEIGHT * p_fire
+        + _FIRE_EVIDENCE_URGENCY_WEIGHT * urgency
+        + _FIRE_EVIDENCE_FOLLOW_THROUGH_WEIGHT * follow_through
+    )
+    fire = config.fire_weight * _clamp(
+        max(fire_weighted_sum, config.catalyst_floor_coef * catalyst)
+    )
     expansion = config.expansion_weight * _clamp(
         positive_e * conviction * follow_through * (0.6 + 0.4 * (p_fire + p_exp))
     )
@@ -234,7 +263,7 @@ def run_state_engine(
     evidence_probs = normalize_state_probabilities(evidence_raw, cfg)
 
     blended = blend_with_prior(snapshot.phi.probabilities, evidence_raw, cfg)
-    updated_probs = _normalize_simple(blended)
+    updated_probs = _normalize_simple(blended, cfg)
     updated_phi = build_phi(updated_probs, snapshot.phi.dominant_state, cfg)
 
     prior_probs = _to_map(snapshot.phi.probabilities)

@@ -26,8 +26,10 @@ class StateConfig(BaseModel):
 
     prior_weight: FiniteFloat = Field(default=0.55, ge=0.0, le=1.0)
     evidence_weight: FiniteFloat = Field(default=0.45, ge=0.0, le=1.0)
-    softmax_temperature: FiniteFloat = Field(default=1.0, ge=1e-8)
+    softmax_temperature: FiniteFloat = Field(default=0.5, ge=1e-8)
+    final_softmax_temperature: FiniteFloat = Field(default=0.12, ge=1e-8)
     tie_break_epsilon: FiniteFloat = Field(default=1e-8, ge=1e-8, le=1e-4)
+    catalyst_floor_coef: FiniteFloat = Field(default=0.3, ge=0.0, le=1.0)
 
     dormant_weight: FiniteFloat = Field(default=1.0, ge=0.0)
     setup_weight: FiniteFloat = Field(default=1.0, ge=0.0)
@@ -44,6 +46,7 @@ class StateConfig(BaseModel):
         if self.prior_weight + self.evidence_weight <= 0.0:
             raise ValueError("prior_weight + evidence_weight must be positive")
         return self
+
 
 class StateEngineResult(BaseModel):
     """Deterministic state engine outputs for downstream use."""

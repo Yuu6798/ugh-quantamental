@@ -16,7 +16,7 @@ ALPHAVANTAGE_API_KEY : Alpha Vantage API key (free, register at https://www.alph
 FX_DATA_BRANCH       : git data branch name (default: fx-daily-data, informational only)
 FX_SQLITE_FILENAME   : SQLite filename under the data directory (default: fx_protocol.db)
 FX_THEORY_VERSION    : UGH theory version (default: v2)
-FX_ENGINE_VERSION    : UGH engine version (default: v2)
+FX_ENGINE_VERSION    : UGH engine version (default: v2.1)
 FX_SCHEMA_VERSION    : schema version (default: v1)
 FX_PROTOCOL_VERSION  : protocol version (default: v1)
 FX_SQLITE_PATH       : full path to SQLite file (overrides FX_SQLITE_FILENAME)
@@ -55,7 +55,7 @@ def main() -> None:
     alphavantage_api_key = _env("ALPHAVANTAGE_API_KEY")
 
     theory_version = _env("FX_THEORY_VERSION", "v2")
-    engine_version = _env("FX_ENGINE_VERSION", "v2")
+    engine_version = _env("FX_ENGINE_VERSION", "v2.1")
     schema_version = _env("FX_SCHEMA_VERSION", "v1")
     protocol_version = _env("FX_PROTOCOL_VERSION", "v1")
     data_branch = _env("FX_DATA_BRANCH", "fx-daily-data")

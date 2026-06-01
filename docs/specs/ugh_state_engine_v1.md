@@ -30,13 +30,19 @@ The v1 state engine consumes:
    - Produces raw evidence scores for the six lifecycle states:
      - `dormant`: rises when conviction, urgency, catalyst, and follow-through are all weak.
      - `setup`: rises on positive signal with low saturation and still pre-fire conditions.
-     - `fire`: rises with strong catalyst + high prior fire + urgency + follow-through.
+     - `fire`: rises from a weighted evidence sum
+       (`0.35*catalyst + 0.35*prior.fire + 0.15*urgency + 0.15*follow_through`)
+       and a catalyst floor (`catalyst_floor_coef * catalyst`), then uses the
+       larger of the two bounded values. The floor lets strong-catalyst days
+       fire without relying on `prior.fire` history, closing the round-4
+       multiplicative-gate loophole.
      - `expansion`: rises with strong `e_star`, conviction, follow-through, and prior fire/expansion lean.
      - `exhaustion`: rises when signal stays positive but pricing saturation is high and mismatch shrinks.
      - `failure`: rises when `e_star` is negative and/or disconfirmation/regime shock is elevated.
 
 3. `normalize_state_probabilities(scores, config)`
    - Applies temperature softmax to map any finite score vector to a valid `StateProbabilities` simplex.
+   - Default evidence-layer `softmax_temperature` is `0.5` to sharpen raw state evidence before prior blending.
    - Rejects non-finite scaled values, and config constrains temperature away from unsafe near-zero values (`softmax_temperature >= 1e-8`).
 
 4. `blend_with_prior(prior_probabilities, evidence_scores, config)`
@@ -64,7 +70,17 @@ Given prior distribution `P_prior` and normalized evidence distribution `P_evide
 
 `P_blended[s] = prior_w * P_prior[s] + evidence_w * P_evidence[s]`
 
-- renormalize the blended non-negative vector to sum to `1.0` for a stable valid output distribution.
+- apply a second, final softmax over the blended non-negative vector using
+  `final_softmax_temperature` (default `0.12`) to widen the winner margin at
+  the actual `dominant_state` decision layer.
+- if the blended vector has no positive mass, fall back to a uniform
+  distribution.
+
+The two temperatures are intentionally independent: `softmax_temperature=0.5`
+sharpens the evidence side before prior blending, while
+`final_softmax_temperature=0.12` sharpens only the final state-probability
+distribution. This preserves the default `0.55/0.45` prior/evidence blend
+needed to keep `fire` reachable while reducing knife-edge final-state ties.
 
 ## Tie-break rule
 
