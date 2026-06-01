@@ -321,10 +321,14 @@ Key properties:
 `conviction` is a prediction-reliability score: it estimates how much the
 engine should trust the current `e_star` after evidence confidence,
 alignment, and mismatch penalties are applied. It is not a raw signal
-strength measure and it is independent from the fire-pressure axis. In
-particular, high catalyst / fire days can still have modest conviction
-when price or semantic mismatch is high (for example, the 2026-05-08
-fire cases had conviction around 0.37).
+strength measure and should not be read as fire intensity. The concepts
+are distinct, but the pipeline is not statistically independent:
+`fire_probability` helps shape `e_star` through `compute_e_raw`, and
+`e_star` then enters `mismatch_px`, which is one input to
+`compute_conviction`. As a result, fire and conviction can co-move or
+diverge depending on mismatch. In particular, high catalyst / fire days
+can still have modest conviction when price or semantic mismatch is high
+(for example, the 2026-05-08 fire cases had conviction around 0.37).
 
 Downstream forecast construction also uses conviction as the magnitude
 scaler introduced in PR #87:
