@@ -21,14 +21,19 @@
 | 15 | FX Daily Outcome/Evaluation Workflow | `run_daily_outcome_evaluation_workflow`: records the canonical outcome and four per-forecast evaluations; idempotent |
 | 16 | FX Daily Automation | `run_fx_daily_protocol_once`: data-source abstraction, deterministic request builders, GitHub Actions daily schedule, durable SQLite via `fx-daily-data` git branch |
 | 17 | FX Weekly Report | Read-only `run_weekly_report`: aggregates persisted evaluation records into strategy metrics, baseline comparisons, state/GRV/mismatch summaries, and curated case examples; `WeeklyReportRequest` / `WeeklyReportResult` frozen models; JST-canonical `report_generated_at_jst` field |
+| 18 | FX Monthly Review | Read-only `run_monthly_review` / `rebuild_monthly_review`: aggregates a month of evaluation records into per-strategy / baseline-comparison / state / regime / volatility / intervention / event-tag metrics, provider-health summary, representative cases, rule-based review flags, and recommendation summary; per-variant `range_hit` (v2.3); emits JSON / MD / CSV artifacts; spec `docs/specs/fx_monthly_review_v1.md`; automated via `fx-monthly-review.yml` and `fx-analysis-pipeline.yml` |
 
 ## Next up
 
-**Milestone 18 — Monthly FX reporting**
+Milestones 1–18 and the 2026-05 engine review (Phases P0–P4 + Phase B) are
+complete. There is no committed next milestone.
 
-Aggregate weekly report outputs into a monthly performance review for USDJPY.
-Requires: a monthly reporting layer, a formal spec in `docs/specs/`, and an
-optional scheduled GitHub Actions step.
+The natural next major direction is an **execution / trading layer** that
+consumes engine outputs (state lifecycle, conviction, `expected_close_change_bp`,
+per-variant `expected_range`) for position sizing — the prerequisite-integration
+goal that `docs/engine_review_2026_05_planning.md` §8 / §11.3 deferred to a
+trading system. This is a large new scope and requires its own planning doc in
+`docs/specs/` before implementation.
 
 ## Validation commands
 
