@@ -14,7 +14,7 @@ Milestones 1-18 完了、2026-05 engine review も全フェーズ (P0-P4 + Phase
 
 active queue - 未着手または進行中の Phase / Brief / Milestone のみを置く。終了した項目は wrap-up step 4 で `## 直近 merged` に移す。
 
-1. **PLANS.md M18 同期を PR 化** - branch `claude/remaining-tasks-review-YkIQi` に push 済み (M18 を完了 milestone 表に追加、Next up を実態化)。PR 作成 → merge する。あわせて governance spec の `Status: Draft` バナーを実態 (実装+test+workflow 完備) に合わせるか確認する。
+1. **governance spec `Status: Draft` バナーの実態確認** - `docs/specs/fx_monthly_governance_v1.md` は実装 + test + workflow が完備なのにバナーが `Draft`。実態 (shipping 済みか) を確認し、必要なら shipped 相当へ更新する。
 2. **売買 / execution レイヤーの planning doc 起草** - 次の大方向。engine 出力 (state lifecycle / conviction / expected_close_change_bp / per-variant expected_range) を入力にした position sizing。大規模新スコープなので `docs/specs/` への planning から着手する。
 
 ## 直近 merged
