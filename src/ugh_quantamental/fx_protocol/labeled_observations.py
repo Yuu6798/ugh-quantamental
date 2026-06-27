@@ -41,6 +41,7 @@ LABELED_OBSERVATION_FIELDNAMES: tuple[str, ...] = (
     "direction_hit",
     "range_hit",
     "state_proxy_hit",
+    "state_correctness_hit",
     "close_error_bp",
     "magnitude_error_bp",
     # AI annotation fields (primary source for analysis)
@@ -470,6 +471,7 @@ def _collect_labeled_observation_rows(
                     "direction_hit": ev.get("direction_hit", ""),
                     "range_hit": ev.get("range_hit", ""),
                     "state_proxy_hit": ev.get("state_proxy_hit", ""),
+                    "state_correctness_hit": ev.get("state_correctness_hit", ""),
                     "close_error_bp": ev.get("close_error_bp", ""),
                     "magnitude_error_bp": ev.get("magnitude_error_bp", ""),
                     # AI annotation fields

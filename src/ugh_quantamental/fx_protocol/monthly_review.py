@@ -116,6 +116,8 @@ def _compute_monthly_metrics_for_rows(rows: list[dict[str, str]]) -> dict[str, A
     range_hits = count_bool_rows(range_evaluable, "range_hit")
     state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]
     state_hits = count_bool_rows(state_evaluable, "state_proxy_hit")
+    correctness_evaluable = [r for r in rows if r.get("state_correctness_hit", "") != ""]
+    correctness_hits = count_bool_rows(correctness_evaluable, "state_correctness_hit")
     close_errors = [abs(v) for v in collect_floats(rows, "close_error_bp")]
     mag_errors = [abs(v) for v in collect_floats(rows, "magnitude_error_bp")]
 
@@ -130,6 +132,12 @@ def _compute_monthly_metrics_for_rows(rows: list[dict[str, str]]) -> dict[str, A
         "state_proxy_hit_count": state_hits,
         "state_proxy_hit_rate": (
             safe_rate(state_hits, len(state_evaluable)) if state_evaluable else None
+        ),
+        "state_correctness_hit_count": correctness_hits,
+        "state_correctness_hit_rate": (
+            safe_rate(correctness_hits, len(correctness_evaluable))
+            if correctness_evaluable
+            else None
         ),
         "mean_abs_close_error_bp": safe_mean(close_errors),
         "median_abs_close_error_bp": safe_median(close_errors),

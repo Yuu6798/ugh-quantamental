@@ -124,16 +124,55 @@ close_error_bp     = abs(forecast.expected_close_change_bp - outcome.realized_cl
 magnitude_error_bp = abs(abs(forecast.expected_close_change_bp) - abs(outcome.realized_close_change_bp))
 ```
 
-### 5.4 State-proxy diagnostics (UGH only)
+### 5.4 State diagnostics (UGH only)
 
-If `forecast.dominant_state` and `realized_state_proxy` are both non-`None`:
+There are **two distinct, independent** state metrics (FX-STATEPROXY-REDEF).
+
+**`state_proxy_hit` — PERSISTENCE (not accuracy).** If `forecast.dominant_state`
+and `realized_state_proxy` are both non-`None`:
 
 ```
-state_proxy_hit    = (forecast.dominant_state.value == realized_state_proxy)
+state_proxy_hit     = (forecast.dominant_state.value == realized_state_proxy)
 actual_state_change = (forecast.dominant_state.value != realized_state_proxy)
 ```
 
-Otherwise both are `None`.
+⚠️ `realized_state_proxy` is the **next-day forecast's** `dominant_state` (§4),
+so `state_proxy_hit` measures whether the lifecycle state *persisted* to the next
+forecast — **not** whether it was correct. It is ~100% in stable regimes and `0`
+on transitions (the most information-rich days), so it must **not** be read as an
+accuracy KPI. The name is retained (no in-place redefinition) for rollout
+continuity; correctness is reported separately below.
+
+**`state_correctness_hit` — CORRECTNESS (v1 heuristic).** If
+`forecast.dominant_state` is non-`None`:
+
+```
+state_correctness_hit = (forecast.dominant_state == classify_realized_state(outcome))
+```
+
+`classify_realized_state` is a pure, deterministic, coarse classifier mapping the
+day's realized OHLC to a `LifecycleState` (intraday range in bp of open + the
+directional body ratio `|close - open| / (high - low)`):
+
+| condition | realized state |
+|---|---|
+| range `< 30 bp` | `dormant` |
+| range `>= 80 bp`, body `>= 0.6` | `fire` |
+| range `>= 80 bp`, body `< 0.6` | `exhaustion` |
+| moderate range, body `>= 0.6` | `expansion` |
+| moderate range, body `< 0.6` | `setup` |
+
+⚠️ The realized label is in the **`LifecycleState`** vocabulary only (never the
+regime/volatility axes — that would be a category error). `failure` is **not**
+emitted: it is a forecast-relative breakdown that cannot be distinguished from
+`exhaustion` from direction-agnostic OHLC alone. This is a v1 proxy; it is a
+**new column** (`state_correctness_hit`), so persistence and correctness never
+share a column (no semantic mixing across rollouts). Both metrics are `None` for
+baselines and when `dominant_state`/inputs are absent.
+
+Weekly/monthly strategy & slice aggregations surface both
+`state_proxy_hit_rate` and `state_correctness_hit_rate`. (Daily scoreboard and
+slice/tag scoreboards still surface persistence only — a follow-up rollup.)
 
 ### 5.5 `mismatch_change_bp` (UGH only)
 

@@ -231,6 +231,8 @@ def test_monthly_strategy_metrics_fieldnames_unchanged() -> None:
         "range_hit_rate",
         "state_proxy_hit_count",
         "state_proxy_hit_rate",
+        "state_correctness_hit_count",
+        "state_correctness_hit_rate",
         "mean_abs_close_error_bp",
         "median_abs_close_error_bp",
         "mean_abs_magnitude_error_bp",

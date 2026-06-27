@@ -21,8 +21,10 @@ from ugh_quantamental.fx_protocol.outcome_models import DailyOutcomeWorkflowRequ
 from ugh_quantamental.fx_protocol.outcomes import (
     build_evaluation_record,
     build_outcome_record,
+    classify_realized_state,
     compute_disconfirmers_hit,
 )
+from ugh_quantamental.schemas.enums import LifecycleState
 
 HAS_SQLALCHEMY = importlib.util.find_spec("sqlalchemy") is not None
 
@@ -321,6 +323,64 @@ def test_ugh_state_proxy_hit_when_mismatch() -> None:
     assert ev.state_proxy_hit is False
     assert ev.actual_state_change is True
     assert ev.realized_state_proxy == "fire"
+
+
+def _outcome_with(open_, high, low, close) -> OutcomeRecord:
+    return build_outcome_record(
+        _outcome_request(
+            realized_open=open_, realized_high=high, realized_low=low, realized_close=close,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "ohlc, expected",
+    [
+        # quiet (range 20bp)                       -> dormant
+        ((150.0, 150.2, 149.9, 150.1), LifecycleState.dormant),
+        # moderate range (~47bp), weak body        -> setup
+        ((150.0, 150.6, 149.9, 150.05), LifecycleState.setup),
+        # moderate range (~50bp), strong body      -> expansion
+        ((150.0, 150.7, 149.95, 150.65), LifecycleState.expansion),
+        # large range (~107bp), strong body        -> fire
+        ((150.0, 151.5, 149.9, 151.4), LifecycleState.fire),
+        # large range (~100bp), weak body (faded)  -> exhaustion
+        ((150.0, 151.0, 149.5, 150.8), LifecycleState.exhaustion),
+    ],
+)
+def test_classify_realized_state(ohlc, expected) -> None:
+    assert classify_realized_state(_outcome_with(*ohlc)) is expected
+
+
+def test_classify_realized_state_is_deterministic() -> None:
+    outcome = _outcome_with(150.0, 151.5, 149.9, 151.4)
+    assert classify_realized_state(outcome) is classify_realized_state(outcome)
+
+
+def test_state_correctness_diverges_from_persistence_hit() -> None:
+    """state_correctness_hit (vs realized OHLC) is independent of state_proxy_hit
+    (persistence vs next-day forecast). Default outcome classifies to exhaustion."""
+    outcome = _outcome_up()  # -> exhaustion
+    # Persistence HIT (forecast state == next-day forecast state) but the
+    # realized state is exhaustion, so correctness MISSES.
+    forecast = _make_ugh_forecast(dominant_state_value="setup")
+    ev = build_evaluation_record(forecast, outcome, "setup", datetime.now(_UTC))
+    assert ev.state_proxy_hit is True
+    assert ev.state_correctness_hit is False
+
+    # Persistence MISS but correctness HIT (forecast state matches realized).
+    forecast2 = _make_ugh_forecast(dominant_state_value="exhaustion")
+    ev2 = build_evaluation_record(forecast2, outcome, "fire", datetime.now(_UTC))
+    assert ev2.state_proxy_hit is False
+    assert ev2.state_correctness_hit is True
+
+
+def test_baseline_state_correctness_hit_is_none() -> None:
+    outcome = _outcome_up()
+    baseline = _make_baseline_forecast(StrategyKind.baseline_random_walk)
+    ev = build_evaluation_record(baseline, outcome, None, datetime.now(_UTC))
+    assert ev.state_correctness_hit is None
+    assert ev.state_proxy_hit is None
 
 
 def test_ugh_state_proxy_none_when_no_next_batch() -> None:

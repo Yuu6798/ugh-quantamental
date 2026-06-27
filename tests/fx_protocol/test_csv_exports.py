@@ -375,9 +375,22 @@ class TestEvaluationRecordsToRows:
         rows = evaluation_records_to_rows((ev,))
         row = rows[0]
         assert row["state_proxy_hit"] == ""
+        assert row["state_correctness_hit"] == ""
         assert row["mismatch_change_bp"] == ""
         assert row["realized_state_proxy"] == ""
         assert row["actual_state_change"] == ""
+
+    def test_ugh_state_correctness_hit_populated(self) -> None:
+        from ugh_quantamental.fx_protocol.outcomes import build_evaluation_record
+
+        ev = build_evaluation_record(
+            _ugh_forecast(),
+            _outcome_up(),
+            evaluated_at_utc=datetime(2026, 3, 14, 1, 0, 0, tzinfo=_UTC),
+            realized_state_proxy="setup",
+        )
+        row = evaluation_records_to_rows((ev,))[0]
+        assert isinstance(row["state_correctness_hit"], bool)
 
     def test_disconfirmers_hit_blank_when_empty(self) -> None:
         rows = evaluation_records_to_rows(_four_evaluations())

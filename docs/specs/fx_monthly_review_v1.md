@@ -77,8 +77,10 @@ Per-strategy aggregation for each of the four strategies:
 | `direction_hit_rate` | `direction_hit_count / forecast_count` |
 | `range_hit_count` | Number of range hits (UGH only) |
 | `range_hit_rate` | `range_hit_count / range_evaluable_count` |
-| `state_proxy_hit_count` | Number of state proxy hits (UGH only) |
-| `state_proxy_hit_rate` | `state_proxy_hit_count / state_evaluable_count` |
+| `state_proxy_hit_count` | Number of state **persistence** hits (UGH only; not accuracy — FX-STATEPROXY-REDEF) |
+| `state_proxy_hit_rate` | `state_proxy_hit_count / state_evaluable_count` (persistence, not accuracy) |
+| `state_correctness_hit_count` | Number of state **correctness** hits (forecast state == realized-OHLC state; UGH only) |
+| `state_correctness_hit_rate` | `state_correctness_hit_count / state_correctness_evaluable_count` |
 | `mean_abs_close_error_bp` | Mean of `|close_error_bp|` |
 | `median_abs_close_error_bp` | Median of `|close_error_bp|` |
 | `mean_abs_magnitude_error_bp` | Mean of `|magnitude_error_bp|` |

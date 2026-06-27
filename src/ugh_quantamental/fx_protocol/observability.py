@@ -593,6 +593,7 @@ def _parse_evaluation_row(row: dict[str, str]) -> "EvaluationRecord":
         close_error_bp=_opt_float(row.get("close_error_bp", "")),
         magnitude_error_bp=_opt_float(row.get("magnitude_error_bp", "")),
         state_proxy_hit=_opt_bool(row.get("state_proxy_hit", "")),
+        state_correctness_hit=_opt_bool(row.get("state_correctness_hit", "")),
         mismatch_change_bp=_opt_float(row.get("mismatch_change_bp", "")),
         realized_state_proxy=_opt_str(row.get("realized_state_proxy", "")),
         actual_state_change=_opt_bool(row.get("actual_state_change", "")),

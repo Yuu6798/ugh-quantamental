@@ -68,7 +68,8 @@ Per-strategy aggregate metrics from weekly observations:
 | `observation_count` | Total observations |
 | `direction_hit_count` / `direction_hit_rate` | Direction accuracy |
 | `range_hit_count` / `range_hit_rate` | Range hit rate (UGH only) |
-| `state_proxy_hit_count` / `state_proxy_hit_rate` | State proxy hit rate |
+| `state_proxy_hit_count` / `state_proxy_hit_rate` | State **persistence** rate (forecast state == next-day forecast state; not accuracy — FX-STATEPROXY-REDEF) |
+| `state_correctness_hit_count` / `state_correctness_hit_rate` | State **correctness** rate (forecast state == realized-OHLC state) |
 | `mean_close_error_bp` / `median_close_error_bp` | Close error statistics |
 | `mean_magnitude_error_bp` | Magnitude error mean |
 
