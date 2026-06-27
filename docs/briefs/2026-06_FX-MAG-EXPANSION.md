@@ -20,7 +20,9 @@ landing 後に着手 (engine_version v2.4 → v2.5)。
 - [ ] 平常 (低 catalyst) 入力では現状とほぼ同等の magnitude を維持し、過剰増幅で
       穏当日の誤差を悪化させない (回帰テストで境界を固定)
 - [ ] 方向 (sign) と FLAT epsilon 判定 (`_direction_from_bp_with_epsilon`) の挙動は
-      不変 — 本 brief は magnitude のみを対象
+      不変 — 本 brief は magnitude のみを対象。**FLAT/方向判定は expansion 前の値で
+      確定**し、expansion が below-epsilon の FLAT を directional に変えないことを
+      回帰テストで固定 (下記 hint 参照)
 - [ ] `engine_version` を v2.5 に bump し、**3 箇所** の default を sync:
       `automation_models.py` default、`.github/workflows/fx-daily-protocol.yml`
       の `FX_ENGINE_VERSION`、`scripts/run_fx_daily_protocol.py` の
@@ -54,6 +56,14 @@ landing 後に着手 (engine_version v2.4 → v2.5)。
   (例 ∈[1.0, k], k は新 config 定数) を追加し、conviction_factor とは別系統で
   乗じる。これにより conviction (= reliability、§7 で magnitude scaler と明文化済)
   との二重役割を再混同させない (P2/§8 Option B decouple 決定を維持)。
+- ⚠️ **FLAT 分類の invariant を壊さないこと**。現状
+  `_direction_from_bp_with_epsilon` は expansion **後**の
+  `expected_close_change_bp` で FLAT/方向を判定する (forecasting.py:344-348)。
+  高 catalyst × 小 e_star のとき multiplier>1 が固定 epsilon を跨ぎ、本来 FLAT の
+  予測を UP/DOWN に変えてしまう (AC の「sign/FLAT epsilon 不変」と矛盾)。よって
+  **direction/FLAT 判定は expansion 前の値で行い、expansion は既に非 FLAT な
+  forecast の magnitude にのみ適用する** (epsilon 判定を pre-expansion 値に固定)。
+  below-epsilon の回帰テスト (小 e_star + 高 catalyst → FLAT のまま) を必須とする。
 - expansion multiplier の入力は projection/state が既に算出している量
   (`fire_probability`, `urgency`, `catalyst_strength` 等) を再利用し、新たな
   外部入力を増やさない。純関数・clamp 済・determinism を維持。

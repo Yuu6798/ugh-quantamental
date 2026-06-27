@@ -54,10 +54,10 @@ median は 5–9bp。
 | # | 主題 | 症状 | 根因 (file:line) | Brief |
 |---|---|---|---|---|
 | ★1 | magnitude 過小予測 | 6/19 実+44bp に予測+7bp | `forecasting.py:340-342` 平均アンカー × 係数≤1.0 | FX-MAG-EXPANSION |
-| ★2 | 急変動直後の過剰防御 | 6/12 failure→FLAT が翌日反発を逸失 | `state.py:134-135` 単一 `regime_shock` で failure 発火 | FX-STATE-HYSTERESIS |
+| ★2 | failure state ラベルの過剰発火 (state_proxy/分析を歪める; ※forecast direction には非影響 `forecasting.py:340-366`) | 単一 shock で `failure` ラベル化 | `state.py:134-135` 単一 `regime_shock` で failure 発火 | FX-STATE-HYSTERESIS |
 | ★2' | state_proxy が逆を測る | state率が週ごと 0↔100 振動 | `outcomes.py:254` 翌日 forecast state との一致 = 持続性指標 | FX-STATEPROXY-REDEF |
 | ★3 | governance がレジーム失敗を覆い隠す | choppy 0% でも `keep_current_logic` | `monthly_review.py:522` 閾値が全集計のみ | FX-GOV-REGIME-FLAGS |
-| ★4 | ライブのアノテーション欠落 | 週次 28/28 unannotated | `ai_annotations.py` が CI で 0 件産出 | FX-ANNOT-LIVE |
+| ★4 | ライブのアノテーション欠落 | 週次 28/28 unannotated | 配線ギャップ: daily `run_annotation_analytics` が Step A の suggestions を Step C `build_labeled_observations` に渡さない (`analytics_annotations.py:577,593`) | FX-ANNOT-LIVE |
 
 ## 2. 着手順序と依存関係
 
