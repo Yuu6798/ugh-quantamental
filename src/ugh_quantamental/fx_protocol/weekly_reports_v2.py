@@ -233,6 +233,12 @@ def build_annotation_field_coverage(
     effective_field_map = {
         "event_tags": "effective_event_tags",
     }
+    # Fields with a deterministic OHLC fallback source. The column is populated
+    # only when the fallback actually supplied the effective label.
+    fallback_field_map = {
+        "regime_label": "fallback_regime_label",
+        "volatility_label": "fallback_volatility_label",
+    }
 
     total = len(observations)
     result: dict[str, dict[str, Any]] = {}
@@ -242,6 +248,7 @@ def build_annotation_field_coverage(
         "ai_populated_count": 0, "ai_populated_rate": 0.0,
         "auto_populated_count": 0, "auto_populated_rate": 0.0,
         "manual_populated_count": 0, "manual_populated_rate": 0.0,
+        "fallback_populated_count": 0, "fallback_populated_rate": 0.0,
         "effective_populated_count": 0, "effective_populated_rate": 0.0,
         "missing_count": 0, "missing_rate": 0.0,
     }
@@ -265,10 +272,17 @@ def build_annotation_field_coverage(
         else:
             auto_pop = 0
 
+        # Fallback-populated: the deterministic OHLC fallback column is set
+        # only when the fallback won the effective label.
+        fb_col = fallback_field_map.get(field, "")
+        fallback_pop = (
+            sum(1 for r in observations if r.get(fb_col, "").strip()) if fb_col else 0
+        )
+
         # Manual-populated: field-level detection.
-        # For non-tag fields: effective is populated but AI column is empty
-        # → the value came from manual fallback regardless of row-level source.
-        # For event_tags: directly check manual_event_tags column.
+        # For non-tag fields: effective is populated, the AI column is empty,
+        # and the value did NOT come from the OHLC fallback → it came from
+        # manual. For event_tags: directly check manual_event_tags column.
         if field == "event_tags":
             manual_pop = sum(
                 1 for r in observations if r.get("manual_event_tags", "").strip()
@@ -278,6 +292,7 @@ def build_annotation_field_coverage(
                 1 for r in observations
                 if not r.get(ai_col, "").strip()
                 and r.get(eff_col, "").strip()
+                and not (fb_col and r.get(fb_col, "").strip())
             )
         else:
             manual_pop = 0
@@ -292,6 +307,8 @@ def build_annotation_field_coverage(
             "auto_populated_rate": round(auto_pop / total, 4),
             "manual_populated_count": manual_pop,
             "manual_populated_rate": round(manual_pop / total, 4),
+            "fallback_populated_count": fallback_pop,
+            "fallback_populated_rate": round(fallback_pop / total, 4),
             "effective_populated_count": eff_pop,
             "effective_populated_rate": round(eff_pop / total, 4),
             "missing_count": missing,

@@ -23,7 +23,14 @@ from ugh_quantamental.fx_protocol.labeled_observations import (
     build_labeled_observations,
 )
 from ugh_quantamental.fx_protocol.monthly_review import compute_monthly_regime_metrics
-from ugh_quantamental.fx_protocol.weekly_reports_v2 import build_slice_metrics
+from ugh_quantamental.fx_protocol.weekly_report_exports import (
+    export_weekly_ai_annotation_summary_csv,
+    export_weekly_annotation_coverage_csv,
+)
+from ugh_quantamental.fx_protocol.weekly_reports_v2 import (
+    build_annotation_field_coverage,
+    build_slice_metrics,
+)
 
 _JST = ZoneInfo("Asia/Tokyo")
 _UTC = timezone.utc
@@ -318,3 +325,54 @@ class TestSourceSummaryCountsFallback:
             + summary["unannotated_count"]
         )
         assert bucket_sum == summary["total_observations"] == 4
+
+
+class TestFieldCoverageAttribution:
+    def test_fallback_not_counted_as_manual(self) -> None:
+        """Fallback-won regime/volatility must report as fallback, not manual."""
+        observations = [
+            {  # fallback won regime + volatility (ai empty)
+                "ai_regime_label": "", "regime_label": "trending",
+                "fallback_regime_label": "trending",
+                "ai_volatility_label": "", "volatility_label": "low",
+                "fallback_volatility_label": "low",
+            },
+            {  # manual won regime (ai empty, no fallback column)
+                "ai_regime_label": "", "regime_label": "choppy",
+                "fallback_regime_label": "",
+            },
+        ]
+        cov = build_annotation_field_coverage(observations)
+        assert cov["regime_label"]["fallback_populated_count"] == 1
+        assert cov["regime_label"]["manual_populated_count"] == 1  # only the manual row
+        assert cov["volatility_label"]["fallback_populated_count"] == 1
+        assert cov["volatility_label"]["manual_populated_count"] == 0
+
+
+class TestWeeklyExportsThreadFallback:
+    def test_summary_csv_includes_fallback(self, tmp_path) -> None:
+        report = {
+            "annotation_source_summary": {
+                "total_observations": 3, "ai_annotated_count": 0,
+                "auto_annotated_count": 0, "manual_annotated_count": 0,
+                "fallback_annotated_count": 3, "unannotated_count": 0,
+                "evidence_ref_count": 0,
+            },
+        }
+        path = export_weekly_ai_annotation_summary_csv(report, str(tmp_path))
+        metrics = {r["metric"]: r["value"] for r in _read_rows(path)}
+        assert metrics["fallback_annotated_count"] == "3"
+
+    def test_coverage_csv_includes_fallback_columns(self, tmp_path) -> None:
+        report = {
+            "annotation_field_coverage": {
+                "regime_label": {
+                    "total_observations": 2, "fallback_populated_count": 2,
+                    "fallback_populated_rate": 1.0, "manual_populated_count": 0,
+                    "effective_populated_count": 2,
+                },
+            },
+        }
+        path = export_weekly_annotation_coverage_csv(report, str(tmp_path))
+        rows = {r["field"]: r for r in _read_rows(path)}
+        assert rows["regime_label"]["fallback_populated_count"] == "2"

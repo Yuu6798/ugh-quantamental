@@ -466,9 +466,16 @@ def _collect_labeled_observation_rows(
                     "ai_annotation_prompt_version": ai.get("ai_annotation_prompt_version", ""),
                     "ai_evidence_refs": ai.get("ai_evidence_refs", ""),
                     "ai_annotation_status": ai.get("ai_annotation_status", ""),
-                    # Deterministic OHLC fallback labels (lowest tier)
-                    "fallback_regime_label": fb_regime,
-                    "fallback_volatility_label": fb_vol,
+                    # Deterministic OHLC fallback labels — recorded only when
+                    # the fallback actually won the field (i.e. ai/auto/manual
+                    # left it empty), so downstream coverage can attribute
+                    # fallback coverage distinctly from manual.
+                    "fallback_regime_label": (
+                        fb_regime if regime_src == SOURCE_FALLBACK else ""
+                    ),
+                    "fallback_volatility_label": (
+                        fb_vol if vol_src == SOURCE_FALLBACK else ""
+                    ),
                     # Effective labels (resolved via AI > auto > manual > fallback)
                     "regime_label": eff_regime,
                     "event_tags": effective_et,
