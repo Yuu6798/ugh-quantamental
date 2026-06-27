@@ -258,6 +258,34 @@ class TestFallbackPrecedence:
         assert row["fallback_regime_label"] == ""  # fallback did not win
         assert row["annotation_status"] == ""  # stays unlabeled
 
+    def test_status_only_manual_yields_to_fallback_win(self, tmp_path) -> None:
+        """A status-only manual draft (status set, labels empty) must NOT claim
+        the source when the fallback actually supplies the labels — the row is
+        fallback coverage, confirmed (regression PR #116)."""
+        tmpdir = str(tmp_path)
+        obs_path = _setup_history(tmpdir, days=3)
+        _write_csv(
+            os.path.join(tmpdir, "annotations", "manual_annotations.csv"),
+            [{
+                "as_of_jst": "2026-03-17T08:00:00+09:00",
+                "regime_label": "",  # no manual labels
+                "event_tags": "",
+                "volatility_label": "",
+                "intervention_risk": "",
+                "notes": "",
+                "annotation_status": "pending",  # status only
+            }],
+            ["as_of_jst", "regime_label", "event_tags", "volatility_label",
+             "intervention_risk", "notes", "annotation_status"],
+        )
+        fallback = {"fc_001": {"regime_label": "trending", "volatility_label": "low"}}
+        build_labeled_observations(tmpdir, _NOW, fallback_annotations=fallback)
+        row = {r["as_of_jst"][:10]: r for r in _read_rows(obs_path)}["2026-03-17"]
+
+        assert row["regime_label"] == "trending"  # fallback supplies labels
+        assert row["annotation_source"] == "ohlc_fallback"  # not manual_compat
+        assert row["annotation_status"] == "confirmed"  # market-derived
+
     def test_no_annotations_leaves_rows_unannotated(self, tmp_path) -> None:
         tmpdir = str(tmp_path)
         obs_path = _setup_history(tmpdir, days=3)
