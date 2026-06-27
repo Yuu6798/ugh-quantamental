@@ -30,6 +30,21 @@ fallback として追加して、daily/weekly のスライス分析が常に pop
       `weekly_annotation_coverage.csv` の effective coverage が実際に populate
       されることを assert する (単体で `ai_annotations.py` だけ叩いて pass し、
       live artifact は 28/28 のまま、という抜けを禁止)
+- [ ] **slice eligibility まで assert する**。coverage CSV と label 充填だけでは
+      不十分: `weekly_reports_v2.build_slice_metrics` は `annotation_source !=
+      none` の行のみ annotated 扱い (weekly_reports_v2.py:368)、月次
+      regime/volatility slice は `annotation_status == "confirmed"` の行のみ
+      集計 (monthly_review.py:307-310)。したがって fallback 行は適切な
+      **provenance (`annotation_source`) と status (`annotation_status=confirmed`
+      相当)** を持たねばならず、テストは weekly slice 行が `label=all` に潰れない
+      こと・月次 (GOV) slice が空でないことを直接 assert する
+- [ ] **daily AI suggestion の語彙を共有軸に正規化**。`generate_ai_annotations`
+      は中間ヒット率で `ai_regime_label="mixed"` を出す (analytics_annotations.py:190-194)。
+      AI は fallback より precedence が上なので、Step A suggestions を
+      `build_labeled_observations` に配線すると "mixed" という第3バケットが
+      混入し axes-mismatch を再導入する。AI suggestion 経路を共有語彙
+      (trending/choppy, low/normal/high) に正規化 (または mixed→既定軸へ map) し、
+      共有語彙に対するテストを置く
 - [ ] fallback アノテーターは realized OHLC のみから regime (trending/choppy) と
       volatility (low/normal/high) を導出する純関数で、network/file I/O/乱数なし
 - [ ] 既存の AI / auto / manual アノテーションが存在する場合は現行の
@@ -45,6 +60,8 @@ fallback として追加して、daily/weekly のスライス分析が常に pop
   (`rebuild_weekly_report` / `run_ai_annotation_pass`),
   `labeled_observations.py` (`build_labeled_observations`),
   `annotation_coverage.py`, `annotation_models.py`,
+  `weekly_reports_v2.py` (`build_slice_metrics` の `annotation_source` ゲート確認),
+  `monthly_review.py` (regime/vol slice の `annotation_status==confirmed` ゲート確認),
   対応する `tests/fx_protocol/` テスト, 必要なら
   `docs/specs/fx_ai_weekly_annotation_v1.md` の Status / fallback 節更新
 - OUT: engine 関数 (`projection.py`/`state.py`)、protocol schemas
@@ -74,8 +91,15 @@ fallback として追加して、daily/weekly のスライス分析が常に pop
   ai/auto/manual いずれも値を持たないフィールドのみを埋める。stale な manual
   互換ラベルが AI ラベルを上書きする逆転 (AI-first 設計の破壊) を起こさないこと。
 - §2 の通り本 brief は FX-GOV-REGIME-FLAGS (★3) と FX-MAG/STATE 検証の前提。
-  fallback ラベルの enum 値は monthly review のレジーム軸 (trending/choppy,
-  low/normal/high) と**完全一致**させること (axes-mismatch は PR #104 型 churn)。
+  **共有語彙コントラクト**: fallback も AI suggestion 経路
+  (`generate_ai_annotations`) も、出力 enum を monthly review のレジーム軸
+  (trending/choppy, low/normal/high) と**完全一致**させること。現状 AI 経路は
+  `mixed` を出すため、これを正規化しないと AI>fallback precedence 経由で第3
+  バケットが slice に漏れる (axes-mismatch は PR #104 型 churn の主因)。
+- **provenance / status の付与**: fallback が埋めた行は weekly の
+  `annotation_source` (≠ none) と月次の `annotation_status` (confirmed 相当) の
+  両ゲートを通る値を持たせる。どちらか一方だけだと「coverage は緑だが slice は
+  label=all / 空」になる。
 
 ## Required Outputs
 - Branch name: `codex/fx-annot-live`
@@ -84,8 +108,10 @@ fallback として追加して、daily/weekly のスライス分析が常に pop
   `annotation_fallback.py`, `annotation_sources.py`,
   `analytics_annotations.py`, `tests/fx_protocol/test_*annotation*.py`,
   spec doc
-- Required tests: API 鍵不在時の fallback 発火、precedence 非上書き、
-  純関数 determinism (同 OHLC → 同ラベル)、coverage > 0
+- Required tests: fallback 発火 (配線経由)、precedence 非上書き、
+  純関数 determinism (同 OHLC → 同ラベル)、E2E で coverage > 0 **かつ** weekly
+  slice が `label=all` に潰れない・月次 slice が空でない、AI suggestion 語彙が
+  共有軸 (mixed 非混入)
 
 ## Done When
 - All acceptance criteria are checked
