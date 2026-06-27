@@ -102,3 +102,45 @@ FX-STATE-HYSTERESIS (★2) ──────┼─> FX-MAG-EXPANSION (★1)   [
       default (+ 同 docstring)。後者を漏らすと手動/ローカル実行が旧バージョンで
       forecast を永続化し version-based audit/stratify を壊す
 - [ ] 着手順序 (§2) と依存関係が各 brief の Scope に反映
+- [ ] 各 brief が §5 の横断契約に矛盾しない
+
+## 5. 横断契約 (cross-cutting contracts) — single source of truth
+
+PR #114 のレビュー (4 round / 10 thread) で表面化した、複数 brief に跨る契約を
+ここに一元化する。各 brief は本節を参照し、**ここと矛盾する記述を持たないこと**
+(restate する場合も本節を canonical とする)。AGENTS.md §5.2 の「self-consistency
+崩れを二度起こさない encode work」に該当。
+
+### 5.1 ラベル語彙コントラクト ⚠️ axes-mismatch は PR #104 型 churn の主因
+
+| 軸 | 値 | 共有する brief | 共有しない brief |
+|---|---|---|---|
+| regime | `trending` / `choppy` | FX-ANNOT-LIVE, FX-GOV-REGIME-FLAGS | — |
+| volatility | `low` / `normal` / `high` | FX-ANNOT-LIVE, FX-GOV-REGIME-FLAGS | — |
+| lifecycle state | `dormant`/`setup`/`fire`/`expansion`/`exhaustion`/`failure` (`LifecycleState`, `schemas/enums.py:25-33`) | FX-STATEPROXY-REDEF | regime/vol 軸とは**別物** |
+
+- regime/vol と lifecycle-state は**絶対に混同しない**。FX-STATEPROXY-REDEF の
+  realized ラベルは LifecycleState で導出する (regime/vol 軸の流用は category
+  error)。
+- AI suggestion 経路 (`generate_ai_annotations`) は現状 `mixed` を出すため、
+  共有語彙に正規化してから effective label に昇格させる (AI > fallback precedence)。
+
+### 5.2 engine_version の 3 箇所 sync
+
+bump 時は必ず: `automation_models.py` default / `fx-daily-protocol.yml` の
+`FX_ENGINE_VERSION` / `scripts/run_fx_daily_protocol.py` の `_env` default
+(+ docstring)。漏れると手動/ローカル実行が旧バージョンで永続化し audit/stratify
+を破壊。
+
+### 5.3 live-path E2E 原則
+
+「単体テストは通るが live artifact は変わらない」抜けを禁止。アノテーション・
+state・governance の変更は、実エントリポイント (`run_annotation_analytics` /
+`rebuild_weekly_report` / `run_full_workflow` / `compute_review_flags`→
+`classify_judgment`) を通すテストで効果を assert する。
+
+### 5.4 メトリクス semantics の versioning
+
+永続メトリクス列の意味を rollout 跨ぎで in-place 変更しない。rename / 新メトリクス
+追加、または schema/protocol version bump + 集計時 filtering のいずれかを採る
+(report 経路は theory/engine version でしか stratify しないため)。
