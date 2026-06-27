@@ -17,9 +17,19 @@ fallback として追加して、daily/weekly のスライス分析が常に pop
 - [ ] `csv/analytics/weekly/<latest>/weekly_annotation_coverage.csv` の effective
       coverage が regime_label / volatility_label について > 0 になる
       (テストデータ経由で検証可能なこと)
-- [ ] 既存 AI アノテーション経路 (`ai_annotations.py`) が 0 件になる条件
-      (例: `ANTHROPIC_API_KEY` 不在) を特定し、その場合に決定論的 fallback が
-      発火することを単体テストで保証
+- [ ] 28/28 unannotated の**実際の root cause を live path で特定**する
+      (API 鍵不在を前提にしない)。daily 経路 `run_annotation_analytics`
+      (`analytics_annotations.py:551`, automation.py:567 から呼出) は Step A で
+      `ai_annotation_suggestions.csv` を生成するが、Step C の
+      `build_labeled_observations` (同 :593) にそれを渡していない (suggestions が
+      effective label に昇格しない)。weekly 経路 `rebuild_weekly_report`
+      (`analytics_rebuild.py:120`) は `run_ai_annotation_pass` (:85) 経由。
+      この配線ギャップを特定し是正する
+- [ ] **end-to-end テスト**: live rebuild 経路 (`rebuild_weekly_report`) と daily
+      経路 (`run_annotation_analytics`) を通して、labeled_observations と
+      `weekly_annotation_coverage.csv` の effective coverage が実際に populate
+      されることを assert する (単体で `ai_annotations.py` だけ叩いて pass し、
+      live artifact は 28/28 のまま、という抜けを禁止)
 - [ ] fallback アノテーターは realized OHLC のみから regime (trending/choppy) と
       volatility (low/normal/high) を導出する純関数で、network/file I/O/乱数なし
 - [ ] 既存の AI / auto / manual アノテーションが存在する場合は現行の
@@ -30,7 +40,10 @@ fallback として追加して、daily/weekly のスライス分析が常に pop
 
 ## Scope
 - IN: `src/ugh_quantamental/fx_protocol/ai_annotations.py`,
-  `annotation_sources.py`, `analytics_annotations.py`,
+  `annotation_sources.py`, `analytics_annotations.py`
+  (`run_annotation_analytics` の Step A→C 配線), `analytics_rebuild.py`
+  (`rebuild_weekly_report` / `run_ai_annotation_pass`),
+  `labeled_observations.py` (`build_labeled_observations`),
   `annotation_coverage.py`, `annotation_models.py`,
   対応する `tests/fx_protocol/` テスト, 必要なら
   `docs/specs/fx_ai_weekly_annotation_v1.md` の Status / fallback 節更新
@@ -43,9 +56,13 @@ fallback として追加して、daily/weekly のスライス分析が常に pop
 なし。新規依存が必要と判断したら AGENTS.md §3 escalation。
 
 ## Implementation Hints (optional)
-- まず CI の `fx-analysis-pipeline` / weekly 実行で `ai_annotations` が 0 件に
-  なる経路を grep + 実行確認 (API 鍵 secret 不在が最有力。`build_notification`
-  系は `anthropic` を best-effort import している前例あり)。
+- root cause は API 鍵不在ではなく **配線**。`run_ai_annotation_pass`
+  (`ai_annotations.py:176`) は決定論的 (API 不要) なのに、daily 経路は生成した
+  suggestions を `build_labeled_observations` に渡さず effective label に昇格
+  しない。まず `run_annotation_analytics` (Step A→C) と `rebuild_weekly_report`
+  の両経路を読み、どこで suggestions が labeled_observations / coverage に
+  到達せず落ちているかを実行確認すること。Scope は `automation.py` の
+  forecast 経路には触れず、annotation analytics のみ。
 - fallback の regime/volatility 判定はルールベースで十分: 例として連続同方向
   本数や close 変化の符号一貫性で trending/choppy、true range や
   `trailing_mean_abs_close_change_bp` 比で low/normal/high。閾値は

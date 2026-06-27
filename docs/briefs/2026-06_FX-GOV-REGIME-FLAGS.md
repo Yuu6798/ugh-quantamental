@@ -20,9 +20,17 @@ choppy 0% dir / high-vol 0% dir という壊滅的なレジーム別失敗が tr
       (module-level, 明示, easily-changeable) で定義
 - [ ] スライスに十分な観測 (既存 `THRESHOLD_MINIMUM_OBSERVATIONS` を流用) が
       無い場合は誤発火しない
-- [ ] 新フラグが立つと governance の change-candidate 経路
-      (`monthly_governance.py`) が `keep_current_logic` を出さない
-      (5月窓データ: choppy 0% で flag が立つことを fixture で検証)
+- [ ] 新フラグ ID を governance の判定経路へ**明示的に配線**する。現状
+      `classify_judgment` (`monthly_governance.py:107`) は
+      `logic_flags = {inspect_magnitude_mapping, inspect_direction_logic,
+      inspect_state_mapping}` しか認識せず、`build_change_candidate_list`
+      (:286-341) も既知 fid にしか分岐がないため、`compute_review_flags` に
+      フラグを足すだけでは `overall_judgment` は `keep` のまま change candidate も
+      生成されない。新 ID を `classify_judgment` の logic_flags / 
+      `build_change_candidate_list` の分岐 / summary 経路に map する
+- [ ] fixture (5月窓 choppy 0%) で、新フラグ発火時に `overall_judgment` が
+      `keep` 以外 (inspect 相当) を返し、対応する change candidate が生成される
+      ことを assert する (フラグが立つだけで判定が変わらない抜けを禁止)
 - [ ] `docs/specs/fx_monthly_review_v1.md` のフラグ一覧に追記、`pytest -q` /
       `ruff check .` clean
 
