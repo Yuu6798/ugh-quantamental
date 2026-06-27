@@ -51,14 +51,21 @@ def make_deterministic_adapter(
     prompt_version: str = "deterministic-p1",
     generated_at_utc: datetime | None = None,
 ) -> AiAnnotationAdapter:
-    """Create a deterministic fake AI adapter for testing.
+    """Create a deterministic fake AI adapter for testing and live fallback.
 
-    Derives labels from existing evaluation data in the observation rows:
-    - regime_label: based on direction_hit rate of ugh forecasts per as_of_jst
-    - volatility_label: based on close_error_bp magnitude
+    Derives labels from the observation rows:
+    - regime_label / volatility_label: from realized OHLC only, via
+      :mod:`annotation_fallback` (market-derived, NOT performance-derived).
     - intervention_risk: based on realized_close_change_bp magnitude
+      (a market fact, not a forecast-accuracy field).
     - event_tags: from effective_event_tags or auto_event_tags if present
     - failure_reason: set when direction_hit is False for ugh strategy
+      (a distinct diagnostic axis, kept separate from regime/volatility).
+
+    ⚠️ regime and volatility are deliberately NOT derived from
+    ``direction_hit`` / ``close_error_bp``: that circular ("choppy = days we
+    missed") coupling invalidates regime-stratified analysis. See
+    engine_review_2026_06_planning.md §5.1.
     """
 
     def _adapter(
@@ -67,8 +74,16 @@ def make_deterministic_adapter(
     ) -> AiAnnotationBatch:
         from datetime import timezone
 
+        from ugh_quantamental.fx_protocol.annotation_fallback import (
+            build_ohlc_fallback_annotations,
+        )
+
         ts = generated_at_utc or datetime.now(timezone.utc)
         records: list[AiAnnotationRecord] = []
+
+        # Market-derived regime / volatility for every row with usable OHLC,
+        # computed once over the whole series (regime needs a trailing window).
+        ohlc_labels = build_ohlc_fallback_annotations(observations)
 
         # One record per observation, keyed by forecast_id.
         # Skip rows without a distinct forecast_id to avoid key collisions.
@@ -82,16 +97,10 @@ def make_deterministic_adapter(
             except (ValueError, TypeError):
                 continue
 
-            # Derive regime from direction hit
-            hit = obs.get("direction_hit", "").lower() in ("true", "1", "yes")
-            regime = "trending" if hit else "choppy"
-
-            # Derive volatility from close error
-            try:
-                err = abs(float(obs.get("close_error_bp", "0")))
-            except (ValueError, TypeError):
-                err = 0.0
-            vol = "high" if err > 50 else ("normal" if err > 20 else "low")
+            # Regime / volatility from realized OHLC (market-derived).
+            market = ohlc_labels.get(forecast_id, {})
+            regime = market.get("regime_label") or None
+            vol = market.get("volatility_label") or None
 
             # Derive intervention risk from realized change
             try:
@@ -104,7 +113,8 @@ def make_deterministic_adapter(
             existing_tags = obs.get("effective_event_tags", "") or obs.get("auto_event_tags", "")
             tags = tuple(sorted(t.strip() for t in existing_tags.split("|") if t.strip()))
 
-            # Failure reason
+            # Failure reason (distinct diagnostic axis from regime/volatility)
+            hit = obs.get("direction_hit", "").lower() in ("true", "1", "yes")
             strategy = obs.get("strategy_kind", "")
             failure = None
             if is_ugh_kind(strategy) and not hit:

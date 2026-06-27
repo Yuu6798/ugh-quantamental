@@ -29,10 +29,10 @@ from ugh_quantamental.fx_protocol.labeled_observations import (
     _derive_auto_event_tags,
     _is_last_business_day_of_month,
     build_labeled_observations,
+    collect_evaluated_forecast_rows,
     load_manual_annotations,
 )
 from ugh_quantamental.fx_protocol.metrics_utils import collect_floats, count_bool_rows
-from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE, is_ugh_kind
 
 logger = logging.getLogger(__name__)
 
@@ -159,55 +159,64 @@ def _build_ai_annotation_row(
 ) -> dict[str, str]:
     """Build a single AI annotation row using heuristic rules on history data.
 
-    Heuristics (purely supplementary, never authoritative):
-    - regime_label: derived from recent evaluation direction hit rates
+    Heuristics (purely supplementary, never authoritative). Regime and
+    volatility are derived ONLY from realized OHLC / market statistics — never
+    from forecast-accuracy fields (``direction_hit`` / ``close_error_bp``),
+    which would make the labels circular (see
+    engine_review_2026_06_planning.md §5.1). Output uses the shared vocabulary
+    (trending/choppy, low/normal/high) — no "mixed"/"unknown" third bucket.
+
+    - regime_label: close-change sign consistency over recent outcomes
+    - volatility_label: recent intraday range vs trailing baseline
     - event_tags: collected from recent outcome event_tags
-    - volatility_label: derived from recent close_error_bp magnitudes
-    - intervention_risk: simple heuristic based on magnitude of recent moves
+    - intervention_risk: magnitude of recent realized moves (a market fact)
     """
+    from ugh_quantamental.fx_protocol.annotation_fallback import (
+        REGIME_CHOPPY,
+        VOL_NORMAL,
+        classify_regime,
+        classify_volatility,
+        intraday_range_bp,
+    )
+
     base = os.path.abspath(csv_output_dir)
     history_dir = os.path.join(base, "history")
 
-    regime_label = "unknown"
+    regime_label = REGIME_CHOPPY
     event_tags = ""
-    volatility_label = "normal"
+    volatility_label = VOL_NORMAL
     intervention_risk = "low"
-    notes = "auto-generated draft"
+    notes = "auto-generated draft (OHLC-derived)"
 
-    # Scan recent evaluations and outcomes for heuristic signals
-    eval_rows = _collect_recent_eval_rows(history_dir, limit=5)
+    # Scan recent outcomes for market-derived signals (oldest → newest).
     outcome_rows = _collect_recent_outcome_rows(history_dir, limit=5)
+    ohlc_series = sorted(
+        outcome_rows, key=lambda r: r.get("window_end_jst", "")
+    )
 
-    if eval_rows:
-        ugh_evals = [r for r in eval_rows if is_ugh_kind(r.get("strategy_kind", ""))]
-        if ugh_evals:
-            hit_count = sum(
-                1 for r in ugh_evals
-                if r.get("direction_hit", "").lower() in ("true", "1", "yes")
-            )
-            hit_rate = hit_count / len(ugh_evals)
-            if hit_rate >= 0.8:
-                regime_label = "trending"
-            elif hit_rate <= 0.2:
-                regime_label = "choppy"
-            else:
-                regime_label = "mixed"
+    close_changes: list[float] = []
+    ranges_bp: list[float] = []
+    for r in ohlc_series:
+        try:
+            change = float(r.get("realized_close_change_bp", ""))
+            close_changes.append(change)
+        except (ValueError, TypeError):
+            pass
+        try:
+            o = float(r.get("realized_open", ""))
+            h = float(r.get("realized_high", ""))
+            low = float(r.get("realized_low", ""))
+            ranges_bp.append(intraday_range_bp(h, low, o))
+        except (ValueError, TypeError):
+            pass
 
-        close_errors = []
-        for r in eval_rows:
-            try:
-                v = float(r.get("close_error_bp", ""))
-                close_errors.append(v)
-            except (ValueError, TypeError):
-                pass
-        if close_errors:
-            avg_err = sum(close_errors) / len(close_errors)
-            if avg_err > 50:
-                volatility_label = "high"
-            elif avg_err > 20:
-                volatility_label = "normal"
-            else:
-                volatility_label = "low"
+    if close_changes:
+        regime_label = classify_regime(close_changes)
+    if ranges_bp:
+        latest_range = ranges_bp[-1]
+        prior = ranges_bp[:-1]
+        baseline = sum(prior) / len(prior) if prior else 0.0
+        volatility_label = classify_volatility(latest_range, baseline)
 
     if outcome_rows:
         all_tags: list[str] = []
@@ -244,29 +253,6 @@ def _build_ai_annotation_row(
         "ai_notes": notes,
         "generated_at_utc": generated_at_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
-
-
-def _collect_recent_eval_rows(
-    history_dir: str, limit: int = 5
-) -> list[dict[str, str]]:
-    """Collect the most recent evaluation CSV rows from history."""
-    if not os.path.isdir(history_dir):
-        return []
-    rows: list[dict[str, str]] = []
-    for date_dir in sorted(os.listdir(history_dir), reverse=True):
-        if len(rows) >= limit * EXPECTED_DAILY_BATCH_SIZE:
-            break
-        date_path = os.path.join(history_dir, date_dir)
-        if not os.path.isdir(date_path):
-            continue
-        for batch_dir in sorted(os.listdir(date_path)):
-            eval_csv = os.path.join(date_path, batch_dir, "evaluation.csv")
-            if not os.path.isfile(eval_csv):
-                continue
-            with open(eval_csv, newline="", encoding="utf-8") as fh:
-                reader = csv.DictReader(fh)
-                rows.extend(reader)
-    return rows[:limit * EXPECTED_DAILY_BATCH_SIZE]
 
 
 def _collect_recent_outcome_rows(
@@ -588,10 +574,23 @@ def run_annotation_analytics(
     except Exception:
         logger.warning("Manual annotation template step failed (non-fatal).", exc_info=True)
 
-    # Step C: Labeled observations (must run before scoreboards)
+    # Step C: Labeled observations (must run before scoreboards).
+    #
+    # The daily live path must wire AI + deterministic OHLC fallback labels
+    # into the labeled observations, mirroring the weekly rebuild path.
+    # Historically Step C called build_labeled_observations WITHOUT any
+    # annotation source, which is why live weekly reports were 28/28
+    # unannotated (FX-ANNOT-LIVE root cause): suggestions never reached the
+    # effective labels. Both passes are deterministic and API-key-free.
     try:
-        result["labeled_observations_path"] = build_labeled_observations(
+        ai_annotations, fallback_annotations = _build_daily_annotations(
             csv_output_dir, generated_at_utc
+        )
+        result["labeled_observations_path"] = build_labeled_observations(
+            csv_output_dir,
+            generated_at_utc,
+            ai_annotations=ai_annotations,
+            fallback_annotations=fallback_annotations,
         )
     except Exception:
         logger.warning("Labeled observations step failed (non-fatal).", exc_info=True)
@@ -624,3 +623,41 @@ def _read_csv_rows(path: str) -> list[dict[str, str]]:
     """Read all rows from a CSV file."""
     with open(path, newline="", encoding="utf-8") as fh:
         return list(csv.DictReader(fh))
+
+
+def _build_daily_annotations(
+    csv_output_dir: str,
+    generated_at_utc: datetime,
+) -> tuple[dict[str, dict[str, str]] | None, dict[str, dict[str, str]] | None]:
+    """Build forecast_id-keyed AI + OHLC fallback annotations for the daily path.
+
+    Returns ``(ai_annotations, fallback_annotations)``, either of which may be
+    ``None`` when no evaluated history is available. Both passes are
+    deterministic and require no API key. Failures are swallowed so the daily
+    run is never broken by the annotation layer.
+    """
+    history_dir = os.path.join(os.path.abspath(csv_output_dir), "history")
+    if not os.path.isdir(history_dir):
+        return None, None
+
+    ai_annotations: dict[str, dict[str, str]] | None = None
+    fallback_annotations: dict[str, dict[str, str]] | None = None
+    try:
+        from ugh_quantamental.fx_protocol.ai_annotations import (
+            ai_batch_to_lookup,
+            run_ai_annotation_pass,
+        )
+        from ugh_quantamental.fx_protocol.annotation_fallback import (
+            build_ohlc_fallback_annotations,
+        )
+
+        obs = collect_evaluated_forecast_rows(history_dir)
+        if obs:
+            fallback_annotations = build_ohlc_fallback_annotations(obs)
+            batch = run_ai_annotation_pass(obs, generated_at_utc=generated_at_utc)
+            if batch:
+                ai_annotations = ai_batch_to_lookup(batch)
+    except Exception:
+        logger.warning("Daily AI/fallback annotation pass failed (non-fatal).", exc_info=True)
+
+    return ai_annotations, fallback_annotations

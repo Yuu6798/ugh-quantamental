@@ -20,11 +20,14 @@ SOURCE_AI: str = "ai"
 SOURCE_AI_PLUS_AUTO: str = "ai_plus_auto"
 SOURCE_AUTO_ONLY: str = "auto_only"
 SOURCE_MANUAL_COMPAT: str = "manual_compat"
+#: Deterministic rule-based OHLC fallback — the lowest precedence tier, below
+#: manual. Fills regime / volatility only when ai/auto/manual are all absent.
+SOURCE_FALLBACK: str = "ohlc_fallback"
 SOURCE_NONE: str = "none"
 
 ANNOTATION_SOURCE_VALUES: tuple[str, ...] = (
     SOURCE_AI, SOURCE_AI_PLUS_AUTO, SOURCE_AUTO_ONLY,
-    SOURCE_MANUAL_COMPAT, SOURCE_NONE,
+    SOURCE_MANUAL_COMPAT, SOURCE_FALLBACK, SOURCE_NONE,
 )
 
 
@@ -38,10 +41,13 @@ def resolve_effective_label(
     ai_value: str,
     auto_value: str,
     manual_value: str,
+    fallback_value: str = "",
 ) -> tuple[str, str]:
     """Return (effective_value, source) using AI-first precedence.
 
-    Priority: ai > auto > manual.
+    Priority: ai > auto > manual > fallback. The deterministic OHLC
+    ``fallback_value`` is the lowest tier: it only fills the field when none of
+    ai / auto / manual provide a value, so it never overrides a higher source.
     """
     if ai_value:
         return ai_value, SOURCE_AI
@@ -49,6 +55,8 @@ def resolve_effective_label(
         return auto_value, SOURCE_AUTO_ONLY
     if manual_value:
         return manual_value, SOURCE_MANUAL_COMPAT
+    if fallback_value:
+        return fallback_value, SOURCE_FALLBACK
     return "", SOURCE_NONE
 
 

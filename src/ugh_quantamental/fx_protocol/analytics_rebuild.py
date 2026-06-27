@@ -20,6 +20,9 @@ from ugh_quantamental.fx_protocol.analytics_annotations import (
     build_tag_scoreboard,
     generate_manual_annotation_template,
 )
+from ugh_quantamental.fx_protocol.labeled_observations import (
+    collect_evaluated_forecast_rows,
+)
 from ugh_quantamental.fx_protocol.weekly_report_exports import (
     export_weekly_report_artifacts,
 )
@@ -68,32 +71,39 @@ def rebuild_annotation_analytics(
     except Exception:
         logger.warning("Manual annotation template rebuild failed.", exc_info=True)
 
-    # Step 1b: Generate AI annotations if not provided externally.
-    # Uses the deterministic adapter to ensure AI-first analysis is active
-    # in the default rebuild path (CLI, GitHub Actions).
-    if ai_annotations is None:
-        try:
-            from ugh_quantamental.fx_protocol.ai_annotations import (
-                ai_batch_to_lookup,
-                run_ai_annotation_pass,
+    # Step 1b: Generate AI + deterministic OHLC fallback annotations if not
+    # provided externally. The deterministic adapter and OHLC fallback ensure
+    # AI-first analysis is active in the default rebuild path (CLI, Actions)
+    # without any API key.
+    fallback_annotations: dict[str, dict[str, str]] | None = None
+    try:
+        _history = os.path.join(os.path.abspath(csv_output_dir), "history")
+        if os.path.isdir(_history):
+            from ugh_quantamental.fx_protocol.annotation_fallback import (
+                build_ohlc_fallback_annotations,
             )
-            # Build a quick observation list from history for the adapter
-            _history = os.path.join(os.path.abspath(csv_output_dir), "history")
-            if os.path.isdir(_history):
-                _obs_for_ai = _collect_eval_rows_for_ai(_history)
-                if _obs_for_ai:
+            _obs_for_ai = collect_evaluated_forecast_rows(_history)
+            if _obs_for_ai:
+                fallback_annotations = build_ohlc_fallback_annotations(_obs_for_ai)
+                if ai_annotations is None:
+                    from ugh_quantamental.fx_protocol.ai_annotations import (
+                        ai_batch_to_lookup,
+                        run_ai_annotation_pass,
+                    )
                     _batch = run_ai_annotation_pass(
                         _obs_for_ai, generated_at_utc=generated_at_utc,
                     )
                     if _batch:
                         ai_annotations = ai_batch_to_lookup(_batch)
-        except Exception:
-            logger.warning("Default AI annotation pass failed (non-fatal).", exc_info=True)
+    except Exception:
+        logger.warning("Default AI/fallback annotation pass failed (non-fatal).", exc_info=True)
 
     # Step 2: Rebuild labeled observations (must run before scoreboards)
     try:
         result["labeled_observations_path"] = build_labeled_observations(
-            csv_output_dir, generated_at_utc, ai_annotations=ai_annotations
+            csv_output_dir, generated_at_utc,
+            ai_annotations=ai_annotations,
+            fallback_annotations=fallback_annotations,
         )
     except Exception:
         logger.warning("Labeled observations rebuild failed.", exc_info=True)
@@ -182,82 +192,3 @@ def rebuild_weekly_report(
     export_weekly_report_artifacts(report, csv_output_dir, date_str)
 
     return report
-
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
-
-
-def _collect_eval_rows_for_ai(history_dir: str) -> list[dict[str, str]]:
-    """Collect evaluated forecast rows from history for the AI annotation adapter.
-
-    Uses cross-batch join: evaluations and outcomes live in the *next* day's
-    batch, so we build global forecast_id → evaluation and forecast_id →
-    outcome indexes first, then iterate over forecasts and merge all three.
-    This ensures the adapter receives outcome-derived fields
-    (realized_close_change_bp, event_tags) needed for accurate label derivation.
-    """
-    import csv as _csv
-
-    # Pass 1: global evaluation and outcome indexes across all batches
-    global_evals: dict[str, dict[str, str]] = {}
-    global_outcomes: dict[str, dict[str, str]] = {}
-    for date_dir in sorted(os.listdir(history_dir)):
-        date_path = os.path.join(history_dir, date_dir)
-        if not os.path.isdir(date_path):
-            continue
-        for batch_dir in sorted(os.listdir(date_path)):
-            batch_path = os.path.join(date_path, batch_dir)
-            eval_csv = os.path.join(batch_path, "evaluation.csv")
-            outcome_csv = os.path.join(batch_path, "outcome.csv")
-
-            if os.path.isfile(eval_csv):
-                outcome_row: dict[str, str] | None = None
-                if os.path.isfile(outcome_csv):
-                    with open(outcome_csv, newline="", encoding="utf-8") as fh:
-                        rows = list(_csv.DictReader(fh))
-                        if rows:
-                            outcome_row = rows[0]
-                with open(eval_csv, newline="", encoding="utf-8") as fh:
-                    for r in _csv.DictReader(fh):
-                        fid = r.get("forecast_id", "")
-                        if fid:
-                            global_evals[fid] = r
-                            if outcome_row is not None:
-                                global_outcomes[fid] = outcome_row
-
-    # Pass 2: iterate forecasts, merge with global evaluation + outcome indexes
-    rows: list[dict[str, str]] = []
-    for date_dir in sorted(os.listdir(history_dir)):
-        date_path = os.path.join(history_dir, date_dir)
-        if not os.path.isdir(date_path):
-            continue
-        for batch_dir in sorted(os.listdir(date_path)):
-            forecast_csv = os.path.join(date_path, batch_dir, "forecast.csv")
-            if not os.path.isfile(forecast_csv):
-                continue
-            with open(forecast_csv, newline="", encoding="utf-8") as fh:
-                for fc in _csv.DictReader(fh):
-                    fid = fc.get("forecast_id", "")
-                    if not fid:
-                        continue
-                    ev = global_evals.get(fid)
-                    if not ev:
-                        continue
-                    merged = dict(fc)
-                    merged.update(ev)
-                    oc = global_outcomes.get(fid)
-                    if oc:
-                        merged["realized_close_change_bp"] = oc.get(
-                            "realized_close_change_bp", ""
-                        )
-                        merged["realized_direction"] = oc.get(
-                            "realized_direction", ""
-                        )
-                        # Carry outcome event_tags for AI adapter tag derivation
-                        oc_tags = oc.get("event_tags", "")
-                        if oc_tags:
-                            merged["effective_event_tags"] = oc_tags
-                    rows.append(merged)
-    return rows
