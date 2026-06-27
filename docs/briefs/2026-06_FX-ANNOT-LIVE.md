@@ -53,11 +53,13 @@ fallback として追加して、daily/weekly のスライス分析が常に pop
       `ai_annotations.py:85-94`)。これは「choppy = モデルが外した日」という
       **定義上の循環**で、regime 別分析が市場レジームではなくモデル成績の再エン
       コードになる (★3 GOV フラグの前提自体を無効化)。AI は fallback より
-      precedence が上なので OHLC fallback も上書きされる。よって live AI/default
-      の regime/volatility ラベルを **OHLC/市場由来のみ**に是正する (または
-      これら 2 軸に限り AI を fallback の下に下げる)。テストで
-      `direction_hit` / `close_error_bp` 等の performance フィールドがラベルを
-      決定しないことを assert する
+      precedence が上なので OHLC fallback も上書きされる。よって **AI/default 経路の
+      ラベル導出そのものを OHLC/市場由来に是正する** (precedence 順
+      `ai > auto > manual` は変更しない — AI を fallback の下に下げる案は採らない。
+      それは resolve_effective_label の順序と「fallback は欠落フィールドのみ補完」
+      という本 brief の要件に矛盾するため)。テストで `direction_hit` /
+      `close_error_bp` 等の performance フィールドがラベルを決定しないことを
+      assert する
 - [ ] 既存の AI / auto / manual アノテーションが存在する場合は現行の
       AI-first precedence (`annotation_sources.py`: **ai > auto > manual**) を
       尊重し、rule-based fallback はそれら**全てが欠落しているフィールドのみ**を
