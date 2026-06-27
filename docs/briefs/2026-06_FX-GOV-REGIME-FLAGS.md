@@ -59,8 +59,11 @@ choppy 0% dir / high-vol 0% dir という壊滅的なレジーム別失敗が tr
 - フラグ id は既存命名に倣う (例 `regime_direction_collapse`,
   `volatility_direction_collapse`)。`monthly_governance.py:286` の
   `("keep_current_logic", "insufficient_data")` 分岐に新フラグが干渉しないこと。
-- レジーム軸の enum 値は FX-ANNOT-LIVE / FX-STATEPROXY-REDEF と完全一致させる
+- レジーム軸の enum 値は **FX-ANNOT-LIVE とのみ**完全一致させる
   (trending/choppy, low/normal/high)。axes-mismatch は PR #104 型 churn の主因。
+  ※ FX-STATEPROXY-REDEF は別語彙 (`LifecycleState`: dormant/setup/fire/…) を扱う
+  ので regime/vol 軸を共有しない — この brief から STATEPROXY を軸共有先として
+  参照しないこと。
 
 ## Required Outputs
 - Branch name: `codex/fx-gov-regime-flags`
