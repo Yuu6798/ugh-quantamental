@@ -24,7 +24,13 @@ fallback として追加して、daily/weekly のスライス分析が常に pop
       `build_labeled_observations` (同 :593) にそれを渡していない (suggestions が
       effective label に昇格しない)。weekly 経路 `rebuild_weekly_report`
       (`analytics_rebuild.py:120`) は `run_ai_annotation_pass` (:85) 経由。
-      この配線ギャップを特定し是正する
+      この配線ギャップを特定し是正する。⚠️ **キー変換も必須**: Step A の
+      suggestions は `as_of_jst` キー (forecast_id 列なし、`analytics_annotations.py:70,239`)
+      だが、`build_labeled_observations` は `ai_annotations.get(forecast_id, {})`
+      (`labeled_observations.py:320`) で per-forecast_id 解決する。単に CSV を渡す
+      だけでは突合せず coverage 0 のまま。1 つの as_of_jst suggestion を当日の
+      各 forecast_id へ展開する変換 (または weekly adapter の forecast_id-keyed
+      dict 形状の再利用) を要求する
 - [ ] **end-to-end テスト**: live rebuild 経路 (`rebuild_weekly_report`) と daily
       経路 (`run_annotation_analytics`) を通して、labeled_observations と
       `weekly_annotation_coverage.csv` の effective coverage が実際に populate
