@@ -38,7 +38,13 @@ The v1 state engine consumes:
        multiplicative-gate loophole.
      - `expansion`: rises with strong `e_star`, conviction, follow-through, and prior fire/expansion lean.
      - `exhaustion`: rises when signal stays positive but pricing saturation is high and mismatch shrinks.
-     - `failure`: rises when `e_star` is negative and/or disconfirmation/regime shock is elevated.
+     - `failure`: rises when `e_star` is negative and/or disconfirmation is
+       elevated. As of **v2.4** a lone `regime_shock` is damped: it contributes
+       only `regime_shock_failure_floor * regime_shock` to the failure evidence
+       when uncorroborated, ramping to its full value as `negative_e` /
+       `disconfirmation` corroborate it. This stops a single same-snapshot shock
+       spike from flipping the state to `failure` while keeping `negative_e` and
+       `disconfirmation` as full-strength single-signal triggers (see Changelog).
 
 3. `normalize_state_probabilities(scores, config)`
    - Applies temperature softmax to map any finite score vector to a valid `StateProbabilities` simplex.
@@ -105,3 +111,39 @@ Still out-of-scope in v1:
 - persistence/connectors/CLI orchestration
 - online parameter fitting
 - external data retrieval
+
+## Changelog
+
+### v2.4 — failure hysteresis (FX-STATE-HYSTERESIS, engine_review_2026_06 ★2)
+
+Single same-snapshot `regime_shock` spikes (e.g. the trading day after a sharp
+move) previously fired the `failure` state on their own because the failure
+evidence was the raw `max(negative_e, disconfirmation, regime_shock)`. That
+distorted the lifecycle-state label, `state_proxy`, and regime/state-stratified
+analysis even when the forecast was correct (the state is a parallel label, not
+a forecast-direction input — `forecasting.py` derives direction from
+`e_star × conviction`, so this is a labelling/analysis cleanup, not a
+direction-prediction change).
+
+v2.4 damps the shock term in `compute_state_evidence`:
+
+```
+negative_signal     = clamp(-e_star)            # 0 for any non-negative e_star
+shock_corroboration = max(negative_signal, disconfirmation)
+damped_regime_shock = regime_shock * (
+    regime_shock_failure_floor + (1 - regime_shock_failure_floor) * shock_corroboration
+)
+failure = failure_weight * clamp(max(negative_e, disconfirmation, damped_regime_shock))
+```
+
+`regime_shock_failure_floor` (new `StateConfig` field, default `0.4`) caps the
+standalone contribution of an uncorroborated shock; `negative_e` and
+`disconfirmation` remain full-strength single-signal triggers. The corroboration
+gate deliberately uses the *negative directional strength* `max(0, -e_star)` and
+**not** `negative_e = (1 - e_star)/2`: the latter is `0.5` at neutral `e_star`
+and would treat a positive prediction as partial corroboration, leaving an
+uncorroborated shock above `floor * shock`. The damping is
+same-snapshot only — no prior-day state is required, so no workflow/plumbing
+change is needed. `engine_version` bumps `v2.3 → v2.4` (synced across
+`automation_models.py`, `fx-daily-protocol.yml`, and
+`scripts/run_fx_daily_protocol.py`).

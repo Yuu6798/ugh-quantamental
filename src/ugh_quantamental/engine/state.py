@@ -131,8 +131,23 @@ def compute_state_evidence(
     exhaustion = config.exhaustion_weight * _clamp(
         positive_e * pricing_sat * mismatch_shrink * (0.5 + 0.5 * follow_through)
     )
+    # v2.4 failure hysteresis: dampen the instantaneous regime_shock so a single
+    # same-snapshot spike cannot dominate the failure evidence on its own.
+    # negative_e and disconfirmation remain full-strength single-signal triggers;
+    # the shock contributes only `floor * shock` when uncorroborated and ramps to
+    # its full value as a genuine negative signal / disconfirmation corroborate
+    # it. Corroboration uses the *negative directional strength* max(0, -e_star)
+    # — NOT negative_e = (1 - e_star)/2, which is 0.5 at neutral e_star and would
+    # treat a positive prediction as partial corroboration. Same-snapshot only —
+    # no prior-day state required (FX-STATE-HYSTERESIS / ★2).
+    negative_signal = _clamp(-e_star)
+    shock_corroboration = max(negative_signal, disconfirmation)
+    damped_regime_shock = regime_shock * (
+        config.regime_shock_failure_floor
+        + (1.0 - config.regime_shock_failure_floor) * shock_corroboration
+    )
     failure = config.failure_weight * _clamp(
-        max(negative_e, disconfirmation, regime_shock)
+        max(negative_e, disconfirmation, damped_regime_shock)
     )
 
     return {

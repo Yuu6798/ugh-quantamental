@@ -333,6 +333,121 @@ def test_failure_case_negative_signal_or_disconfirmation(base_config: StateConfi
     assert result.dominant_state is LifecycleState.failure
 
 
+def test_lone_regime_shock_failure_evidence_is_damped(base_config: StateConfig) -> None:
+    """v2.4: an uncorroborated regime_shock contributes only floor*shock.
+
+    Positive e_star (no negative directional signal) and no disconfirmation, so
+    corroboration is 0 and the shock contributes exactly ``floor * shock``.
+    """
+    evidence = compute_state_evidence(
+        snapshot=_make_snapshot(prior_dominant=LifecycleState.setup),
+        projection_result=_projection(
+            e_star=0.5, conviction=0.5, urgency=0.4, mismatch_px=0.3, mismatch_sem=0.2,
+        ),
+        event_features=StateEventFeatures(
+            catalyst_strength=0.3,
+            follow_through=0.35,
+            pricing_saturation=0.2,
+            disconfirmation_strength=0.0,  # no corroboration
+            regime_shock=0.9,  # high lone shock
+            observation_freshness=0.85,
+        ),
+        config=base_config,
+    )
+    # negative_signal = max(0, -0.5) = 0; corroboration = max(0, 0) = 0.
+    # damped = 0.9 * 0.4 = 0.36; negative_e = (1 - 0.5)/2 = 0.25.
+    # failure = max(0.25, 0.0, 0.36) = 0.36 (= floor * shock).
+    assert evidence[LifecycleState.failure] == pytest.approx(0.36)
+    # Strictly below the raw-shock value the old max() would have produced.
+    assert evidence[LifecycleState.failure] < 0.9
+
+
+def test_weak_positive_e_star_is_not_shock_corroboration(base_config: StateConfig) -> None:
+    """A weak-positive e_star must NOT corroborate the shock (PR #117 review).
+
+    negative_e = (1 - e_star)/2 is non-zero for positive e_star, but the
+    corroboration gate uses max(0, -e_star), which is 0 here — so a lone shock
+    contributes exactly floor*shock, not an inflated value.
+    """
+    evidence = compute_state_evidence(
+        snapshot=_make_snapshot(prior_dominant=LifecycleState.setup),
+        projection_result=_projection(
+            e_star=0.2, conviction=0.5, urgency=0.4, mismatch_px=0.3, mismatch_sem=0.2,
+        ),
+        event_features=StateEventFeatures(
+            catalyst_strength=0.3,
+            follow_through=0.35,
+            pricing_saturation=0.2,
+            disconfirmation_strength=0.0,
+            regime_shock=1.0,
+            observation_freshness=0.85,
+        ),
+        config=base_config,
+    )
+    # damped shock = 1.0 * floor(0.4) = 0.4 (NOT 0.4 + 0.6*0.4 = 0.64).
+    # negative_e = (1 - 0.2)/2 = 0.4, so failure = max(0.4, 0, 0.4) = 0.4.
+    assert evidence[LifecycleState.failure] == pytest.approx(0.4)
+    assert evidence[LifecycleState.failure] < 0.64
+
+
+def test_corroborated_regime_shock_failure_unaffected(base_config: StateConfig) -> None:
+    """v2.4: disconfirmation/negative_e remain full-strength failure triggers."""
+    evidence = compute_state_evidence(
+        snapshot=_make_snapshot(prior_dominant=LifecycleState.setup),
+        projection_result=_projection(
+            e_star=-0.5, conviction=0.3, urgency=0.4, mismatch_px=0.4, mismatch_sem=0.4,
+        ),
+        event_features=StateEventFeatures(
+            catalyst_strength=0.2,
+            follow_through=0.2,
+            pricing_saturation=0.2,
+            disconfirmation_strength=0.9,  # strong corroboration
+            regime_shock=0.9,
+            observation_freshness=0.85,
+        ),
+        config=base_config,
+    )
+    # disconfirmation (0.9) dominates the max regardless of shock damping.
+    assert evidence[LifecycleState.failure] == pytest.approx(0.9)
+
+
+def test_lone_shock_does_not_flip_state_to_failure() -> None:
+    """v2.4 (★2): a single high regime_shock with a positive next close must
+    not flip the dominant state to failure. Holding the (evidence-leaning)
+    scenario fixed, the undamped config (floor=1.0, recovering the old raw-max
+    behavior) flips to failure; the v2.4 damping default keeps it at setup."""
+    snapshot = _make_snapshot(prior_dominant=LifecycleState.setup)
+    omega = _make_omega(snapshot)
+    # Positive next close (e_star > 0) — the model was right — but a lone
+    # same-snapshot regime_shock spikes.
+    projection = _projection(
+        e_star=0.55, conviction=0.6, urgency=0.45, mismatch_px=0.25, mismatch_sem=0.25,
+    )
+    features = StateEventFeatures(
+        catalyst_strength=0.35,
+        follow_through=0.5,
+        pricing_saturation=0.2,
+        disconfirmation_strength=0.05,  # uncorroborated
+        regime_shock=0.95,  # the post-shock spike
+        observation_freshness=0.85,
+    )
+    base = StateConfig(prior_weight=0.3, evidence_weight=0.7)
+
+    damped = run_state_engine(
+        snapshot=snapshot, omega=omega, projection_result=projection,
+        event_features=features, config=base,
+    )
+    assert damped.dominant_state is not LifecycleState.failure
+
+    # Recover the pre-v2.4 raw-max behavior: floor=1.0 disables damping.
+    undamped = run_state_engine(
+        snapshot=snapshot, omega=omega, projection_result=projection,
+        event_features=features,
+        config=base.model_copy(update={"regime_shock_failure_floor": 1.0}),
+    )
+    assert undamped.dominant_state is LifecycleState.failure
+
+
 def test_dominant_state_resolution_is_deterministic() -> None:
     tied = StateProbabilities(
         dormant=0.3,

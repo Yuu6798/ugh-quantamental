@@ -30,6 +30,12 @@ class StateConfig(BaseModel):
     final_softmax_temperature: FiniteFloat = Field(default=0.12, ge=1e-8)
     tie_break_epsilon: FiniteFloat = Field(default=1e-8, ge=1e-8, le=1e-4)
     catalyst_floor_coef: FiniteFloat = Field(default=0.3, ge=0.0, le=1.0)
+    # v2.4 failure hysteresis: a lone same-snapshot regime_shock contributes only
+    # `regime_shock_failure_floor * shock` to the failure evidence; its full
+    # weight is restored only as the shock is corroborated by negative e_star or
+    # disconfirmation. This stops a single post-shock spike from flipping the
+    # state to `failure` (see engine_review_2026_06 ★2 / FX-STATE-HYSTERESIS).
+    regime_shock_failure_floor: FiniteFloat = Field(default=0.4, ge=0.0, le=1.0)
 
     dormant_weight: FiniteFloat = Field(default=1.0, ge=0.0)
     setup_weight: FiniteFloat = Field(default=1.0, ge=0.0)
