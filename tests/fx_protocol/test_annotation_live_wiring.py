@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 
 from ugh_quantamental.fx_protocol.analytics_annotations import run_annotation_analytics
 from ugh_quantamental.fx_protocol.analytics_rebuild import rebuild_weekly_report
+from ugh_quantamental.fx_protocol.annotation_sources import build_annotation_source_summary
 from ugh_quantamental.fx_protocol.labeled_observations import build_labeled_observations
 from ugh_quantamental.fx_protocol.monthly_review import compute_monthly_regime_metrics
 from ugh_quantamental.fx_protocol.weekly_reports_v2 import build_slice_metrics
@@ -224,3 +225,54 @@ class TestFallbackPrecedence:
         rows = _read_rows(obs_path)
         assert all(r["annotation_source"] == "none" for r in rows)
         assert all(not r["regime_label"] for r in rows)
+
+    def test_pending_manual_not_promoted_by_fallback(self, tmp_path) -> None:
+        """A pending manual annotation must stay pending even when a fallback
+        label is available (manual outranks fallback; regression for
+        PR #116 review)."""
+        tmpdir = str(tmp_path)
+        obs_path = _setup_history(tmpdir, days=3)
+        # Manual annotation for 2026-03-17 (fc_001), pending, regime only.
+        _write_csv(
+            os.path.join(tmpdir, "annotations", "manual_annotations.csv"),
+            [{
+                "as_of_jst": "2026-03-17T08:00:00+09:00",
+                "regime_label": "choppy",
+                "event_tags": "",
+                "volatility_label": "",
+                "intervention_risk": "",
+                "notes": "",
+                "annotation_status": "pending",
+            }],
+            ["as_of_jst", "regime_label", "event_tags", "volatility_label",
+             "intervention_risk", "notes", "annotation_status"],
+        )
+        fallback = {"fc_001": {"regime_label": "trending", "volatility_label": "high"}}
+        build_labeled_observations(tmpdir, _NOW, fallback_annotations=fallback)
+        row = {r["as_of_jst"][:10]: r for r in _read_rows(obs_path)}["2026-03-17"]
+
+        assert row["regime_label"] == "choppy"  # manual wins over fallback
+        assert row["annotation_source"] == "manual_compat"
+        assert row["annotation_status"] == "pending"  # NOT promoted to confirmed
+
+
+class TestSourceSummaryCountsFallback:
+    def test_fallback_rows_counted_and_buckets_sum(self) -> None:
+        observations = [
+            {"annotation_source": "ohlc_fallback"},
+            {"annotation_source": "ohlc_fallback"},
+            {"annotation_source": "ai"},
+            {"annotation_source": "none"},
+        ]
+        summary = build_annotation_source_summary(observations)
+        assert summary["fallback_annotated_count"] == 2
+        assert summary["ai_annotated_count"] == 1
+        assert summary["unannotated_count"] == 1
+        bucket_sum = (
+            summary["ai_annotated_count"]
+            + summary["auto_annotated_count"]
+            + summary["manual_annotated_count"]
+            + summary["fallback_annotated_count"]
+            + summary["unannotated_count"]
+        )
+        assert bucket_sum == summary["total_observations"] == 4

@@ -455,12 +455,16 @@ def _collect_labeled_observation_rows(
                     "intervention_risk": eff_ir,
                     "failure_reason": ai.get("ai_failure_reason", ""),
                     "annotation_source": annotation_source,
-                    # Market-derived rows (AI or deterministic OHLC fallback)
-                    # are treated as "confirmed" for downstream scoreboards and
-                    # monthly slices that gate on annotation_status == confirmed.
+                    # Confirmation follows the *winning* source. AI and the
+                    # deterministic OHLC fallback are market-derived -> confirmed.
+                    # When manual outranks the fallback (manual_compat), the
+                    # manual row's own status is preserved, so a *pending*
+                    # manual annotation is never promoted to confirmed just
+                    # because a fallback label was also available.
                     "annotation_status": (
                         "confirmed"
-                        if (has_ai or has_fallback)
+                        if annotation_source
+                        in (SOURCE_AI, SOURCE_AI_PLUS_AUTO, SOURCE_FALLBACK)
                         else manual.get("annotation_status", "")
                     ),
                 }

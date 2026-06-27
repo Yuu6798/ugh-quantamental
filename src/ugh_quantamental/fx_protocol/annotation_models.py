@@ -130,6 +130,7 @@ class AiAnnotationSourceSummary(BaseModel):
     ai_annotated_count: int = 0
     auto_annotated_count: int = 0
     manual_annotated_count: int = 0
+    fallback_annotated_count: int = 0
     unannotated_count: int = 0
     model_versions: tuple[str, ...] = ()
     prompt_versions: tuple[str, ...] = ()
@@ -141,6 +142,7 @@ class AiAnnotationSourceSummary(BaseModel):
             self.ai_annotated_count
             + self.auto_annotated_count
             + self.manual_annotated_count
+            + self.fallback_annotated_count
             + self.unannotated_count
         )
         if total != self.total_observations:

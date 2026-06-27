@@ -577,10 +577,13 @@ def run_weekly_report_v2(
     et_source_summary = build_event_tag_source_summary(observations)
 
     obs_count = len(observations)
-    # AI-first: annotated_analysis_ready when AI or auto annotations exist
-    ai_or_auto_count = (
+    # AI-first: annotated_analysis_ready when AI, auto, or the deterministic
+    # OHLC fallback supply machine-derived labels (manual_compat is excluded
+    # as it may be unconfirmed; fallback is always confirmed market coverage).
+    annotated_count = (
         source_summary.get("ai_annotated_count", 0)
         + source_summary.get("auto_annotated_count", 0)
+        + source_summary.get("fallback_annotated_count", 0)
     )
 
     # Collect model/prompt versions from source summary
@@ -607,7 +610,7 @@ def run_weekly_report_v2(
         "theory_versions_in_window": theory_versions_in_window,
         "engine_versions_in_window": engine_versions_in_window,
         "core_analysis_ready": obs_count > 0,
-        "annotated_analysis_ready": ai_or_auto_count > 0,
+        "annotated_analysis_ready": annotated_count > 0,
         "annotation_coverage": coverage,
         "annotation_field_coverage": field_coverage,
         "annotation_source_summary": source_summary,

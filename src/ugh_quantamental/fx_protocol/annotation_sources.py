@@ -126,6 +126,7 @@ def build_annotation_source_summary(
     ai_count = counts[SOURCE_AI] + counts[SOURCE_AI_PLUS_AUTO]
     auto_count = counts[SOURCE_AUTO_ONLY]
     manual_count = counts[SOURCE_MANUAL_COMPAT]
+    fallback_count = counts[SOURCE_FALLBACK]
     unannotated = counts[SOURCE_NONE]
 
     return {
@@ -133,6 +134,10 @@ def build_annotation_source_summary(
         "ai_annotated_count": ai_count,
         "auto_annotated_count": auto_count,
         "manual_annotated_count": manual_count,
+        # Deterministic OHLC fallback rows: market-derived coverage that must
+        # be counted so the buckets sum to total and fallback-only weeks are
+        # not mis-reported as unannotated.
+        "fallback_annotated_count": fallback_count,
         "unannotated_count": unannotated,
         "model_versions": sorted(model_versions),
         "prompt_versions": sorted(prompt_versions),
