@@ -237,6 +237,21 @@ class TestGenerateAiAnnotations:
         as_of_values = [r["as_of_jst"] for r in rows]
         assert as_of_values.count(_AS_OF.isoformat()) == 1
 
+    def test_uses_shared_vocabulary_no_mixed(self, tmp_path: str) -> None:
+        """Regime / volatility must use the shared axes only (no mixed/unknown).
+
+        A leaked "mixed" regime would re-introduce a third bucket via the
+        AI > fallback precedence (engine_review_2026_06_planning.md §5.1).
+        """
+        tmpdir = str(tmp_path)
+        _setup_history(tmpdir)
+        path = generate_ai_annotations(tmpdir, _AS_OF, _NOW)
+        assert path is not None
+        with open(path, newline="", encoding="utf-8") as fh:
+            row = list(csv.DictReader(fh))[-1]
+        assert row["ai_regime_label"] in ("trending", "choppy")
+        assert row["ai_volatility_label"] in ("low", "normal", "high")
+
 
 # ---------------------------------------------------------------------------
 # Test: Manual annotation template

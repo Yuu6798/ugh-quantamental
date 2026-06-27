@@ -26,6 +26,10 @@ def _make_obs(
     close_error_bp: str = "15.0",
     realized_close_change_bp: str = "20.0",
     strategy_kind: str = "ugh",
+    realized_open: str = "150.00",
+    realized_high: str = "150.30",
+    realized_low: str = "149.70",
+    realized_close: str = "150.30",
 ) -> dict[str, str]:
     return {
         "forecast_id": forecast_id,
@@ -36,6 +40,12 @@ def _make_obs(
         "direction_hit": direction_hit,
         "close_error_bp": close_error_bp,
         "realized_close_change_bp": realized_close_change_bp,
+        # OHLC drives the (market-derived) regime / volatility labels.
+        # Default: ~40bp intraday range, single positive close change.
+        "realized_open": realized_open,
+        "realized_high": realized_high,
+        "realized_low": realized_low,
+        "realized_close": realized_close,
         "effective_event_tags": "fomc",
     }
 
@@ -47,8 +57,9 @@ class TestDeterministicAdapter:
         batch = adapter(obs, None)
         assert len(batch.records) == 1
         rec = batch.records[0]
-        assert rec.regime_label == "trending"  # direction_hit=True
-        assert rec.volatility_label == "low"  # close_error_bp=15 < 20
+        # OHLC-derived: positive close change -> trending; ~40bp range -> low.
+        assert rec.regime_label == "trending"
+        assert rec.volatility_label == "low"
         assert rec.intervention_risk == "low"  # change=20 < 50
         assert "fomc" in rec.event_tags
 
@@ -88,9 +99,23 @@ class TestDeterministicAdapter:
 
     def test_high_volatility_label(self) -> None:
         adapter = make_deterministic_adapter(generated_at_utc=_NOW)
-        obs = [_make_obs(close_error_bp="75.0")]
+        # ~100bp intraday range (>= 90bp absolute threshold) -> high.
+        obs = [_make_obs(realized_high="151.00", realized_low="149.50")]
         batch = adapter(obs, None)
         assert batch.records[0].volatility_label == "high"
+
+    def test_labels_ignore_performance_fields(self) -> None:
+        """regime / volatility must NOT depend on direction_hit / close_error_bp.
+
+        Holding OHLC fixed, flipping the performance fields must not change the
+        market-derived labels (guards against the circular-label leakage that
+        FX-ANNOT-LIVE removes).
+        """
+        adapter = make_deterministic_adapter(generated_at_utc=_NOW)
+        hit = adapter([_make_obs(direction_hit="True", close_error_bp="5.0")], None)
+        miss = adapter([_make_obs(direction_hit="False", close_error_bp="95.0")], None)
+        assert hit.records[0].regime_label == miss.records[0].regime_label
+        assert hit.records[0].volatility_label == miss.records[0].volatility_label
 
     def test_medium_intervention_risk(self) -> None:
         adapter = make_deterministic_adapter(generated_at_utc=_NOW)
@@ -106,7 +131,7 @@ class TestAiBatchToLookup:
         lookup = ai_batch_to_lookup(batch)
         assert "fc-001" in lookup
         row = lookup["fc-001"]
-        assert row["ai_regime_label"] == "trending"
+        assert row["ai_regime_label"] == "trending"  # positive close change
         assert row["ai_annotation_status"] == "generated"
         assert row["ai_annotation_model_version"] == "deterministic-v1"
 

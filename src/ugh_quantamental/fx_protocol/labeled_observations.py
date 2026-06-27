@@ -54,7 +54,10 @@ LABELED_OBSERVATION_FIELDNAMES: tuple[str, ...] = (
     "ai_annotation_prompt_version",
     "ai_evidence_refs",
     "ai_annotation_status",
-    # Effective labels (resolved via AI > auto > manual precedence)
+    # Deterministic OHLC fallback labels (lowest tier, below manual)
+    "fallback_regime_label",
+    "fallback_volatility_label",
+    # Effective labels (resolved via AI > auto > manual > fallback precedence)
     "regime_label",
     "event_tags",
     "manual_event_tags",
@@ -191,15 +194,47 @@ def _read_csv_rows(path: str) -> list[dict[str, str]]:
         return list(csv.DictReader(fh))
 
 
+def _resolve_annotation_status(
+    has_ai: bool, label_sources: set[str], manual_status: str
+) -> str:
+    """Resolve ``annotation_status`` from the row's annotation provenance.
+
+    - Any AI-populated row is ``confirmed`` — including tag-only or
+      failure-reason-only AI annotations that carry no regime/volatility/
+      intervention label (the AI pass ran; its output is machine-derived).
+    - For non-AI rows, an unconfirmed manual *label* that won a field keeps its
+      own status (e.g. ``pending``), so a deterministic fallback label available
+      for the same row never silently promotes it to ``confirmed``.
+    - Otherwise an OHLC fallback label that won a field is ``confirmed`` —
+      including rows that also carry auto event tags, which must not strip a
+      fallback-labeled row of its confirmation.
+    - When nothing was resolved, the manual status (possibly empty) carries.
+    """
+    from ugh_quantamental.fx_protocol.annotation_sources import (
+        SOURCE_FALLBACK,
+        SOURCE_MANUAL_COMPAT,
+    )
+
+    if has_ai:
+        return "confirmed"
+    if SOURCE_MANUAL_COMPAT in label_sources and manual_status != "confirmed":
+        return manual_status
+    if SOURCE_FALLBACK in label_sources:
+        return "confirmed"
+    return manual_status
+
+
 def build_labeled_observations(
     csv_output_dir: str,
     generated_at_utc: datetime,
     ai_annotations: dict[str, dict[str, str]] | None = None,
+    fallback_annotations: dict[str, dict[str, str]] | None = None,
 ) -> str | None:
     """Build ``labeled_observations.csv`` joining history CSVs with annotations.
 
     AI annotations are the primary annotation source.  Manual annotations
-    are optional compatibility inputs with lowest precedence.
+    are optional compatibility inputs.  The deterministic OHLC fallback is the
+    lowest tier and only fills fields absent from all higher sources.
 
     Parameters
     ----------
@@ -207,6 +242,11 @@ def build_labeled_observations(
         Optional dict keyed by forecast_id containing AI annotation fields.
         When provided, these become the primary source for regime/volatility/
         intervention/event-tag labels.
+    fallback_annotations:
+        Optional dict keyed by forecast_id with ``regime_label`` /
+        ``volatility_label`` derived deterministically from realized OHLC.
+        Lowest precedence: applied only where ai/auto/manual leave a field
+        empty.
 
     Returns the absolute path to the written file, or ``None`` on failure.
     """
@@ -219,6 +259,7 @@ def build_labeled_observations(
         manual_annotations = load_manual_annotations(csv_output_dir)
         rows = _collect_labeled_observation_rows(
             history_dir, manual_annotations, ai_annotations or {},
+            fallback_annotations or {},
         )
 
         if not rows:
@@ -238,13 +279,15 @@ def _collect_labeled_observation_rows(
     history_dir: str,
     manual_annotations: dict[str, dict[str, str]],
     ai_annotations: dict[str, dict[str, str]],
+    fallback_annotations: dict[str, dict[str, str]] | None = None,
 ) -> list[dict[str, str]]:
     """Scan history/ and build labeled observation rows.
 
     Uses AI-first annotation precedence:
       1. AI annotation labels (primary)
       2. Deterministic auto-derived labels
-      3. Manual compatibility labels (lowest priority)
+      3. Manual compatibility labels
+      4. Deterministic OHLC fallback labels (lowest priority)
 
     Evaluations live in the *next* day's batch (they evaluate the previous
     day's forecasts against that day's outcome).  To join correctly we first
@@ -255,11 +298,14 @@ def _collect_labeled_observation_rows(
         SOURCE_AI,
         SOURCE_AI_PLUS_AUTO,
         SOURCE_AUTO_ONLY,
+        SOURCE_FALLBACK,
         SOURCE_MANUAL_COMPAT,
         SOURCE_NONE,
         resolve_effective_event_tags,
         resolve_effective_label,
     )
+
+    fallback_annotations = fallback_annotations or {}
 
     # Pass 1: build global evaluation and outcome indexes across all batches.
     global_eval_by_forecast: dict[str, dict[str, str]] = {}
@@ -322,6 +368,9 @@ def _collect_labeled_observation_rows(
                 # Manual annotation lookup (compatibility)
                 manual = manual_annotations.get(as_of_jst, {})
 
+                # Deterministic OHLC fallback lookup (lowest tier)
+                fallback = fallback_annotations.get(forecast_id, {})
+
                 # Auto-derived event tags
                 auto_tags = _derive_auto_event_tags(as_of_jst, outcome_row)
 
@@ -338,18 +387,22 @@ def _collect_labeled_observation_rows(
                     ai_tags=ai_tag_list, auto_tags=auto_tags, manual_tags=manual_tag_list,
                 )
 
-                # Resolve effective labels (AI > auto > manual)
+                # Resolve effective labels (AI > auto > manual > fallback)
+                fb_regime = fallback.get("regime_label", "")
+                fb_vol = fallback.get("volatility_label", "")
                 eff_regime, regime_src = resolve_effective_label(
                     ai_value=ai.get("ai_regime_label", ""),
                     auto_value="",
                     manual_value=manual.get("regime_label", ""),
+                    fallback_value=fb_regime,
                 )
-                eff_vol, _ = resolve_effective_label(
+                eff_vol, vol_src = resolve_effective_label(
                     ai_value=ai.get("ai_volatility_label", ""),
                     auto_value="",
                     manual_value=manual.get("volatility_label", ""),
+                    fallback_value=fb_vol,
                 )
-                eff_ir, _ = resolve_effective_label(
+                eff_ir, ir_src = resolve_effective_label(
                     ai_value=ai.get("ai_intervention_risk", ""),
                     auto_value="",
                     manual_value=manual.get("intervention_risk", ""),
@@ -365,13 +418,31 @@ def _collect_labeled_observation_rows(
                     or ai.get("ai_failure_reason", "")
                 )
                 has_auto = bool(auto_tags)
+                # Source attribution follows what actually WON an effective
+                # field, not raw input availability:
+                #  - manual_compat claims the source only when a manual *label*
+                #    won AND the manual row carries a status. A blank-status
+                #    manual draft whose labels win stays unlabeled (none), as
+                #    before the fallback tier existed.
+                #  - a genuine fallback win outranks a status-only manual draft
+                #    (status set but no labels): the fallback supplied the real
+                #    labels, so the row is fallback coverage, not manual.
+                #  - a status-only manual with no fallback win still maps to
+                #    manual_compat (preserves pre-fallback-tier behavior).
+                manual_status = manual.get("annotation_status", "")
+                manual_label_won = SOURCE_MANUAL_COMPAT in (regime_src, vol_src, ir_src)
+                fallback_won = SOURCE_FALLBACK in (regime_src, vol_src)
                 if has_ai and has_auto:
                     annotation_source = SOURCE_AI_PLUS_AUTO
                 elif has_ai:
                     annotation_source = SOURCE_AI
                 elif has_auto:
                     annotation_source = SOURCE_AUTO_ONLY
-                elif manual.get("annotation_status", ""):
+                elif manual_label_won and manual_status:
+                    annotation_source = SOURCE_MANUAL_COMPAT
+                elif fallback_won:
+                    annotation_source = SOURCE_FALLBACK
+                elif manual_status:
                     annotation_source = SOURCE_MANUAL_COMPAT
                 else:
                     annotation_source = SOURCE_NONE
@@ -412,7 +483,17 @@ def _collect_labeled_observation_rows(
                     "ai_annotation_prompt_version": ai.get("ai_annotation_prompt_version", ""),
                     "ai_evidence_refs": ai.get("ai_evidence_refs", ""),
                     "ai_annotation_status": ai.get("ai_annotation_status", ""),
-                    # Effective labels (resolved via AI > auto > manual)
+                    # Deterministic OHLC fallback labels — recorded only when
+                    # the fallback actually won the field (i.e. ai/auto/manual
+                    # left it empty), so downstream coverage can attribute
+                    # fallback coverage distinctly from manual.
+                    "fallback_regime_label": (
+                        fb_regime if regime_src == SOURCE_FALLBACK else ""
+                    ),
+                    "fallback_volatility_label": (
+                        fb_vol if vol_src == SOURCE_FALLBACK else ""
+                    ),
+                    # Effective labels (resolved via AI > auto > manual > fallback)
                     "regime_label": eff_regime,
                     "event_tags": effective_et,
                     "manual_event_tags": manual_et,
@@ -423,12 +504,18 @@ def _collect_labeled_observation_rows(
                     "intervention_risk": eff_ir,
                     "failure_reason": ai.get("ai_failure_reason", ""),
                     "annotation_source": annotation_source,
-                    # AI-annotated rows are treated as "confirmed" for
-                    # downstream scoreboards that gate on annotation_status.
-                    "annotation_status": (
-                        "confirmed"
-                        if has_ai
-                        else manual.get("annotation_status", "")
+                    # Confirmation follows the provenance of the regime /
+                    # volatility / intervention *labels* themselves — NOT the
+                    # overall annotation_source, which also reflects event tags
+                    # (an auto event tag must not strip confirmation off an
+                    # otherwise fallback-labeled row). AI and deterministic OHLC
+                    # fallback labels are market-derived -> confirmed; but an
+                    # unconfirmed manual label that won a field keeps its own
+                    # (e.g. pending) status so it is never silently promoted.
+                    "annotation_status": _resolve_annotation_status(
+                        has_ai,
+                        {regime_src, vol_src, ir_src},
+                        manual.get("annotation_status", ""),
                     ),
                 }
                 rows.append(row)
@@ -436,8 +523,85 @@ def _collect_labeled_observation_rows(
     return rows
 
 
+def collect_evaluated_forecast_rows(history_dir: str) -> list[dict[str, str]]:
+    """Collect evaluated forecast rows from history for AI / fallback labeling.
+
+    Uses a cross-batch join: evaluations and outcomes live in the *next* day's
+    batch, so global ``forecast_id → evaluation`` and ``forecast_id → outcome``
+    indexes are built first, then forecasts are iterated and merged with both.
+    Each returned row carries the forecast fields plus the evaluation fields and
+    the realized OHLC / close-change / direction / event-tags from the outcome —
+    everything the deterministic adapter and the OHLC fallback need.
+
+    Pure read-only; no writes. Rows without a matched evaluation are skipped.
+    """
+    # Pass 1: global evaluation and outcome indexes across all batches.
+    global_evals: dict[str, dict[str, str]] = {}
+    global_outcomes: dict[str, dict[str, str]] = {}
+    for date_dir in sorted(os.listdir(history_dir)):
+        date_path = os.path.join(history_dir, date_dir)
+        if not os.path.isdir(date_path):
+            continue
+        for batch_dir in sorted(os.listdir(date_path)):
+            batch_path = os.path.join(date_path, batch_dir)
+            eval_csv = os.path.join(batch_path, "evaluation.csv")
+            outcome_csv = os.path.join(batch_path, "outcome.csv")
+            if not os.path.isfile(eval_csv):
+                continue
+            outcome_row: dict[str, str] | None = None
+            if os.path.isfile(outcome_csv):
+                outcome_rows = _read_csv_rows(outcome_csv)
+                if outcome_rows:
+                    outcome_row = outcome_rows[0]
+            for ev in _read_csv_rows(eval_csv):
+                fid = ev.get("forecast_id", "")
+                if fid:
+                    global_evals[fid] = ev
+                    if outcome_row is not None:
+                        global_outcomes[fid] = outcome_row
+
+    # Pass 2: iterate forecasts, merge with evaluation + outcome indexes.
+    rows: list[dict[str, str]] = []
+    _OUTCOME_CARRY = (
+        "realized_open",
+        "realized_high",
+        "realized_low",
+        "realized_close",
+        "realized_close_change_bp",
+        "realized_direction",
+    )
+    for date_dir in sorted(os.listdir(history_dir)):
+        date_path = os.path.join(history_dir, date_dir)
+        if not os.path.isdir(date_path):
+            continue
+        for batch_dir in sorted(os.listdir(date_path)):
+            forecast_csv = os.path.join(date_path, batch_dir, "forecast.csv")
+            if not os.path.isfile(forecast_csv):
+                continue
+            for fc in _read_csv_rows(forecast_csv):
+                fid = fc.get("forecast_id", "")
+                if not fid:
+                    continue
+                ev = global_evals.get(fid)
+                if not ev:
+                    continue
+                merged = dict(fc)
+                merged.update(ev)
+                oc = global_outcomes.get(fid)
+                if oc:
+                    for key in _OUTCOME_CARRY:
+                        if oc.get(key, "") != "":
+                            merged[key] = oc[key]
+                    oc_tags = oc.get("event_tags", "")
+                    if oc_tags:
+                        merged["effective_event_tags"] = oc_tags
+                rows.append(merged)
+    return rows
+
+
 __all__ = [
     "LABELED_OBSERVATION_FIELDNAMES",
     "build_labeled_observations",
+    "collect_evaluated_forecast_rows",
     "load_manual_annotations",
 ]

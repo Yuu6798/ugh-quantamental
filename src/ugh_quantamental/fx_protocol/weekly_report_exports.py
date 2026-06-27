@@ -146,6 +146,7 @@ def build_weekly_report_md(report: dict[str, Any]) -> str:
     ai_count = src_summary.get("ai_annotated_count", 0)
     auto_count = src_summary.get("auto_annotated_count", 0)
     manual_count = src_summary.get("manual_annotated_count", 0)
+    fallback_count = src_summary.get("fallback_annotated_count", 0)
     unannotated = src_summary.get("unannotated_count", 0)
 
     lines.append("## AI Annotation Layer")
@@ -153,6 +154,7 @@ def build_weekly_report_md(report: dict[str, Any]) -> str:
     lines.append(f"- **AI annotated**: {ai_count}")
     lines.append(f"- **Auto annotated**: {auto_count}")
     lines.append(f"- **Manual compat**: {manual_count}")
+    lines.append(f"- **OHLC fallback**: {fallback_count}")
     lines.append(f"- **Unannotated**: {unannotated}")
 
     model_vs = report.get("ai_annotation_model_versions", [])
@@ -178,9 +180,9 @@ def build_weekly_report_md(report: dict[str, Any]) -> str:
         lines.append("### Field-Level Coverage")
         lines.append("")
         lines.append(
-            "| Field | AI | Auto | Manual | Effective | Missing |"
+            "| Field | AI | Auto | Manual | Fallback | Effective | Missing |"
         )
-        lines.append("|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|")
         for field_name in (
             "regime_label", "event_tags", "volatility_label",
             "intervention_risk", "failure_reason",
@@ -191,6 +193,7 @@ def build_weekly_report_md(report: dict[str, Any]) -> str:
                 f"| {fc.get('ai_populated_count', 0)} "
                 f"| {fc.get('auto_populated_count', 0)} "
                 f"| {fc.get('manual_populated_count', 0)} "
+                f"| {fc.get('fallback_populated_count', 0)} "
                 f"| {fc.get('effective_populated_count', 0)} "
                 f"| {fc.get('missing_count', 0)} |"
             )
@@ -345,6 +348,8 @@ WEEKLY_ANNOTATION_COVERAGE_FIELDNAMES: tuple[str, ...] = (
     "auto_populated_rate",
     "manual_populated_count",
     "manual_populated_rate",
+    "fallback_populated_count",
+    "fallback_populated_rate",
     "effective_populated_count",
     "effective_populated_rate",
     "missing_count",
@@ -388,6 +393,7 @@ def export_weekly_ai_annotation_summary_csv(
         {"metric": "ai_annotated_count", "value": src.get("ai_annotated_count", 0)},
         {"metric": "auto_annotated_count", "value": src.get("auto_annotated_count", 0)},
         {"metric": "manual_annotated_count", "value": src.get("manual_annotated_count", 0)},
+        {"metric": "fallback_annotated_count", "value": src.get("fallback_annotated_count", 0)},
         {"metric": "unannotated_count", "value": src.get("unannotated_count", 0)},
         {"metric": "evidence_ref_count", "value": src.get("evidence_ref_count", 0)},
     ]
