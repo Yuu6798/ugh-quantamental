@@ -789,6 +789,16 @@ def build_recommendation_summary(
             parts.append("Investigate provider data quality (lag/fallback rates too high).")
         elif fid == "missing_windows":
             parts.append("Investigate missing protocol windows.")
+        elif fid == "regime_direction_collapse":
+            parts.append(
+                "Review direction logic per regime — a confirmed regime slice "
+                "collapsed despite an acceptable blended metric."
+            )
+        elif fid == "volatility_direction_collapse":
+            parts.append(
+                "Review direction logic per volatility regime — a confirmed "
+                "volatility slice collapsed despite an acceptable blended metric."
+            )
 
     return " ".join(parts)
 

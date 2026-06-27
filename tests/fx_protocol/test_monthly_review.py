@@ -851,6 +851,14 @@ class TestRecommendationSummary:
         assert "magnitude" in summary.lower()
         assert "direction" in summary.lower()
 
+    def test_collapse_only_flags_are_not_blank(self) -> None:
+        """A collapse-only review must produce a non-empty recommendation
+        (PR #120 review: build_recommendation_summary must handle the new IDs)."""
+        for fid in ("regime_direction_collapse", "volatility_direction_collapse"):
+            summary = build_recommendation_summary([{"flag": fid, "reason": "choppy 0%"}])
+            assert summary.strip() != ""
+            assert "direction logic" in summary.lower()
+
 
 # ---------------------------------------------------------------------------
 # Tests: full monthly review
