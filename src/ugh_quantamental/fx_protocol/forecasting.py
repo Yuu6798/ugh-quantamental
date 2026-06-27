@@ -62,6 +62,28 @@ def _direction_from_bp_with_epsilon(
     return _direction_from_bp(change_bp), change_bp
 
 
+def _volatility_expansion_multiplier(
+    *,
+    catalyst_strength: float,
+    urgency: float,
+    fire_probability: float,
+    config: "ProjectionConfig",
+) -> float:
+    """Return a magnitude multiplier in ``[1.0, volatility_expansion_max]`` (v2.5).
+
+    Driven by the same-snapshot signals projection/state already compute
+    (catalyst, urgency, fire). The mean signal ramps a linear activation from 0
+    at ``volatility_expansion_activation_floor`` to 1 at full strength, so calm
+    days (low signals) stay at multiplier ``1.0`` while high-catalyst days expand
+    up to ``volatility_expansion_max``. Pure, deterministic, clamped.
+    """
+    mean_signal = (catalyst_strength + urgency + fire_probability) / 3.0
+    floor = config.volatility_expansion_activation_floor
+    denom = max(1.0 - floor, 1e-9)
+    activation = min(1.0, max(0.0, (mean_signal - floor) / denom))
+    return 1.0 + (config.volatility_expansion_max - 1.0) * activation
+
+
 def _shared_range(low: float, high: float) -> ExpectedRange:
     return ExpectedRange(low_price=low, high_price=high)
 
@@ -338,14 +360,30 @@ def build_ugh_variant_forecast(
     # scaling, retained for v2).
     ctx = request.baseline_context
     conviction_factor = 0.5 + 0.5 * projection_res.conviction
-    expected_close_change_bp = (
+    pre_expansion_close_change_bp = (
         projection_res.e_star * ctx.trailing_mean_abs_close_change_bp * conviction_factor
     )
+    # Direction / FLAT are decided on the PRE-expansion magnitude so the v2.5
+    # volatility expansion can never push a below-epsilon FLAT forecast across
+    # the threshold into UP/DOWN (FX-MAG-EXPANSION sign/FLAT invariant).
     forecast_direction, record_close_change_bp = _direction_from_bp_with_epsilon(
-        expected_close_change_bp,
+        pre_expansion_close_change_bp,
         ctx.trailing_mean_abs_close_change_bp,
         projection_req.config,
     )
+    # v2.5: scale the (signed) magnitude of already-non-FLAT forecasts so a
+    # high-catalyst day can exceed the trailing-mean band. FLAT stays FLAT.
+    if forecast_direction is not ForecastDirection.flat:
+        record_close_change_bp *= _volatility_expansion_multiplier(
+            catalyst_strength=variant_request.state.event_features.catalyst_strength,
+            urgency=projection_res.urgency,
+            # The same-snapshot input fire_probability SIGNAL — NOT the lifecycle
+            # posterior P(fire). On a negative/high-shock day the posterior
+            # collapses toward failure/exhaustion, which would suppress the
+            # expansion exactly on the large-move days this term must uncap.
+            fire_probability=projection_req.signal_features.fire_probability,
+            config=projection_req.config,
+        )
 
     return _make_base_record(
         request=request,

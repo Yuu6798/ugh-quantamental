@@ -633,6 +633,138 @@ def test_ugh_magnitude_scales_with_volatility_and_conviction(db_session, monkeyp
     assert ugh.forecast_direction == ForecastDirection.down
 
 
+def _high_fire_request() -> DailyForecastWorkflowRequest:
+    """Request whose input fire_probability SIGNAL is high (drives expansion).
+
+    The v2.5 multiplier reads ``projection.signal_features.fire_probability``
+    (the same-snapshot input signal), not the lifecycle posterior, so the test
+    high-fire input must live on the request's signal features.
+    """
+    base = _full_request()
+    proj = base.projection
+    high_sig = proj.signal_features.model_copy(update={"fire_probability": 0.95})
+    high_proj = proj.model_copy(update={"signal_features": high_sig})
+    ugh = base.model_copy(update={"projection": high_proj})
+    return _request(ugh_request=ugh)
+
+
+def _run_ugh_alpha(db_session, monkeypatch, req, projection_result, state_result):
+    from ugh_quantamental.fx_protocol import forecasting
+
+    def _fake_full_workflow(session, request):
+        del session, request
+        return FullWorkflowResult(
+            projection=ProjectionWorkflowResult(
+                run_id="proj-1", engine_result=projection_result, persisted_run=None,
+            ),
+            state=StateWorkflowResult(
+                run_id="state-1", engine_result=state_result, persisted_run=None,
+            ),
+        )
+
+    monkeypatch.setattr(forecasting, "run_full_workflow", _fake_full_workflow)
+    result = run_daily_forecast_workflow(db_session, req)
+    return next(f for f in result.forecasts if f.strategy_kind == StrategyKind.ugh_v2_alpha)
+
+
+class TestVolatilityExpansionMultiplier:
+    def test_calm_signals_no_expansion(self) -> None:
+        from ugh_quantamental.fx_protocol.forecasting import _volatility_expansion_multiplier
+        cfg = ProjectionConfig()
+        assert _volatility_expansion_multiplier(
+            catalyst_strength=0.1, urgency=0.1, fire_probability=0.1, config=cfg,
+        ) == pytest.approx(1.0)
+
+    def test_high_signals_reach_toward_max(self) -> None:
+        from ugh_quantamental.fx_protocol.forecasting import _volatility_expansion_multiplier
+        cfg = ProjectionConfig()
+        m = _volatility_expansion_multiplier(
+            catalyst_strength=1.0, urgency=1.0, fire_probability=1.0, config=cfg,
+        )
+        assert m == pytest.approx(cfg.volatility_expansion_max)
+
+    def test_monotonic_and_bounded(self) -> None:
+        from ugh_quantamental.fx_protocol.forecasting import _volatility_expansion_multiplier
+        cfg = ProjectionConfig()
+        low = _volatility_expansion_multiplier(
+            catalyst_strength=0.6, urgency=0.6, fire_probability=0.6, config=cfg,
+        )
+        high = _volatility_expansion_multiplier(
+            catalyst_strength=0.9, urgency=0.9, fire_probability=0.9, config=cfg,
+        )
+        assert 1.0 <= low <= high <= cfg.volatility_expansion_max
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+@pytest.mark.parametrize("e_star", [0.9, -0.9])
+def test_high_catalyst_magnitude_exceeds_trailing_mean(db_session, monkeypatch, e_star) -> None:
+    """v2.5: high catalyst/urgency/fire lets |magnitude| exceed the trailing mean
+    (20 bp here) — for both positive and negative e_star (sign preserved)."""
+    req = _high_fire_request()
+    projection = _projection_result(e_star=e_star, conviction=1.0)
+    projection = projection.model_copy(update={"urgency": 0.95})
+    ugh = _run_ugh_alpha(db_session, monkeypatch, req, projection, _state_result(req))
+
+    assert abs(ugh.expected_close_change_bp) > 20.0  # trailing_mean_abs_close_change_bp
+    expected_dir = ForecastDirection.up if e_star > 0 else ForecastDirection.down
+    assert ugh.forecast_direction == expected_dir
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_expansion_uses_input_signal_not_lifecycle_posterior(db_session, monkeypatch) -> None:
+    """v2.5 (PR #118 review): expansion is driven by the input fire_probability
+    SIGNAL, so a negative large-move day whose lifecycle posterior collapsed to
+    `failure` (P(fire)~0) still expands."""
+    req = _high_fire_request()  # input signal fire_probability = 0.95
+    projection = _projection_result(e_star=-0.9, conviction=1.0)
+    projection = projection.model_copy(update={"urgency": 0.95})
+    # Lifecycle posterior dominated by failure (P(fire) ~ 0).
+    failure_probs = StateProbabilities(
+        dormant=0.01, setup=0.01, fire=0.01, expansion=0.01,
+        exhaustion=0.01, failure=0.95,
+    )
+    failure_state = StateEngineResult(
+        evidence_scores=failure_probs,
+        updated_probabilities=failure_probs,
+        updated_phi=Phi(dominant_state=LifecycleState.failure, probabilities=failure_probs),
+        updated_market_svp=req.ugh_request.state.omega.market_svp,
+        dominant_state=LifecycleState.failure,
+        transition_confidence=0.5,
+    )
+    ugh = _run_ugh_alpha(db_session, monkeypatch, req, projection, failure_state)
+
+    # Despite P(fire)~0 in the posterior, the high input signal still uncaps it.
+    assert abs(ugh.expected_close_change_bp) > 20.0
+    assert ugh.forecast_direction == ForecastDirection.down
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_calm_day_magnitude_unchanged(db_session, monkeypatch) -> None:
+    """v2.5: low-signal (calm) days keep the pre-expansion magnitude."""
+    req = _request()
+    projection = _projection_result(e_star=0.6, conviction=1.0)
+    projection = projection.model_copy(update={"urgency": 0.1})
+    ugh = _run_ugh_alpha(db_session, monkeypatch, req, projection, _state_result(req))
+
+    # mean(catalyst=0.6, urgency=0.1, fire=0.2) = 0.3 < floor(0.5) -> multiplier 1.0.
+    # magnitude = e_star * 20 * (0.5 + 0.5*1.0) = 0.6 * 20 * 1.0 = 12.0 bp.
+    assert ugh.expected_close_change_bp == pytest.approx(12.0)
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_expansion_does_not_cross_flat_epsilon(db_session, monkeypatch) -> None:
+    """v2.5 invariant: a below-epsilon FLAT forecast stays FLAT even with high
+    catalyst/urgency/fire — direction/FLAT is decided pre-expansion."""
+    req = _high_fire_request()
+    # e_star=0.2, conviction=0.0 -> pre-expansion 0.2*20*0.5 = 2.0 bp <= 3.0 floor.
+    projection = _projection_result(e_star=0.2, conviction=0.0)
+    projection = projection.model_copy(update={"urgency": 0.99})
+    ugh = _run_ugh_alpha(db_session, monkeypatch, req, projection, _state_result(req))
+
+    assert ugh.forecast_direction == ForecastDirection.flat
+    assert ugh.expected_close_change_bp == 0.0
+
+
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
 def test_idempotent_rerun_and_partial_batch_error(db_session, monkeypatch) -> None:
     from ugh_quantamental.fx_protocol import forecasting
