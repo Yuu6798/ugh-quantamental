@@ -119,6 +119,18 @@ class ProjectionConfig(BaseModel):
     bounds_max_width: FiniteFloat = Field(default=1.0, gt=0.0)
     range_width_scale: FiniteFloat = Field(default=2.0, ge=0.0)
     range_width_floor_ratio: FiniteFloat = Field(default=0.25, ge=0.0)
+    # v2.5 volatility-expansion magnitude term (FX-MAG-EXPANSION). On
+    # high-catalyst/urgency/fire days the signed magnitude of an already-non-FLAT
+    # forecast is scaled by a multiplier in [1.0, volatility_expansion_max], so
+    # UGH can exceed the trailing-mean band the conviction factor (<= 1.0)
+    # otherwise caps it at. The activation ramps from 0 at
+    # volatility_expansion_activation_floor to 1 at full signal strength, so calm
+    # days (low signals) keep magnitude unchanged. This is a separate factor from
+    # conviction (= reliability scaler, §7/§8 Option B) to avoid re-coupling them.
+    volatility_expansion_max: FiniteFloat = Field(default=1.8, ge=1.0)
+    volatility_expansion_activation_floor: FiniteFloat = Field(
+        default=0.5, ge=0.0, le=1.0
+    )
 
 
 class ProjectionEngineResult(BaseModel):

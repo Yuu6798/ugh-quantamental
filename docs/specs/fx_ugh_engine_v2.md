@@ -212,6 +212,43 @@ magnitude through the existing `(0.5 + 0.5 * conviction)` multiplier, and
 it tightens width through `bounds_low_conf_coef * (1 - conviction)`.
 This is a coherent uncertainty model, not an accidental double count.
 
+### 5.1.3 Volatility-expansion magnitude term (v2.5)
+
+Through v2.4 the persisted magnitude was
+
+`expected_close_change_bp = e_star * trailing_mean_abs_close_change_bp * (0.5 + 0.5 * conviction)`
+
+with the conviction factor bounded in `[0.5, 1.0]`, so UGH could **never**
+exceed the trailing-mean band — the 2026-06 ★1 finding (6/19 realized +44 bp,
+predicted +7 bp; FX-MAG-EXPANSION). v2.5 adds a separate volatility-expansion
+multiplier driven by the same-snapshot signals projection/state already
+compute:
+
+```
+mean_signal = (catalyst_strength + urgency + fire_probability) / 3
+activation  = clamp((mean_signal - volatility_expansion_activation_floor) / (1 - floor))
+multiplier  = 1 + (volatility_expansion_max - 1) * activation     # in [1, max]
+```
+
+applied to the **signed** magnitude of an already-non-FLAT forecast. Defaults:
+`volatility_expansion_max = 1.8`, `volatility_expansion_activation_floor = 0.5`.
+On high-catalyst/urgency/fire days `|expected_close_change_bp|` can now exceed
+`trailing_mean_abs_close_change_bp`; calm days (mean signal below the floor)
+keep multiplier `1.0` and are unchanged.
+
+This is a **separate factor from conviction** (which remains the reliability
+scaler, §7 / §8 Option B) to avoid re-coupling the two roles. Two invariants:
+
+- **Sign / FLAT are decided on the pre-expansion magnitude.** The expansion is
+  applied only after `_direction_from_bp_with_epsilon` has classified the
+  forecast, and only when the direction is not FLAT — a below-epsilon FLAT
+  forecast can never be pushed across the threshold into UP/DOWN.
+- The multiplier reuses existing engine quantities (no new external inputs);
+  it is a pure, clamped, deterministic function.
+
+`engine_version` bumps `v2.4 → v2.5` (synced across `automation_models.py`,
+`fx-daily-protocol.yml`, and `scripts/run_fx_daily_protocol.py`).
+
 ### 5.2 Parallel variant deployment
 
 v2 is deployed as **four parameter variants in parallel**, exposed as four
