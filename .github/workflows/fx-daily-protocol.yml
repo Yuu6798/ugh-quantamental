@@ -36,7 +36,7 @@ jobs:
       FX_DATA_BRANCH: ${{ vars.FX_DATA_BRANCH || 'fx-daily-data' }}
       FX_SQLITE_FILENAME: ${{ vars.FX_SQLITE_FILENAME || 'fx_protocol.db' }}
       FX_THEORY_VERSION: ${{ vars.FX_THEORY_VERSION || 'v2' }}
-      FX_ENGINE_VERSION: ${{ vars.FX_ENGINE_VERSION || 'v2.3' }}
+      FX_ENGINE_VERSION: ${{ vars.FX_ENGINE_VERSION || 'v2.4' }}
       FX_SCHEMA_VERSION: ${{ vars.FX_SCHEMA_VERSION || 'v1' }}
       FX_PROTOCOL_VERSION: ${{ vars.FX_PROTOCOL_VERSION || 'v1' }}
       FX_WRITE_CSV_EXPORTS: ${{ vars.FX_WRITE_CSV_EXPORTS || '1' }}
