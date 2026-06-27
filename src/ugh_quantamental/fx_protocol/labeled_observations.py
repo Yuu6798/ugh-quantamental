@@ -413,10 +413,13 @@ def _collect_labeled_observation_rows(
                     or ai.get("ai_failure_reason", "")
                 )
                 has_auto = bool(auto_tags)
-                # Fallback supplies a label only when it is present; the
-                # branch ordering below ensures it is consulted only after
-                # ai / auto / manual have all been ruled out.
-                has_fallback = bool(fb_regime or fb_vol)
+                # Fallback is the source only when it actually WON an effective
+                # field — not merely because raw fallback inputs exist. A row
+                # whose effective labels came from an unconfirmed (blank-status)
+                # manual annotation must NOT be promoted to a non-none source by
+                # an available-but-overridden fallback (it stays unlabeled, as
+                # before the fallback tier existed).
+                fallback_won = SOURCE_FALLBACK in (regime_src, vol_src)
                 if has_ai and has_auto:
                     annotation_source = SOURCE_AI_PLUS_AUTO
                 elif has_ai:
@@ -425,7 +428,7 @@ def _collect_labeled_observation_rows(
                     annotation_source = SOURCE_AUTO_ONLY
                 elif manual.get("annotation_status", ""):
                     annotation_source = SOURCE_MANUAL_COMPAT
-                elif has_fallback:
+                elif fallback_won:
                     annotation_source = SOURCE_FALLBACK
                 else:
                     annotation_source = SOURCE_NONE

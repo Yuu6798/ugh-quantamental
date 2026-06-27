@@ -228,6 +228,36 @@ class TestFallbackPrecedence:
         assert fc2["annotation_source"] == "ohlc_fallback"
         assert fc2["annotation_status"] == "confirmed"
 
+    def test_draft_manual_winning_fields_stays_unlabeled(self, tmp_path) -> None:
+        """A blank-status manual annotation that wins regime+volatility must
+        stay source=none (unlabeled) even when raw fallback inputs exist — an
+        overridden fallback must not promote a draft row (regression PR #116)."""
+        tmpdir = str(tmp_path)
+        obs_path = _setup_history(tmpdir, days=3)
+        _write_csv(
+            os.path.join(tmpdir, "annotations", "manual_annotations.csv"),
+            [{
+                "as_of_jst": "2026-03-17T08:00:00+09:00",
+                "regime_label": "trending",
+                "event_tags": "",
+                "volatility_label": "high",
+                "intervention_risk": "",
+                "notes": "",
+                "annotation_status": "",  # blank/draft
+            }],
+            ["as_of_jst", "regime_label", "event_tags", "volatility_label",
+             "intervention_risk", "notes", "annotation_status"],
+        )
+        # Fallback inputs available but should lose to the manual labels.
+        fallback = {"fc_001": {"regime_label": "choppy", "volatility_label": "low"}}
+        build_labeled_observations(tmpdir, _NOW, fallback_annotations=fallback)
+        row = {r["as_of_jst"][:10]: r for r in _read_rows(obs_path)}["2026-03-17"]
+
+        assert row["regime_label"] == "trending"  # draft manual wins
+        assert row["annotation_source"] == "none"  # NOT promoted to ohlc_fallback
+        assert row["fallback_regime_label"] == ""  # fallback did not win
+        assert row["annotation_status"] == ""  # stays unlabeled
+
     def test_no_annotations_leaves_rows_unannotated(self, tmp_path) -> None:
         tmpdir = str(tmp_path)
         obs_path = _setup_history(tmpdir, days=3)
