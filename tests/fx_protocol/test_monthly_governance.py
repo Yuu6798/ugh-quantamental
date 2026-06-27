@@ -276,6 +276,19 @@ class TestBuildChangeCandidateList:
         assert "CC-001" == result[0]["candidate_id"]
         assert "CC-002" == result[1]["candidate_id"]
 
+    def test_regime_collapse_flag_routes_to_logic_audit(self) -> None:
+        """FX-GOV-REGIME-FLAGS: a regime/vol collapse flag must change the
+        judgment off `keep` AND generate a logic-audit change candidate."""
+        for fid in ("regime_direction_collapse", "volatility_direction_collapse"):
+            flags = [{"flag": fid, "reason": "choppy 0% dir"}]
+            assert classify_judgment(flags, [], {}, {}) == JUDGMENT_LOGIC_AUDIT
+            candidates = build_change_candidate_list(
+                {"review_flags": flags}, JUDGMENT_LOGIC_AUDIT
+            )
+            assert len(candidates) == 1
+            assert candidates[0]["category"] == JUDGMENT_LOGIC_AUDIT
+            assert candidates[0]["status"] == "proposed"
+
     def test_provider_flags_produce_candidates(self) -> None:
         review = {
             "review_flags": [

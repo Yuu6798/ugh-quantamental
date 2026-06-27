@@ -103,8 +103,15 @@ def classify_judgment(
     if flag_ids & data_flags:
         return JUDGMENT_DATA_PROVIDER_REMEDIATION
 
-    # Priority 3 & 4: logic-related flags
-    logic_flags = {"inspect_magnitude_mapping", "inspect_direction_logic", "inspect_state_mapping"}
+    # Priority 3 & 4: logic-related flags (incl. regime/volatility-stratified
+    # direction collapse — a per-slice failure that blended metrics hide).
+    logic_flags = {
+        "inspect_magnitude_mapping",
+        "inspect_direction_logic",
+        "inspect_state_mapping",
+        "regime_direction_collapse",
+        "volatility_direction_collapse",
+    }
     if flag_ids & logic_flags:
         return JUDGMENT_LOGIC_AUDIT
 
@@ -315,6 +322,21 @@ def build_change_candidate_list(
                 "rationale": reason,
                 "expected_benefit": "Better magnitude prediction when state proxy hits",
                 "expected_risk": "State threshold change may affect direction accuracy",
+                "owner": "unassigned",
+                "status": "proposed",
+            })
+        elif fid in ("regime_direction_collapse", "volatility_direction_collapse"):
+            axis = "regime" if fid == "regime_direction_collapse" else "volatility"
+            candidates.append({
+                "candidate_id": f"CC-{candidate_counter:03d}",
+                "category": JUDGMENT_LOGIC_AUDIT,
+                "rationale": reason,
+                "expected_benefit": (
+                    f"Recover UGH direction accuracy in the collapsed {axis} slice(s)"
+                ),
+                "expected_risk": (
+                    f"{axis.capitalize()}-specific direction logic may affect other slices"
+                ),
                 "owner": "unassigned",
                 "status": "proposed",
             })

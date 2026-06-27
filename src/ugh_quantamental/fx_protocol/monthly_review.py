@@ -59,6 +59,10 @@ THRESHOLD_PROVIDER_FALLBACK_RATE: float = 0.30
 THRESHOLD_MISSING_WINDOW_RATE: float = 0.25
 #: Minimum observations to evaluate strategy performance meaningfully.
 THRESHOLD_MINIMUM_OBSERVATIONS: int = 5
+#: UGH direction hit rate within a confirmed regime / volatility slice below this
+#: collapses governance even when the blended (all-regime) metric is acceptable.
+#: Catches choppy 0% / high-vol 0% failures diluted by trending's good score.
+THRESHOLD_REGIME_DIRECTION_COLLAPSE_PCT: float = 0.40
 
 
 # ---------------------------------------------------------------------------
@@ -527,6 +531,30 @@ def select_representative_cases(
 # ---------------------------------------------------------------------------
 
 
+def _collapsed_direction_slices(
+    slice_metrics: list[dict[str, Any]],
+    label_field: str,
+) -> str:
+    """Return a comma-joined list of labels whose UGH direction rate collapsed.
+
+    A slice qualifies when it has a real label (not the ``unlabeled`` /
+    ``unknown`` catch-alls), at least ``THRESHOLD_MINIMUM_OBSERVATIONS``
+    confirmed observations (so sparse slices never misfire), and a non-``None``
+    ``direction_hit_rate`` below ``THRESHOLD_REGIME_DIRECTION_COLLAPSE_PCT``.
+    """
+    collapsed: list[str] = []
+    for m in slice_metrics:
+        label = m.get(label_field, "")
+        if label in ("", "unlabeled", "unknown"):
+            continue
+        if (m.get("observation_count") or 0) < THRESHOLD_MINIMUM_OBSERVATIONS:
+            continue
+        rate = m.get("direction_hit_rate")
+        if rate is not None and rate < THRESHOLD_REGIME_DIRECTION_COLLAPSE_PCT:
+            collapsed.append(f"{label} ({rate:.0%})")
+    return ", ".join(collapsed)
+
+
 def compute_review_flags(
     strategy_metrics: list[dict[str, Any]],
     baseline_comparisons: list[dict[str, Any]],
@@ -534,6 +562,8 @@ def compute_review_flags(
     provider_health: dict[str, Any],
     requested_window_count: int,
     missing_window_count: int,
+    regime_metrics: list[dict[str, Any]] | None = None,
+    volatility_metrics: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     """Compute rule-based review flags for the monthly review.
 
@@ -550,6 +580,9 @@ def compute_review_flags(
     6. provider_lag_issue: too many lagged snapshots
     7. provider_fallback_issue: too many fallback adjustments
     8. missing_windows: too many missing windows
+    9. regime_direction_collapse / volatility_direction_collapse: a confirmed
+       regime / volatility slice has UGH direction rate below the collapse
+       threshold, even when the blended metric is acceptable
     """
     flags: list[dict[str, str]] = []
 
@@ -676,6 +709,33 @@ def compute_review_flags(
                     f"Missing: {missing_window_count}/{requested_window_count}."
                 ),
             })
+
+    # 9. Regime / volatility direction collapse (stratified). A catastrophic
+    # per-slice failure (e.g. choppy 0% dir) must flag even when the blended
+    # all-regime metric is within thresholds, so good trending performance can
+    # no longer dilute it past governance.
+    regime_collapse = _collapsed_direction_slices(regime_metrics or [], "regime_label")
+    if regime_collapse:
+        flags.append({
+            "flag": "regime_direction_collapse",
+            "reason": (
+                "UGH direction rate collapsed below "
+                f"{THRESHOLD_REGIME_DIRECTION_COLLAPSE_PCT:.0%} in confirmed regime "
+                f"slice(s): {regime_collapse}. Blended metrics mask this per-regime "
+                "failure; direction logic needs regime-specific review."
+            ),
+        })
+    vol_collapse = _collapsed_direction_slices(volatility_metrics or [], "volatility_label")
+    if vol_collapse:
+        flags.append({
+            "flag": "volatility_direction_collapse",
+            "reason": (
+                "UGH direction rate collapsed below "
+                f"{THRESHOLD_REGIME_DIRECTION_COLLAPSE_PCT:.0%} in confirmed volatility "
+                f"slice(s): {vol_collapse}. Blended metrics mask this per-volatility "
+                "failure; direction logic needs volatility-specific review."
+            ),
+        })
 
     # If no flags fired, the current logic is considered adequate
     if not flags:
@@ -860,6 +920,8 @@ def run_monthly_review(
         provider_health,
         requested_window_count=business_day_count,
         missing_window_count=missing_window_count,
+        regime_metrics=regime_metrics,
+        volatility_metrics=volatility_metrics,
     )
 
     # Recommendation summary

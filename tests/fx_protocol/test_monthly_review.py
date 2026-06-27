@@ -511,6 +511,93 @@ class TestInsufficientDataFlag:
         assert flags[0]["flag"] == "insufficient_data"
 
 
+def _healthy_inputs() -> tuple:
+    """Blended inputs that produce only keep_current_logic (no other flags)."""
+    strategy_metrics = [{
+        "strategy_kind": "ugh",
+        "forecast_count": 20,
+        "direction_hit_rate": 0.6,
+        "range_hit_rate": 0.5,
+        "state_proxy_hit_rate": 0.5,
+        "mean_abs_close_error_bp": 15.0,
+        "mean_abs_magnitude_error_bp": 12.0,
+    }]
+    baseline_comparisons = [
+        {"baseline_strategy_kind": "baseline_random_walk",
+         "direction_accuracy_delta_vs_ugh": -0.1,
+         "mean_abs_close_error_bp_delta_vs_ugh": 5.0,
+         "mean_abs_magnitude_error_bp_delta_vs_ugh": 3.0,
+         "state_proxy_hit_rate_delta_vs_ugh": None},
+        {"baseline_strategy_kind": "baseline_simple_technical",
+         "direction_accuracy_delta_vs_ugh": -0.05,
+         "mean_abs_close_error_bp_delta_vs_ugh": 2.0,
+         "mean_abs_magnitude_error_bp_delta_vs_ugh": 1.0,
+         "state_proxy_hit_rate_delta_vs_ugh": None},
+    ]
+    annotation_cov = {"annotation_coverage_rate": 0.8}
+    provider_health = {"total_runs": 20, "lagged_snapshot_count": 1, "fallback_adjustment_count": 1}
+    return strategy_metrics, baseline_comparisons, annotation_cov, provider_health
+
+
+class TestRegimeDirectionCollapseFlag:
+    def test_choppy_collapse_fires_despite_healthy_blend(self) -> None:
+        """A confirmed choppy 0% slice flags even when blended metrics are fine."""
+        sm, bc, cov, ph = _healthy_inputs()
+        regime_metrics = [
+            {"regime_label": "trending", "observation_count": 10,
+             "direction_hit_rate": 0.9, "mean_abs_close_error_bp": 12.0},
+            {"regime_label": "choppy", "observation_count": 8,
+             "direction_hit_rate": 0.0, "mean_abs_close_error_bp": 32.0},
+        ]
+        flags = compute_review_flags(
+            sm, bc, cov, ph, requested_window_count=20, missing_window_count=0,
+            regime_metrics=regime_metrics,
+        )
+        ids = {f["flag"] for f in flags}
+        assert "regime_direction_collapse" in ids
+        assert "keep_current_logic" not in ids
+
+    def test_high_vol_collapse_fires(self) -> None:
+        sm, bc, cov, ph = _healthy_inputs()
+        vol_metrics = [
+            {"volatility_label": "low", "observation_count": 9,
+             "direction_hit_rate": 0.8, "mean_abs_close_error_bp": 10.0},
+            {"volatility_label": "high", "observation_count": 7,
+             "direction_hit_rate": 0.0, "mean_abs_close_error_bp": 64.0},
+        ]
+        flags = compute_review_flags(
+            sm, bc, cov, ph, requested_window_count=20, missing_window_count=0,
+            volatility_metrics=vol_metrics,
+        )
+        assert "volatility_direction_collapse" in {f["flag"] for f in flags}
+
+    def test_sparse_slice_does_not_misfire(self) -> None:
+        sm, bc, cov, ph = _healthy_inputs()
+        regime_metrics = [
+            {"regime_label": "choppy", "observation_count": 3,  # < THRESHOLD_MINIMUM_OBSERVATIONS
+             "direction_hit_rate": 0.0, "mean_abs_close_error_bp": 32.0},
+        ]
+        flags = compute_review_flags(
+            sm, bc, cov, ph, requested_window_count=20, missing_window_count=0,
+            regime_metrics=regime_metrics,
+        )
+        ids = {f["flag"] for f in flags}
+        assert "regime_direction_collapse" not in ids
+        assert flags[0]["flag"] == "keep_current_logic"
+
+    def test_unlabeled_slice_skipped(self) -> None:
+        sm, bc, cov, ph = _healthy_inputs()
+        regime_metrics = [
+            {"regime_label": "unlabeled", "observation_count": 12,
+             "direction_hit_rate": 0.0, "mean_abs_close_error_bp": 30.0},
+        ]
+        flags = compute_review_flags(
+            sm, bc, cov, ph, requested_window_count=20, missing_window_count=0,
+            regime_metrics=regime_metrics,
+        )
+        assert "regime_direction_collapse" not in {f["flag"] for f in flags}
+
+
 class TestInspectMagnitudeMappingFlag:
     def test_close_error_worse_than_random_walk(self) -> None:
         strategy_metrics = [
