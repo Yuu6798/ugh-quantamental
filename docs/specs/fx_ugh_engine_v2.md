@@ -231,10 +231,14 @@ multiplier  = 1 + (volatility_expansion_max - 1) * activation     # in [1, max]
 ```
 
 applied to the **signed** magnitude of an already-non-FLAT forecast. Defaults:
-`volatility_expansion_max = 1.8`, `volatility_expansion_activation_floor = 0.5`.
+`volatility_expansion_max = 1.8`, `volatility_expansion_activation_floor = 0.6`.
 On high-catalyst/urgency/fire days `|expected_close_change_bp|` can now exceed
-`trailing_mean_abs_close_change_bp`; calm days (mean signal below the floor)
-keep multiplier `1.0` and are unchanged.
+`trailing_mean_abs_close_change_bp`; calm and moderate days (mean signal below
+the floor) keep multiplier `1.0` and are unchanged. `fire_probability` is the
+same-snapshot input **signal** (`signal_features.fire_probability`), not the
+lifecycle posterior `P(fire)` — the posterior collapses toward
+`failure`/`exhaustion` on negative large-move days and would suppress the
+expansion exactly where it is needed.
 
 This is a **separate factor from conviction** (which remains the reliability
 scaler, §7 / §8 Option B) to avoid re-coupling the two roles. Two invariants:

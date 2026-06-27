@@ -377,7 +377,11 @@ def build_ugh_variant_forecast(
         record_close_change_bp *= _volatility_expansion_multiplier(
             catalyst_strength=variant_request.state.event_features.catalyst_strength,
             urgency=projection_res.urgency,
-            fire_probability=state_res.updated_probabilities.fire,
+            # The same-snapshot input fire_probability SIGNAL — NOT the lifecycle
+            # posterior P(fire). On a negative/high-shock day the posterior
+            # collapses toward failure/exhaustion, which would suppress the
+            # expansion exactly on the large-move days this term must uncap.
+            fire_probability=projection_req.signal_features.fire_probability,
             config=projection_req.config,
         )
 

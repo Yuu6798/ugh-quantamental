@@ -129,7 +129,7 @@ class ProjectionConfig(BaseModel):
     # conviction (= reliability scaler, §7/§8 Option B) to avoid re-coupling them.
     volatility_expansion_max: FiniteFloat = Field(default=1.8, ge=1.0)
     volatility_expansion_activation_floor: FiniteFloat = Field(
-        default=0.5, ge=0.0, le=1.0
+        default=0.6, ge=0.0, le=1.0
     )
 
 
