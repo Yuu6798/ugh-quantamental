@@ -75,7 +75,8 @@ same-snapshot shock damping。真のヒステリシス採用時のみ後述の p
 - Expected files changed: `state.py`, `state_models.py`, `automation_models.py`,
   `.github/workflows/fx-daily-protocol.yml`, `scripts/run_fx_daily_protocol.py`,
   `tests/engine/test_state*.py`, spec
-- Required tests: 単一 regime_shock で failure 非発火、ヒステリシス遷移、
+- Required tests: 単一 regime_shock で failure 非発火、same-snapshot shock-damping
+  での遷移 (前日 state 不要; 真のヒステリシスを明示採用する場合のみ prior-state 遷移)、
   engine_version の 3 箇所 sync の存在確認
 
 ## Done When

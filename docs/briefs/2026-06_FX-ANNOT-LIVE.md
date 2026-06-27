@@ -47,6 +47,17 @@ fallback として追加して、daily/weekly のスライス分析が常に pop
       共有語彙に対するテストを置く
 - [ ] fallback アノテーターは realized OHLC のみから regime (trending/choppy) と
       volatility (low/normal/high) を導出する純関数で、network/file I/O/乱数なし
+- [ ] ⚠️ **performance leakage の除去 (循環ラベルの禁止)**。現状 live AI/default
+      経路は regime を UGH `direction_hit` から、volatility を `close_error_bp`
+      から導出している (`analytics_annotations.py:186-194`,
+      `ai_annotations.py:85-94`)。これは「choppy = モデルが外した日」という
+      **定義上の循環**で、regime 別分析が市場レジームではなくモデル成績の再エン
+      コードになる (★3 GOV フラグの前提自体を無効化)。AI は fallback より
+      precedence が上なので OHLC fallback も上書きされる。よって live AI/default
+      の regime/volatility ラベルを **OHLC/市場由来のみ**に是正する (または
+      これら 2 軸に限り AI を fallback の下に下げる)。テストで
+      `direction_hit` / `close_error_bp` 等の performance フィールドがラベルを
+      決定しないことを assert する
 - [ ] 既存の AI / auto / manual アノテーションが存在する場合は現行の
       AI-first precedence (`annotation_sources.py`: **ai > auto > manual**) を
       尊重し、rule-based fallback はそれら**全てが欠落しているフィールドのみ**を

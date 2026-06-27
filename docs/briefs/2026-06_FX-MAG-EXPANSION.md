@@ -12,8 +12,11 @@ landing 後に着手 (engine_version v2.4 → v2.5)。
 改善する。
 
 ## Acceptance Criteria
-- [ ] 高 catalyst/urgency/fire の合成入力で `expected_close_change_bp` が
-      `trailing_mean_abs_close_change_bp` を上回りうる (現状は構造的に不可)
+- [ ] 高 catalyst/urgency/fire の合成入力で **`abs(expected_close_change_bp)` が
+      `trailing_mean_abs_close_change_bp` を上回りうる** (現状は構造的に不可)。
+      `expected_close_change_bp` は符号付きなので、テストは **正負両方向の e_star**
+      を被覆すること (上昇のみ拡張して 6/12 型の −36bp 大幅下落が trailing mean に
+      capped されたまま、という抜けを禁止)
 - [ ] 平常 (低 catalyst) 入力では現状とほぼ同等の magnitude を維持し、過剰増幅で
       穏当日の誤差を悪化させない (回帰テストで境界を固定)
 - [ ] 方向 (sign) と FLAT epsilon 判定 (`_direction_from_bp_with_epsilon`) の挙動は

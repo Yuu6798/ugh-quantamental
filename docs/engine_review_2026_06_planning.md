@@ -124,6 +124,11 @@ PR #114 のレビュー (4 round / 10 thread) で表面化した、複数 brief 
   error)。
 - AI suggestion 経路 (`generate_ai_annotations`) は現状 `mixed` を出すため、
   共有語彙に正規化してから effective label に昇格させる (AI > fallback precedence)。
+- ⚠️ **regime/volatility は市場由来であって performance 由来であってはならない**。
+  現状 live AI/default 経路は regime を `direction_hit`、volatility を
+  `close_error_bp` から導出しており (循環)、これだと「choppy 0% dir」が定義上
+  自明になり ★3 GOV フラグの前提が崩れる。これら 2 軸は OHLC/市場統計のみから
+  導出する (FX-ANNOT-LIVE で是正)。
 
 ### 5.2 engine_version の 3 箇所 sync
 
