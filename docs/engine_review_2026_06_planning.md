@@ -95,7 +95,10 @@ FX-STATE-HYSTERESIS (★2) ──────┼─> FX-MAG-EXPANSION (★1)   [
 
 - [ ] 5 本の Task Brief が `docs/briefs/` に存在し、AGENTS.md フォーマット準拠
 - [ ] 各 brief が名指す symbol / file:line が grep で実在確認済 (§1a gate)
-- [ ] engine_version を bump する brief (★1/★2) が `automation_models.py` default
-      と `.github/workflows/fx-daily-protocol.yml` の `FX_ENGINE_VERSION` の
-      両方を sync する旨を明記
+- [ ] engine_version を bump する brief (★1/★2) が **3 箇所** の default を
+      sync する旨を明記: `automation_models.py` default、
+      `.github/workflows/fx-daily-protocol.yml` の `FX_ENGINE_VERSION`、
+      `scripts/run_fx_daily_protocol.py` の `_env("FX_ENGINE_VERSION", ...)`
+      default (+ 同 docstring)。後者を漏らすと手動/ローカル実行が旧バージョンで
+      forecast を永続化し version-based audit/stratify を壊す
 - [ ] 着手順序 (§2) と依存関係が各 brief の Scope に反映

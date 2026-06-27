@@ -22,8 +22,10 @@ fallback として追加して、daily/weekly のスライス分析が常に pop
       発火することを単体テストで保証
 - [ ] fallback アノテーターは realized OHLC のみから regime (trending/choppy) と
       volatility (low/normal/high) を導出する純関数で、network/file I/O/乱数なし
-- [ ] 既存の manual / AI アノテーションが存在する場合は source precedence
-      (`annotation_sources.py`) を尊重し fallback で上書きしない
+- [ ] 既存の AI / auto / manual アノテーションが存在する場合は現行の
+      AI-first precedence (`annotation_sources.py`: **ai > auto > manual**) を
+      尊重し、rule-based fallback はそれら**全てが欠落しているフィールドのみ**を
+      埋める (上位ソースを上書きしない)
 - [ ] 新規テストが `pytest -q` で pass、`ruff check .` clean
 
 ## Scope
@@ -49,8 +51,11 @@ fallback として追加して、daily/weekly のスライス分析が常に pop
   `trailing_mean_abs_close_change_bp` 比で low/normal/high。閾値は
   module-level 定数として明示し easily-changeable に (monthly_review.py の
   THRESHOLD_* 定数の前例に倣う)。
-- source precedence は `annotation_sources.py` の既存定数を再利用し、
-  「manual > AI > rule-based fallback」の順を崩さない。
+- source precedence は `annotation_sources.py` の既存ロジック
+  (`resolve_*`: **ai > auto > manual**、docstring L3-6 / L44) を崩さない。
+  rule-based fallback は manual の**下**に位置する新たな最下位ティアとして、
+  ai/auto/manual いずれも値を持たないフィールドのみを埋める。stale な manual
+  互換ラベルが AI ラベルを上書きする逆転 (AI-first 設計の破壊) を起こさないこと。
 - §2 の通り本 brief は FX-GOV-REGIME-FLAGS (★3) と FX-MAG/STATE 検証の前提。
   fallback ラベルの enum 値は monthly review のレジーム軸 (trending/choppy,
   low/normal/high) と**完全一致**させること (axes-mismatch は PR #104 型 churn)。

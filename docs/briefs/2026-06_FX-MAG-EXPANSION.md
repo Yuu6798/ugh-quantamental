@@ -18,9 +18,12 @@ landing 後に着手 (engine_version v2.4 → v2.5)。
       穏当日の誤差を悪化させない (回帰テストで境界を固定)
 - [ ] 方向 (sign) と FLAT epsilon 判定 (`_direction_from_bp_with_epsilon`) の挙動は
       不変 — 本 brief は magnitude のみを対象
-- [ ] `engine_version` を v2.5 に bump し、`automation_models.py` default と
-      `.github/workflows/fx-daily-protocol.yml` の `FX_ENGINE_VERSION` default を
-      sync
+- [ ] `engine_version` を v2.5 に bump し、**3 箇所** の default を sync:
+      `automation_models.py` default、`.github/workflows/fx-daily-protocol.yml`
+      の `FX_ENGINE_VERSION`、`scripts/run_fx_daily_protocol.py` の
+      `_env("FX_ENGINE_VERSION", ...)` default (+ 同 docstring L19)。
+      script default を漏らすと手動/ローカル実行が旧バージョンで永続化し
+      version-based audit/stratify を壊す
 - [ ] `docs/specs/fx_ugh_engine_v2.md` に v2.5 magnitude 変更を追記
 
 ## Scope
@@ -29,6 +32,7 @@ landing 後に着手 (engine_version v2.4 → v2.5)。
   `engine/projection_models.py` に新 config field),
   `automation_models.py` (engine_version),
   `.github/workflows/fx-daily-protocol.yml`,
+  `scripts/run_fx_daily_protocol.py` (FX_ENGINE_VERSION default + docstring),
   `tests/fx_protocol/test_forecasting*.py`, `tests/engine/`, spec doc
 - OUT: state classifier (= FX-STATE-HYSTERESIS の領分)、`expected_range` の
   width/floor ロジック (`_build_range_from_projection_width`; center は magnitude
@@ -61,7 +65,7 @@ landing 後に着手 (engine_version v2.4 → v2.5)。
 - PR title: `feat(fx_protocol): volatility-expansion magnitude term for high-catalyst days (v2.5)`
 - Expected files changed: `forecasting.py`, `projection_models.py`,
   `automation_models.py`, `.github/workflows/fx-daily-protocol.yml`,
-  `tests/fx_protocol/`, `tests/engine/`, spec
+  `scripts/run_fx_daily_protocol.py`, `tests/fx_protocol/`, `tests/engine/`, spec
 - Required tests: 大変動日の magnitude 平均超え、穏当日据え置き、sign/epsilon 不変、
   engine_version sync
 
