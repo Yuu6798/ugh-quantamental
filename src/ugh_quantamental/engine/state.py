@@ -135,9 +135,13 @@ def compute_state_evidence(
     # same-snapshot spike cannot dominate the failure evidence on its own.
     # negative_e and disconfirmation remain full-strength single-signal triggers;
     # the shock contributes only `floor * shock` when uncorroborated and ramps to
-    # its full value as negative_e / disconfirmation corroborate it. Same-snapshot
-    # only — no prior-day state required (FX-STATE-HYSTERESIS / ★2).
-    shock_corroboration = max(negative_e, disconfirmation)
+    # its full value as a genuine negative signal / disconfirmation corroborate
+    # it. Corroboration uses the *negative directional strength* max(0, -e_star)
+    # — NOT negative_e = (1 - e_star)/2, which is 0.5 at neutral e_star and would
+    # treat a positive prediction as partial corroboration. Same-snapshot only —
+    # no prior-day state required (FX-STATE-HYSTERESIS / ★2).
+    negative_signal = _clamp(-e_star)
+    shock_corroboration = max(negative_signal, disconfirmation)
     damped_regime_shock = regime_shock * (
         config.regime_shock_failure_floor
         + (1.0 - config.regime_shock_failure_floor) * shock_corroboration

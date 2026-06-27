@@ -128,7 +128,8 @@ direction-prediction change).
 v2.4 damps the shock term in `compute_state_evidence`:
 
 ```
-shock_corroboration = max(negative_e, disconfirmation)
+negative_signal     = clamp(-e_star)            # 0 for any non-negative e_star
+shock_corroboration = max(negative_signal, disconfirmation)
 damped_regime_shock = regime_shock * (
     regime_shock_failure_floor + (1 - regime_shock_failure_floor) * shock_corroboration
 )
@@ -137,7 +138,11 @@ failure = failure_weight * clamp(max(negative_e, disconfirmation, damped_regime_
 
 `regime_shock_failure_floor` (new `StateConfig` field, default `0.4`) caps the
 standalone contribution of an uncorroborated shock; `negative_e` and
-`disconfirmation` remain full-strength single-signal triggers. The damping is
+`disconfirmation` remain full-strength single-signal triggers. The corroboration
+gate deliberately uses the *negative directional strength* `max(0, -e_star)` and
+**not** `negative_e = (1 - e_star)/2`: the latter is `0.5` at neutral `e_star`
+and would treat a positive prediction as partial corroboration, leaving an
+uncorroborated shock above `floor * shock`. The damping is
 same-snapshot only — no prior-day state is required, so no workflow/plumbing
 change is needed. `engine_version` bumps `v2.3 → v2.4` (synced across
 `automation_models.py`, `fx-daily-protocol.yml`, and
