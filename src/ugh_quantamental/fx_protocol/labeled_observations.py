@@ -194,6 +194,31 @@ def _read_csv_rows(path: str) -> list[dict[str, str]]:
         return list(csv.DictReader(fh))
 
 
+def _resolve_annotation_status(label_sources: set[str], manual_status: str) -> str:
+    """Resolve ``annotation_status`` from the regime / volatility / intervention
+    *label* sources (not the overall annotation_source).
+
+    - An unconfirmed manual label that won a field keeps its own status
+      (e.g. ``pending``), so a deterministic fallback label available for the
+      same row never silently promotes it to ``confirmed``.
+    - Otherwise market-derived labels (AI or OHLC fallback) are ``confirmed`` —
+      including rows that also carry auto event tags, which must not strip a
+      fallback-labeled row of its confirmation.
+    - When no label was resolved, the manual status (possibly empty) carries.
+    """
+    from ugh_quantamental.fx_protocol.annotation_sources import (
+        SOURCE_AI,
+        SOURCE_FALLBACK,
+        SOURCE_MANUAL_COMPAT,
+    )
+
+    if SOURCE_MANUAL_COMPAT in label_sources and manual_status != "confirmed":
+        return manual_status
+    if label_sources & {SOURCE_AI, SOURCE_FALLBACK}:
+        return "confirmed"
+    return manual_status
+
+
 def build_labeled_observations(
     csv_output_dir: str,
     generated_at_utc: datetime,
@@ -366,13 +391,13 @@ def _collect_labeled_observation_rows(
                     manual_value=manual.get("regime_label", ""),
                     fallback_value=fb_regime,
                 )
-                eff_vol, _ = resolve_effective_label(
+                eff_vol, vol_src = resolve_effective_label(
                     ai_value=ai.get("ai_volatility_label", ""),
                     auto_value="",
                     manual_value=manual.get("volatility_label", ""),
                     fallback_value=fb_vol,
                 )
-                eff_ir, _ = resolve_effective_label(
+                eff_ir, ir_src = resolve_effective_label(
                     ai_value=ai.get("ai_intervention_risk", ""),
                     auto_value="",
                     manual_value=manual.get("intervention_risk", ""),
@@ -455,17 +480,17 @@ def _collect_labeled_observation_rows(
                     "intervention_risk": eff_ir,
                     "failure_reason": ai.get("ai_failure_reason", ""),
                     "annotation_source": annotation_source,
-                    # Confirmation follows the *winning* source. AI and the
-                    # deterministic OHLC fallback are market-derived -> confirmed.
-                    # When manual outranks the fallback (manual_compat), the
-                    # manual row's own status is preserved, so a *pending*
-                    # manual annotation is never promoted to confirmed just
-                    # because a fallback label was also available.
-                    "annotation_status": (
-                        "confirmed"
-                        if annotation_source
-                        in (SOURCE_AI, SOURCE_AI_PLUS_AUTO, SOURCE_FALLBACK)
-                        else manual.get("annotation_status", "")
+                    # Confirmation follows the provenance of the regime /
+                    # volatility / intervention *labels* themselves — NOT the
+                    # overall annotation_source, which also reflects event tags
+                    # (an auto event tag must not strip confirmation off an
+                    # otherwise fallback-labeled row). AI and deterministic OHLC
+                    # fallback labels are market-derived -> confirmed; but an
+                    # unconfirmed manual label that won a field keeps its own
+                    # (e.g. pending) status so it is never silently promoted.
+                    "annotation_status": _resolve_annotation_status(
+                        {regime_src, vol_src, ir_src},
+                        manual.get("annotation_status", ""),
                     ),
                 }
                 rows.append(row)

@@ -18,7 +18,10 @@ from zoneinfo import ZoneInfo
 from ugh_quantamental.fx_protocol.analytics_annotations import run_annotation_analytics
 from ugh_quantamental.fx_protocol.analytics_rebuild import rebuild_weekly_report
 from ugh_quantamental.fx_protocol.annotation_sources import build_annotation_source_summary
-from ugh_quantamental.fx_protocol.labeled_observations import build_labeled_observations
+from ugh_quantamental.fx_protocol.labeled_observations import (
+    _resolve_annotation_status,
+    build_labeled_observations,
+)
 from ugh_quantamental.fx_protocol.monthly_review import compute_monthly_regime_metrics
 from ugh_quantamental.fx_protocol.weekly_reports_v2 import build_slice_metrics
 
@@ -254,6 +257,45 @@ class TestFallbackPrecedence:
         assert row["regime_label"] == "choppy"  # manual wins over fallback
         assert row["annotation_source"] == "manual_compat"
         assert row["annotation_status"] == "pending"  # NOT promoted to confirmed
+
+
+class TestResolveAnnotationStatus:
+    def test_ai_label_confirmed(self) -> None:
+        assert _resolve_annotation_status({"ai", "none"}, "") == "confirmed"
+
+    def test_fallback_with_auto_tag_stays_confirmed(self) -> None:
+        # Auto event tags must NOT strip confirmation off a fallback-labeled row.
+        assert _resolve_annotation_status({"ohlc_fallback", "none"}, "") == "confirmed"
+
+    def test_pending_manual_label_not_promoted(self) -> None:
+        assert _resolve_annotation_status({"manual_compat", "ohlc_fallback"}, "pending") == "pending"
+
+    def test_confirmed_manual_label_kept(self) -> None:
+        assert _resolve_annotation_status({"manual_compat", "none"}, "confirmed") == "confirmed"
+
+    def test_no_label_carries_manual_status(self) -> None:
+        assert _resolve_annotation_status({"none"}, "") == ""
+
+
+class TestFallbackConfirmationWithAutoTags:
+    def test_month_end_fallback_row_is_confirmed(self, tmp_path) -> None:
+        """A fallback-labeled row that also has a month_end calendar auto tag
+        must still be annotation_status=confirmed (regression for PR #116)."""
+        tmpdir = str(tmp_path)
+        # 2026-03-31 is the last business day of March -> month_end auto tag.
+        _write_day(
+            tmpdir, date_str="20260331",
+            as_of="2026-03-31T08:00:00+09:00", day_index=1,
+        )
+        obs_path = os.path.join(tmpdir, "analytics", "labeled_observations.csv")
+        fallback = {"fc_001": {"regime_label": "trending", "volatility_label": "low"}}
+        build_labeled_observations(tmpdir, _NOW, fallback_annotations=fallback)
+        row = _read_rows(obs_path)[0]
+
+        assert "month_end" in row["event_tags"]          # auto tag present
+        assert row["annotation_source"] == "auto_only"   # auto wins source
+        assert row["regime_label"] == "trending"         # fallback label kept
+        assert row["annotation_status"] == "confirmed"   # still confirmed
 
 
 class TestSourceSummaryCountsFallback:
