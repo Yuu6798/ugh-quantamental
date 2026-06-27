@@ -286,6 +286,20 @@ class TestFallbackPrecedence:
         assert row["annotation_source"] == "ohlc_fallback"  # not manual_compat
         assert row["annotation_status"] == "confirmed"  # market-derived
 
+    def test_ai_tag_only_annotation_is_confirmed(self, tmp_path) -> None:
+        """An AI annotation supplying only event tags (no regime/vol/ir label)
+        must still be source=ai and confirmed so tags reach scoreboards
+        (regression PR #116)."""
+        tmpdir = str(tmp_path)
+        obs_path = _setup_history(tmpdir, days=3)
+        ai = {"fc_001": {"ai_event_tags": "fomc"}}
+        build_labeled_observations(tmpdir, _NOW, ai_annotations=ai)
+        row = {r["as_of_jst"][:10]: r for r in _read_rows(obs_path)}["2026-03-17"]
+
+        assert row["annotation_source"] == "ai"
+        assert row["annotation_status"] == "confirmed"
+        assert "fomc" in row["event_tags"]
+
     def test_no_annotations_leaves_rows_unannotated(self, tmp_path) -> None:
         tmpdir = str(tmp_path)
         obs_path = _setup_history(tmpdir, days=3)
@@ -326,20 +340,27 @@ class TestFallbackPrecedence:
 
 class TestResolveAnnotationStatus:
     def test_ai_label_confirmed(self) -> None:
-        assert _resolve_annotation_status({"ai", "none"}, "") == "confirmed"
+        assert _resolve_annotation_status(True, {"ai", "none"}, "") == "confirmed"
+
+    def test_ai_tag_only_confirmed(self) -> None:
+        # AI annotation with only event tags / failure_reason (no regime/vol/ir
+        # label) must still be confirmed so its tags reach tag scoreboards.
+        assert _resolve_annotation_status(True, {"none"}, "") == "confirmed"
 
     def test_fallback_with_auto_tag_stays_confirmed(self) -> None:
         # Auto event tags must NOT strip confirmation off a fallback-labeled row.
-        assert _resolve_annotation_status({"ohlc_fallback", "none"}, "") == "confirmed"
+        assert _resolve_annotation_status(False, {"ohlc_fallback", "none"}, "") == "confirmed"
 
     def test_pending_manual_label_not_promoted(self) -> None:
-        assert _resolve_annotation_status({"manual_compat", "ohlc_fallback"}, "pending") == "pending"
+        assert _resolve_annotation_status(
+            False, {"manual_compat", "ohlc_fallback"}, "pending"
+        ) == "pending"
 
     def test_confirmed_manual_label_kept(self) -> None:
-        assert _resolve_annotation_status({"manual_compat", "none"}, "confirmed") == "confirmed"
+        assert _resolve_annotation_status(False, {"manual_compat", "none"}, "confirmed") == "confirmed"
 
     def test_no_label_carries_manual_status(self) -> None:
-        assert _resolve_annotation_status({"none"}, "") == ""
+        assert _resolve_annotation_status(False, {"none"}, "") == ""
 
 
 class TestFallbackConfirmationWithAutoTags:

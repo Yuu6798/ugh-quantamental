@@ -194,27 +194,32 @@ def _read_csv_rows(path: str) -> list[dict[str, str]]:
         return list(csv.DictReader(fh))
 
 
-def _resolve_annotation_status(label_sources: set[str], manual_status: str) -> str:
-    """Resolve ``annotation_status`` from the regime / volatility / intervention
-    *label* sources (not the overall annotation_source).
+def _resolve_annotation_status(
+    has_ai: bool, label_sources: set[str], manual_status: str
+) -> str:
+    """Resolve ``annotation_status`` from the row's annotation provenance.
 
-    - An unconfirmed manual label that won a field keeps its own status
-      (e.g. ``pending``), so a deterministic fallback label available for the
-      same row never silently promotes it to ``confirmed``.
-    - Otherwise market-derived labels (AI or OHLC fallback) are ``confirmed`` —
+    - Any AI-populated row is ``confirmed`` — including tag-only or
+      failure-reason-only AI annotations that carry no regime/volatility/
+      intervention label (the AI pass ran; its output is machine-derived).
+    - For non-AI rows, an unconfirmed manual *label* that won a field keeps its
+      own status (e.g. ``pending``), so a deterministic fallback label available
+      for the same row never silently promotes it to ``confirmed``.
+    - Otherwise an OHLC fallback label that won a field is ``confirmed`` —
       including rows that also carry auto event tags, which must not strip a
       fallback-labeled row of its confirmation.
-    - When no label was resolved, the manual status (possibly empty) carries.
+    - When nothing was resolved, the manual status (possibly empty) carries.
     """
     from ugh_quantamental.fx_protocol.annotation_sources import (
-        SOURCE_AI,
         SOURCE_FALLBACK,
         SOURCE_MANUAL_COMPAT,
     )
 
+    if has_ai:
+        return "confirmed"
     if SOURCE_MANUAL_COMPAT in label_sources and manual_status != "confirmed":
         return manual_status
-    if label_sources & {SOURCE_AI, SOURCE_FALLBACK}:
+    if SOURCE_FALLBACK in label_sources:
         return "confirmed"
     return manual_status
 
@@ -508,6 +513,7 @@ def _collect_labeled_observation_rows(
                     # unconfirmed manual label that won a field keeps its own
                     # (e.g. pending) status so it is never silently promoted.
                     "annotation_status": _resolve_annotation_status(
+                        has_ai,
                         {regime_src, vol_src, ir_src},
                         manual.get("annotation_status", ""),
                     ),
