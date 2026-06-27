@@ -19,6 +19,7 @@ from ugh_quantamental.fx_protocol.models import (
     OutcomeRecord,
     is_ugh_kind,
 )
+from ugh_quantamental.schemas.enums import LifecycleState
 from ugh_quantamental.fx_protocol.outcome_models import (
     DailyOutcomeWorkflowRequest,
     PersistedOutcomeEvaluationBatch,
@@ -207,6 +208,55 @@ def compute_disconfirmers_hit(
     )
 
 
+# ---------------------------------------------------------------------------
+# Realized lifecycle-state classifier (FX-STATEPROXY-REDEF, v1 heuristic)
+# ---------------------------------------------------------------------------
+#
+# Coarse, deterministic mapping from a single day's realized OHLC to a
+# ``LifecycleState`` label, used as an *independent ground truth* for the
+# ``state_correctness_hit`` metric (distinct from the persistence-only
+# ``state_proxy_hit``). Thresholds are realized intraday range (bp of open) and
+# the directional "body ratio" (how much of the range the close captured).
+#
+# ⚠️ This is intentionally a coarse v1 proxy. ``failure`` is NOT emitted: it is
+# a forecast-relative breakdown that cannot be distinguished from
+# ``exhaustion`` from direction-agnostic OHLC alone. The realized label is in
+# the ``LifecycleState`` vocabulary ONLY — never the regime/volatility axes
+# (trending/choppy, low/normal/high), which would be a category error.
+_REALIZED_RANGE_QUIET_BP: float = 30.0
+_REALIZED_RANGE_LARGE_BP: float = 80.0
+_REALIZED_BODY_TREND_RATIO: float = 0.6
+
+
+def classify_realized_state(outcome: OutcomeRecord) -> LifecycleState:
+    """Classify a day's realized OHLC into a coarse ``LifecycleState`` (v1).
+
+    Pure and deterministic. Rules (intraday range in bp of the open, and the
+    directional body ratio ``|close - open| / (high - low)``):
+
+    - quiet range            -> ``dormant``
+    - large range, strong body  -> ``fire`` (move fired and held)
+    - large range, weak body    -> ``exhaustion`` (big range, faded close)
+    - moderate range, strong body -> ``expansion`` (directional continuation)
+    - moderate range, weak body   -> ``setup`` (building, no follow-through)
+    """
+    open_px = outcome.realized_open
+    range_price = outcome.realized_high - outcome.realized_low
+    range_bp = (range_price / open_px * 10000.0) if open_px > 0 else 0.0
+    body_ratio = (
+        abs(outcome.realized_close - outcome.realized_open) / range_price
+        if range_price > 0
+        else 0.0
+    )
+
+    if range_bp < _REALIZED_RANGE_QUIET_BP:
+        return LifecycleState.dormant
+    strong_body = body_ratio >= _REALIZED_BODY_TREND_RATIO
+    if range_bp >= _REALIZED_RANGE_LARGE_BP:
+        return LifecycleState.fire if strong_body else LifecycleState.exhaustion
+    return LifecycleState.expansion if strong_body else LifecycleState.setup
+
+
 def build_evaluation_record(
     forecast: ForecastRecord,
     outcome: OutcomeRecord,
@@ -245,14 +295,25 @@ def build_evaluation_record(
 
     state_proxy_hit: bool | None = None
     actual_state_change: bool | None = None
+    state_correctness_hit: bool | None = None
     mismatch_change_bp: float | None = None
     realized_state_proxy_out: str | None = None
 
     if is_ugh:
         realized_state_proxy_out = realized_state_proxy
         if forecast.dominant_state is not None and realized_state_proxy is not None:
+            # NOTE: state_proxy_hit measures PERSISTENCE — whether today's
+            # forecast state matches the *next-day forecast* state. It is high in
+            # stable regimes and 0 on transitions; it is NOT an accuracy metric.
             state_proxy_hit = forecast.dominant_state.value == realized_state_proxy
             actual_state_change = forecast.dominant_state.value != realized_state_proxy
+        if forecast.dominant_state is not None:
+            # state_correctness_hit measures CORRECTNESS — whether the forecast
+            # lifecycle state matched the realized state derived from OHLC
+            # (FX-STATEPROXY-REDEF). Independent of persistence.
+            state_correctness_hit = (
+                forecast.dominant_state == classify_realized_state(outcome)
+            )
         mismatch_change_bp = outcome.realized_close_change_bp - forecast.expected_close_change_bp
 
     disconfirmers_hit = compute_disconfirmers_hit(forecast, outcome, realized_state_proxy)
@@ -273,6 +334,7 @@ def build_evaluation_record(
         close_error_bp=close_error_bp,
         magnitude_error_bp=magnitude_error_bp,
         state_proxy_hit=state_proxy_hit,
+        state_correctness_hit=state_correctness_hit,
         mismatch_change_bp=mismatch_change_bp,
         realized_state_proxy=realized_state_proxy_out,
         actual_state_change=actual_state_change,

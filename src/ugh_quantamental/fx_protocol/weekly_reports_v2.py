@@ -44,6 +44,8 @@ WEEKLY_STRATEGY_METRICS_FIELDNAMES: tuple[str, ...] = (
     "range_hit_rate",
     "state_proxy_hit_count",
     "state_proxy_hit_rate",
+    "state_correctness_hit_count",
+    "state_correctness_hit_rate",
     "mean_close_error_bp",
     "median_close_error_bp",
     "mean_magnitude_error_bp",
@@ -60,6 +62,8 @@ WEEKLY_SLICE_METRICS_FIELDNAMES: tuple[str, ...] = (
     "range_hit_rate",
     "state_proxy_hit_count",
     "state_proxy_hit_rate",
+    "state_correctness_hit_count",
+    "state_correctness_hit_rate",
     "mean_close_error_bp",
     "median_close_error_bp",
     "mean_magnitude_error_bp",
@@ -96,6 +100,8 @@ def _compute_metrics_for_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
     range_hits = count_bool_rows(range_evaluable, "range_hit")
     state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]
     state_hits = count_bool_rows(state_evaluable, "state_proxy_hit")
+    correctness_evaluable = [r for r in rows if r.get("state_correctness_hit", "") != ""]
+    correctness_hits = count_bool_rows(correctness_evaluable, "state_correctness_hit")
     close_errors = collect_floats(rows, "close_error_bp")
     mag_errors = collect_floats(rows, "magnitude_error_bp")
 
@@ -108,6 +114,12 @@ def _compute_metrics_for_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
         "state_proxy_hit_count": state_hits if state_evaluable else "",
         "state_proxy_hit_rate": (
             _safe_rate(state_hits, len(state_evaluable)) if state_evaluable else ""
+        ),
+        "state_correctness_hit_count": correctness_hits if correctness_evaluable else "",
+        "state_correctness_hit_rate": (
+            _safe_rate(correctness_hits, len(correctness_evaluable))
+            if correctness_evaluable
+            else ""
         ),
         "mean_close_error_bp": _safe_mean(close_errors),
         "median_close_error_bp": _safe_median(close_errors),

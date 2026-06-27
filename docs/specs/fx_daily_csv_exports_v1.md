@@ -188,7 +188,8 @@ CSV values are loaded from persisted records only:
 | `range_hit` | `EvaluationRecord.range_hit` or blank |
 | `close_error_bp` | `EvaluationRecord.close_error_bp` or blank |
 | `magnitude_error_bp` | `EvaluationRecord.magnitude_error_bp` or blank |
-| `state_proxy_hit` | `EvaluationRecord.state_proxy_hit` or blank |
+| `state_proxy_hit` | `EvaluationRecord.state_proxy_hit` (persistence) or blank |
+| `state_correctness_hit` | `EvaluationRecord.state_correctness_hit` (correctness vs realized OHLC state) or blank |
 | `mismatch_change_bp` | `EvaluationRecord.mismatch_change_bp` or blank |
 | `realized_state_proxy` | `EvaluationRecord.realized_state_proxy` or blank |
 | `actual_state_change` | `EvaluationRecord.actual_state_change` or blank |

@@ -230,6 +230,7 @@ def _to_aware_utc(dt: datetime) -> datetime:
 # UGH-only diagnostic fields on EvaluationRecord (must be None for baselines).
 _UGH_EVAL_ONLY_FIELDS: tuple[str, ...] = (
     "state_proxy_hit",
+    "state_correctness_hit",
     "mismatch_change_bp",
     "realized_state_proxy",
     "actual_state_change",
@@ -620,8 +621,13 @@ class EvaluationRecord(BaseModel):
     close_error_bp: float | None = None
     magnitude_error_bp: float | None = None
 
-    # --- state-proxy diagnostics (UGH only; None for baselines) ---
+    # --- state diagnostics (UGH only; None for baselines) ---
+    # state_proxy_hit: PERSISTENCE — forecast state == next-day forecast state
+    #   (high in stable regimes, 0 on transitions; NOT an accuracy metric).
+    # state_correctness_hit: CORRECTNESS — forecast state == realized state
+    #   classified from OHLC (FX-STATEPROXY-REDEF). Independent of persistence.
     state_proxy_hit: bool | None = None
+    state_correctness_hit: bool | None = None
     mismatch_change_bp: float | None = None
     realized_state_proxy: str | None = None
     actual_state_change: bool | None = None

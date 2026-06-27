@@ -96,9 +96,9 @@ def build_weekly_report_md(report: dict[str, Any]) -> str:
     if strats:
         lines.append(
             "| Strategy | Obs | Dir Hit | Dir Rate | Range Rate "
-            "| State Rate | Mean Err (bp) | Median Err (bp) |"
+            "| State Persist | State Correct | Mean Err (bp) | Median Err (bp) |"
         )
-        lines.append("|---|---|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|---|---|")
         for s in strats:
             lines.append(
                 f"| {s.get('strategy_kind', '')} "
@@ -107,6 +107,7 @@ def build_weekly_report_md(report: dict[str, Any]) -> str:
                 f"| {_fmt_pct(s.get('direction_hit_rate', ''))} "
                 f"| {_fmt_pct(s.get('range_hit_rate', ''))} "
                 f"| {_fmt_pct(s.get('state_proxy_hit_rate', ''))} "
+                f"| {_fmt_pct(s.get('state_correctness_hit_rate', ''))} "
                 f"| {_fmt_bp(s.get('mean_close_error_bp', ''))} "
                 f"| {_fmt_bp(s.get('median_close_error_bp', ''))} |"
             )
