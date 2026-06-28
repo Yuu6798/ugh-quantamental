@@ -14,6 +14,7 @@
 - 2026-06-01: ENGINE-P1A/P2A/P2B/P3A を小 PR で処理し、range_hit ensemble (#107)、report_window stratify (#108)、state v2.1 (#109)、rare FLAT epsilon v2.2 (#110) を main に反映。P2B/P3A の長期論点は spec/tests に外部化。
 - 2026-06-01 (S2): engine review 2026-05 を全クローズ。Phase B variant-specific expected_range + v2.3 (#111)、Phase 4 conviction spec + §8 Option B (#112)。Milestone 18 monthly reporting が既存実装済みと判明し PLANS.md を実態同期 (branch, PR pending)。次は売買レイヤー planning。
 - 2026-06-27: 6月デイリーログ分析→週報3本→月次集計→2026-06 engine review program (planning doc + Codex 用 Task Brief 5本) を起草し PR #114 マージ。Codex 8 round/20 thread を全 resolve (P1: state は forecast direction 非入力)。regime ラベルが performance 由来=循環と判明、要再検証。
+- 2026-06-28: 2026-06 engine review program の 5 briefs を全実装・マージ (#116-#120)。FX-ANNOT-LIVE (OHLC fallback+leakage 除去) / STATE-HYSTERESIS v2.4 / MAG-EXPANSION v2.5 / STATEPROXY-REDEF (state_correctness_hit 新設) / GOV-REGIME-FLAGS。engine default v2.5。次は循環ラベル是正後の月次再検証。
 
 <!--
 新規エントリのテンプレート:
