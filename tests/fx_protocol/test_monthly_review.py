@@ -22,6 +22,7 @@ from ugh_quantamental.fx_protocol.monthly_review import (
     compute_review_flags,
     run_monthly_review,
     select_representative_cases,
+    THRESHOLD_REGIME_DIRECTION_COLLAPSE_PCT,
 )
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -511,6 +512,93 @@ class TestInsufficientDataFlag:
         assert flags[0]["flag"] == "insufficient_data"
 
 
+def _healthy_inputs() -> tuple:
+    """Blended inputs that produce only keep_current_logic (no other flags)."""
+    strategy_metrics = [{
+        "strategy_kind": "ugh",
+        "forecast_count": 20,
+        "direction_hit_rate": 0.6,
+        "range_hit_rate": 0.5,
+        "state_proxy_hit_rate": 0.5,
+        "mean_abs_close_error_bp": 15.0,
+        "mean_abs_magnitude_error_bp": 12.0,
+    }]
+    baseline_comparisons = [
+        {"baseline_strategy_kind": "baseline_random_walk",
+         "direction_accuracy_delta_vs_ugh": -0.1,
+         "mean_abs_close_error_bp_delta_vs_ugh": 5.0,
+         "mean_abs_magnitude_error_bp_delta_vs_ugh": 3.0,
+         "state_proxy_hit_rate_delta_vs_ugh": None},
+        {"baseline_strategy_kind": "baseline_simple_technical",
+         "direction_accuracy_delta_vs_ugh": -0.05,
+         "mean_abs_close_error_bp_delta_vs_ugh": 2.0,
+         "mean_abs_magnitude_error_bp_delta_vs_ugh": 1.0,
+         "state_proxy_hit_rate_delta_vs_ugh": None},
+    ]
+    annotation_cov = {"annotation_coverage_rate": 0.8}
+    provider_health = {"total_runs": 20, "lagged_snapshot_count": 1, "fallback_adjustment_count": 1}
+    return strategy_metrics, baseline_comparisons, annotation_cov, provider_health
+
+
+class TestRegimeDirectionCollapseFlag:
+    def test_choppy_collapse_fires_despite_healthy_blend(self) -> None:
+        """A confirmed choppy 0% slice flags even when blended metrics are fine."""
+        sm, bc, cov, ph = _healthy_inputs()
+        regime_metrics = [
+            {"regime_label": "trending", "observation_count": 10,
+             "direction_hit_rate": 0.9, "mean_abs_close_error_bp": 12.0},
+            {"regime_label": "choppy", "observation_count": 8,
+             "direction_hit_rate": 0.0, "mean_abs_close_error_bp": 32.0},
+        ]
+        flags = compute_review_flags(
+            sm, bc, cov, ph, requested_window_count=20, missing_window_count=0,
+            regime_metrics=regime_metrics,
+        )
+        ids = {f["flag"] for f in flags}
+        assert "regime_direction_collapse" in ids
+        assert "keep_current_logic" not in ids
+
+    def test_high_vol_collapse_fires(self) -> None:
+        sm, bc, cov, ph = _healthy_inputs()
+        vol_metrics = [
+            {"volatility_label": "low", "observation_count": 9,
+             "direction_hit_rate": 0.8, "mean_abs_close_error_bp": 10.0},
+            {"volatility_label": "high", "observation_count": 7,
+             "direction_hit_rate": 0.0, "mean_abs_close_error_bp": 64.0},
+        ]
+        flags = compute_review_flags(
+            sm, bc, cov, ph, requested_window_count=20, missing_window_count=0,
+            volatility_metrics=vol_metrics,
+        )
+        assert "volatility_direction_collapse" in {f["flag"] for f in flags}
+
+    def test_sparse_slice_does_not_misfire(self) -> None:
+        sm, bc, cov, ph = _healthy_inputs()
+        regime_metrics = [
+            {"regime_label": "choppy", "observation_count": 3,  # < THRESHOLD_MINIMUM_OBSERVATIONS
+             "direction_hit_rate": 0.0, "mean_abs_close_error_bp": 32.0},
+        ]
+        flags = compute_review_flags(
+            sm, bc, cov, ph, requested_window_count=20, missing_window_count=0,
+            regime_metrics=regime_metrics,
+        )
+        ids = {f["flag"] for f in flags}
+        assert "regime_direction_collapse" not in ids
+        assert flags[0]["flag"] == "keep_current_logic"
+
+    def test_unlabeled_slice_skipped(self) -> None:
+        sm, bc, cov, ph = _healthy_inputs()
+        regime_metrics = [
+            {"regime_label": "unlabeled", "observation_count": 12,
+             "direction_hit_rate": 0.0, "mean_abs_close_error_bp": 30.0},
+        ]
+        flags = compute_review_flags(
+            sm, bc, cov, ph, requested_window_count=20, missing_window_count=0,
+            regime_metrics=regime_metrics,
+        )
+        assert "regime_direction_collapse" not in {f["flag"] for f in flags}
+
+
 class TestInspectMagnitudeMappingFlag:
     def test_close_error_worse_than_random_walk(self) -> None:
         strategy_metrics = [
@@ -764,6 +852,14 @@ class TestRecommendationSummary:
         assert "magnitude" in summary.lower()
         assert "direction" in summary.lower()
 
+    def test_collapse_only_flags_are_not_blank(self) -> None:
+        """A collapse-only review must produce a non-empty recommendation
+        (PR #120 review: build_recommendation_summary must handle the new IDs)."""
+        for fid in ("regime_direction_collapse", "volatility_direction_collapse"):
+            summary = build_recommendation_summary([{"flag": fid, "reason": "choppy 0%"}])
+            assert summary.strip() != ""
+            assert "direction logic" in summary.lower()
+
 
 # ---------------------------------------------------------------------------
 # Tests: full monthly review
@@ -798,6 +894,37 @@ class TestRunMonthlyReview:
         assert len(review["review_flags"]) >= 1
         assert review["recommendation_summary"] != ""
         assert review["annotation_coverage_summary"]["total_observations"] == 3
+
+    def test_regime_collapse_anchors_to_canonical_variant(self) -> None:
+        """The collapse flag must fire on the canonical UGH variant's choppy
+        slice even when the pooled all-variant choppy rate stays healthy
+        (PR #120 review: masking via pooled slices)."""
+        days = ["16", "17", "18", "19", "20", "23"]
+        rows: list[dict[str, str]] = []
+        for d in days:
+            as_of = f"2026-03-{d}T08:00:00+09:00"
+            for variant in _UGH_V2_VARIANTS:
+                # Canonical (alpha) misses every choppy day; others hit -> the
+                # pooled choppy rate stays well above the 40% threshold.
+                hit = "False" if variant == "ugh_v2_alpha" else "True"
+                row = _make_obs(
+                    as_of_jst=as_of, forecast_batch_id=f"batch_{d}",
+                    strategy_kind=variant, regime_label="choppy",
+                    direction_hit=hit, annotation_status="confirmed",
+                )
+                row["annotation_source"] = "ai"
+                rows.append(row)
+
+        review = run_monthly_review(
+            rows, [], review_generated_at_jst=_REVIEW_DATE, business_day_count=6,
+        )
+        flag_ids = {f["flag"] for f in review["review_flags"]}
+        assert "regime_direction_collapse" in flag_ids
+        # Demonstrate the masking the fix defeats: pooled choppy rate is healthy.
+        choppy = next(
+            m for m in review["monthly_regime_metrics"] if m["regime_label"] == "choppy"
+        )
+        assert choppy["direction_hit_rate"] > THRESHOLD_REGIME_DIRECTION_COLLAPSE_PCT
 
     def test_empty_data(self) -> None:
         review = run_monthly_review(

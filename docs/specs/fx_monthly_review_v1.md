@@ -148,7 +148,11 @@ Rule-based flags are computed from monthly metrics. Each flag includes a `flag` 
 | `low_annotation_coverage` | Confirmed annotation coverage below threshold | `THRESHOLD_ANNOTATION_COVERAGE_LOW = 0.30` (30%) |
 | `provider_quality_issue` | Provider lag or fallback rate exceeds threshold | `THRESHOLD_PROVIDER_LAG_RATE = 0.30`, `THRESHOLD_PROVIDER_FALLBACK_RATE = 0.30` |
 | `missing_windows` | Missing window rate exceeds threshold | `THRESHOLD_MISSING_WINDOW_RATE = 0.25` (25%) |
+| `regime_direction_collapse` | A confirmed **regime** slice (e.g. `choppy`) with ≥ `THRESHOLD_MINIMUM_OBSERVATIONS` obs has UGH direction rate below the collapse threshold, even when the blended metric is acceptable | `THRESHOLD_REGIME_DIRECTION_COLLAPSE_PCT = 0.40` (40%) |
+| `volatility_direction_collapse` | A confirmed **volatility** slice (e.g. `high`) with ≥ `THRESHOLD_MINIMUM_OBSERVATIONS` obs has UGH direction rate below the collapse threshold | `THRESHOLD_REGIME_DIRECTION_COLLAPSE_PCT = 0.40` (40%) |
 | `keep_current_logic` | No other flags triggered | (no threshold) |
+
+The two stratified flags (`regime_direction_collapse` / `volatility_direction_collapse`) route to `logic_audit` in `classify_judgment` and each generate a logic-audit change candidate — so a per-regime collapse (e.g. choppy 0% dir) can no longer pass governance by being diluted in the all-regime aggregate (FX-GOV-REGIME-FLAGS).
 
 All thresholds are defined as module-level constants in `monthly_review.py` and can be modified for future tuning.
 

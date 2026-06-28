@@ -221,6 +221,17 @@ class TestBuildMonthlyDecisionLog:
         assert "direction prediction logic" in result["logic_audit_candidates"]
         assert "state-to-magnitude mapping" in result["logic_audit_candidates"]
 
+    def test_collapse_flags_populate_logic_audit_candidates(self) -> None:
+        """Collapse-only reviews must name their audit target in the decision
+        log (PR #120 review)."""
+        for fid, expected in (
+            ("regime_direction_collapse", "regime-stratified direction logic"),
+            ("volatility_direction_collapse", "volatility-stratified direction logic"),
+        ):
+            review = self._make_review(flags=[{"flag": fid, "reason": "choppy 0%"}])
+            result = build_monthly_decision_log(review, JUDGMENT_LOGIC_AUDIT, [])
+            assert expected in result["logic_audit_candidates"]
+
     def test_provider_concerns_populated(self) -> None:
         flags = [
             {"flag": "provider_quality_issue", "reason": "Lag rate 40%"},
@@ -275,6 +286,19 @@ class TestBuildChangeCandidateList:
         assert result[0]["category"] == JUDGMENT_LOGIC_AUDIT
         assert "CC-001" == result[0]["candidate_id"]
         assert "CC-002" == result[1]["candidate_id"]
+
+    def test_regime_collapse_flag_routes_to_logic_audit(self) -> None:
+        """FX-GOV-REGIME-FLAGS: a regime/vol collapse flag must change the
+        judgment off `keep` AND generate a logic-audit change candidate."""
+        for fid in ("regime_direction_collapse", "volatility_direction_collapse"):
+            flags = [{"flag": fid, "reason": "choppy 0% dir"}]
+            assert classify_judgment(flags, [], {}, {}) == JUDGMENT_LOGIC_AUDIT
+            candidates = build_change_candidate_list(
+                {"review_flags": flags}, JUDGMENT_LOGIC_AUDIT
+            )
+            assert len(candidates) == 1
+            assert candidates[0]["category"] == JUDGMENT_LOGIC_AUDIT
+            assert candidates[0]["status"] == "proposed"
 
     def test_provider_flags_produce_candidates(self) -> None:
         review = {
