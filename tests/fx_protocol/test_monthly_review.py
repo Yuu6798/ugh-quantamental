@@ -22,6 +22,7 @@ from ugh_quantamental.fx_protocol.monthly_review import (
     compute_review_flags,
     run_monthly_review,
     select_representative_cases,
+    THRESHOLD_REGIME_DIRECTION_COLLAPSE_PCT,
 )
 
 _JST = ZoneInfo("Asia/Tokyo")
@@ -893,6 +894,37 @@ class TestRunMonthlyReview:
         assert len(review["review_flags"]) >= 1
         assert review["recommendation_summary"] != ""
         assert review["annotation_coverage_summary"]["total_observations"] == 3
+
+    def test_regime_collapse_anchors_to_canonical_variant(self) -> None:
+        """The collapse flag must fire on the canonical UGH variant's choppy
+        slice even when the pooled all-variant choppy rate stays healthy
+        (PR #120 review: masking via pooled slices)."""
+        days = ["16", "17", "18", "19", "20", "23"]
+        rows: list[dict[str, str]] = []
+        for d in days:
+            as_of = f"2026-03-{d}T08:00:00+09:00"
+            for variant in _UGH_V2_VARIANTS:
+                # Canonical (alpha) misses every choppy day; others hit -> the
+                # pooled choppy rate stays well above the 40% threshold.
+                hit = "False" if variant == "ugh_v2_alpha" else "True"
+                row = _make_obs(
+                    as_of_jst=as_of, forecast_batch_id=f"batch_{d}",
+                    strategy_kind=variant, regime_label="choppy",
+                    direction_hit=hit, annotation_status="confirmed",
+                )
+                row["annotation_source"] = "ai"
+                rows.append(row)
+
+        review = run_monthly_review(
+            rows, [], review_generated_at_jst=_REVIEW_DATE, business_day_count=6,
+        )
+        flag_ids = {f["flag"] for f in review["review_flags"]}
+        assert "regime_direction_collapse" in flag_ids
+        # Demonstrate the masking the fix defeats: pooled choppy rate is healthy.
+        choppy = next(
+            m for m in review["monthly_regime_metrics"] if m["regime_label"] == "choppy"
+        )
+        assert choppy["direction_hit_rate"] > THRESHOLD_REGIME_DIRECTION_COLLAPSE_PCT
 
     def test_empty_data(self) -> None:
         review = run_monthly_review(

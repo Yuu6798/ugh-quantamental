@@ -922,6 +922,21 @@ def run_monthly_review(
     # Representative cases
     successes, failures = select_representative_cases(observations, max_examples)
 
+    # Regime/volatility collapse flags must anchor to the SAME canonical UGH
+    # variant the other review flags use (not the pooled all-variant slices that
+    # feed the report), so a canonical-variant per-slice collapse cannot be
+    # masked by the other variants in the pool (PR #120 review).
+    canonical_ugh = _select_canonical_ugh_metrics(strategy_metrics)
+    canonical_kind = canonical_ugh.get("strategy_kind") if canonical_ugh else None
+    flag_regime_metrics: list[dict[str, Any]] = []
+    flag_volatility_metrics: list[dict[str, Any]] = []
+    if include_annotations and canonical_kind:
+        canonical_obs = [
+            r for r in observations if r.get("strategy_kind", "") == canonical_kind
+        ]
+        flag_regime_metrics = compute_monthly_regime_metrics(canonical_obs)
+        flag_volatility_metrics = compute_monthly_volatility_metrics(canonical_obs)
+
     # Review flags
     review_flags = compute_review_flags(
         strategy_metrics,
@@ -930,8 +945,8 @@ def run_monthly_review(
         provider_health,
         requested_window_count=business_day_count,
         missing_window_count=missing_window_count,
-        regime_metrics=regime_metrics,
-        volatility_metrics=volatility_metrics,
+        regime_metrics=flag_regime_metrics,
+        volatility_metrics=flag_volatility_metrics,
     )
 
     # Recommendation summary
