@@ -233,6 +233,10 @@ def build_monthly_decision_log(
             logic_audit_candidates.append("direction prediction logic")
         elif fid == "inspect_state_mapping":
             logic_audit_candidates.append("state-to-magnitude mapping")
+        elif fid == "regime_direction_collapse":
+            logic_audit_candidates.append("regime-stratified direction logic")
+        elif fid == "volatility_direction_collapse":
+            logic_audit_candidates.append("volatility-stratified direction logic")
 
     # Provider / annotation concerns
     provider_concerns: list[str] = []

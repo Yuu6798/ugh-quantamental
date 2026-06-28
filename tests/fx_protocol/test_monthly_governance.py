@@ -221,6 +221,17 @@ class TestBuildMonthlyDecisionLog:
         assert "direction prediction logic" in result["logic_audit_candidates"]
         assert "state-to-magnitude mapping" in result["logic_audit_candidates"]
 
+    def test_collapse_flags_populate_logic_audit_candidates(self) -> None:
+        """Collapse-only reviews must name their audit target in the decision
+        log (PR #120 review)."""
+        for fid, expected in (
+            ("regime_direction_collapse", "regime-stratified direction logic"),
+            ("volatility_direction_collapse", "volatility-stratified direction logic"),
+        ):
+            review = self._make_review(flags=[{"flag": fid, "reason": "choppy 0%"}])
+            result = build_monthly_decision_log(review, JUDGMENT_LOGIC_AUDIT, [])
+            assert expected in result["logic_audit_candidates"]
+
     def test_provider_concerns_populated(self) -> None:
         flags = [
             {"flag": "provider_quality_issue", "reason": "Lag rate 40%"},
