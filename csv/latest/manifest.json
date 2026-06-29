@@ -1,14 +1,14 @@
 {
-  "as_of_jst": "2026-06-26T08:00:00+09:00",
-  "generated_at_utc": "2026-06-26T13:06:00Z",
-  "forecast_batch_id": "fb_USDJPY_20260626T080000_v1_b982ed18c44e221e",
-  "outcome_id": "oc_USDJPY_20260625T080000_20260626T080000_v1_4331c2080a05c217",
+  "as_of_jst": "2026-06-29T08:00:00+09:00",
+  "generated_at_utc": "2026-06-29T09:53:40Z",
+  "forecast_batch_id": "fb_USDJPY_20260629T080000_v1_76f7c3732f1b4ab8",
+  "outcome_id": "oc_USDJPY_20260626T080000_20260629T080000_v1_59944451e861b54a",
   "evaluation_count": 7,
   "forecast_csv_path": "latest/forecast.csv",
   "outcome_csv_path": "latest/outcome.csv",
   "evaluation_csv_path": "latest/evaluation.csv",
   "protocol_version": "v1",
   "theory_version": "v2",
-  "engine_version": "v2.3",
+  "engine_version": "v2.5",
   "schema_version": "v1"
 }
