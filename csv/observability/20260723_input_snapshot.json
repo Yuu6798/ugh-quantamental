@@ -1,491 +1,819 @@
 {
   "as_of_jst": "2026-07-23T08:00:00+09:00",
   "pair": "USDJPY",
-  "current_spot": 163.372,
-  "provider_name": "yahoo_finance",
+  "current_spot": 163.13,
+  "provider_name": "alpha_vantage",
   "market_data_provenance": {
-    "vendor": "yahoo_finance",
-    "feed_name": "chart/USDJPY=X",
+    "vendor": "alpha_vantage",
+    "feed_name": "FX_DAILY/USDJPY",
     "price_type": "mid",
     "resolution": "1d",
     "timezone": "UTC",
-    "retrieved_at_utc": "2026-07-23T09:24:56.806382+00:00"
+    "retrieved_at_utc": "2026-07-23T12:20:04.051591+00:00"
   },
   "completed_windows": [
     {
+      "window_start_jst": "2026-03-05T08:00:00+09:00",
+      "window_end_jst": "2026-03-06T08:00:00+09:00",
+      "open_price": 157.05,
+      "high_price": 157.85,
+      "low_price": 156.43,
+      "close_price": 157.57
+    },
+    {
+      "window_start_jst": "2026-03-06T08:00:00+09:00",
+      "window_end_jst": "2026-03-09T08:00:00+09:00",
+      "open_price": 157.52,
+      "high_price": 158.08,
+      "low_price": 157.37,
+      "close_price": 157.79
+    },
+    {
+      "window_start_jst": "2026-03-09T08:00:00+09:00",
+      "window_end_jst": "2026-03-10T08:00:00+09:00",
+      "open_price": 157.78,
+      "high_price": 158.89,
+      "low_price": 157.62,
+      "close_price": 157.64
+    },
+    {
+      "window_start_jst": "2026-03-10T08:00:00+09:00",
+      "window_end_jst": "2026-03-11T08:00:00+09:00",
+      "open_price": 157.66,
+      "high_price": 158.12,
+      "low_price": 157.25,
+      "close_price": 158.04
+    },
+    {
+      "window_start_jst": "2026-03-11T08:00:00+09:00",
+      "window_end_jst": "2026-03-12T08:00:00+09:00",
+      "open_price": 158.04,
+      "high_price": 158.97,
+      "low_price": 157.84,
+      "close_price": 158.94
+    },
+    {
+      "window_start_jst": "2026-03-12T08:00:00+09:00",
+      "window_end_jst": "2026-03-13T08:00:00+09:00",
+      "open_price": 158.94,
+      "high_price": 159.43,
+      "low_price": 158.55,
+      "close_price": 159.33
+    },
+    {
+      "window_start_jst": "2026-03-13T08:00:00+09:00",
+      "window_end_jst": "2026-03-16T08:00:00+09:00",
+      "open_price": 159.33,
+      "high_price": 159.74,
+      "low_price": 158.98,
+      "close_price": 159.71
+    },
+    {
+      "window_start_jst": "2026-03-16T08:00:00+09:00",
+      "window_end_jst": "2026-03-17T08:00:00+09:00",
+      "open_price": 159.57,
+      "high_price": 159.74,
+      "low_price": 158.83,
+      "close_price": 159.06
+    },
+    {
+      "window_start_jst": "2026-03-17T08:00:00+09:00",
+      "window_end_jst": "2026-03-18T08:00:00+09:00",
+      "open_price": 159.09,
+      "high_price": 159.49,
+      "low_price": 158.7,
+      "close_price": 158.98
+    },
+    {
+      "window_start_jst": "2026-03-18T08:00:00+09:00",
+      "window_end_jst": "2026-03-19T08:00:00+09:00",
+      "open_price": 159.03,
+      "high_price": 159.9,
+      "low_price": 158.55,
+      "close_price": 159.86
+    },
+    {
+      "window_start_jst": "2026-03-19T08:00:00+09:00",
+      "window_end_jst": "2026-03-20T08:00:00+09:00",
+      "open_price": 159.85,
+      "high_price": 159.86,
+      "low_price": 157.49,
+      "close_price": 157.72
+    },
+    {
+      "window_start_jst": "2026-03-20T08:00:00+09:00",
+      "window_end_jst": "2026-03-23T08:00:00+09:00",
+      "open_price": 157.7,
+      "high_price": 159.38,
+      "low_price": 157.58,
+      "close_price": 159.22
+    },
+    {
+      "window_start_jst": "2026-03-23T08:00:00+09:00",
+      "window_end_jst": "2026-03-24T08:00:00+09:00",
+      "open_price": 159.22,
+      "high_price": 159.65,
+      "low_price": 158.02,
+      "close_price": 158.43
+    },
+    {
+      "window_start_jst": "2026-03-24T08:00:00+09:00",
+      "window_end_jst": "2026-03-25T08:00:00+09:00",
+      "open_price": 158.41,
+      "high_price": 159.18,
+      "low_price": 158.25,
+      "close_price": 158.68
+    },
+    {
+      "window_start_jst": "2026-03-25T08:00:00+09:00",
+      "window_end_jst": "2026-03-26T08:00:00+09:00",
+      "open_price": 158.69,
+      "high_price": 159.5,
+      "low_price": 158.55,
+      "close_price": 159.46
+    },
+    {
+      "window_start_jst": "2026-03-26T08:00:00+09:00",
+      "window_end_jst": "2026-03-27T08:00:00+09:00",
+      "open_price": 159.47,
+      "high_price": 159.84,
+      "low_price": 159.26,
+      "close_price": 159.8
+    },
+    {
+      "window_start_jst": "2026-03-27T08:00:00+09:00",
+      "window_end_jst": "2026-03-30T08:00:00+09:00",
+      "open_price": 159.66,
+      "high_price": 160.41,
+      "low_price": 159.43,
+      "close_price": 160.31
+    },
+    {
+      "window_start_jst": "2026-03-30T08:00:00+09:00",
+      "window_end_jst": "2026-03-31T08:00:00+09:00",
+      "open_price": 159.89,
+      "high_price": 160.46,
+      "low_price": 159.3,
+      "close_price": 159.72
+    },
+    {
+      "window_start_jst": "2026-03-31T08:00:00+09:00",
+      "window_end_jst": "2026-04-01T08:00:00+09:00",
+      "open_price": 159.73,
+      "high_price": 159.97,
+      "low_price": 158.64,
+      "close_price": 158.71
+    },
+    {
+      "window_start_jst": "2026-04-01T08:00:00+09:00",
+      "window_end_jst": "2026-04-02T08:00:00+09:00",
+      "open_price": 158.7,
+      "high_price": 159.01,
+      "low_price": 158.25,
+      "close_price": 158.78
+    },
+    {
+      "window_start_jst": "2026-04-02T08:00:00+09:00",
+      "window_end_jst": "2026-04-03T08:00:00+09:00",
+      "open_price": 158.78,
+      "high_price": 159.74,
+      "low_price": 158.52,
+      "close_price": 159.59
+    },
+    {
+      "window_start_jst": "2026-04-03T08:00:00+09:00",
+      "window_end_jst": "2026-04-06T08:00:00+09:00",
+      "open_price": 159.62,
+      "high_price": 159.71,
+      "low_price": 159.41,
+      "close_price": 159.56
+    },
+    {
+      "window_start_jst": "2026-04-06T08:00:00+09:00",
+      "window_end_jst": "2026-04-07T08:00:00+09:00",
+      "open_price": 159.49,
+      "high_price": 159.82,
+      "low_price": 159.28,
+      "close_price": 159.68
+    },
+    {
+      "window_start_jst": "2026-04-07T08:00:00+09:00",
+      "window_end_jst": "2026-04-08T08:00:00+09:00",
+      "open_price": 159.67,
+      "high_price": 160.03,
+      "low_price": 159.45,
+      "close_price": 159.61
+    },
+    {
+      "window_start_jst": "2026-04-08T08:00:00+09:00",
+      "window_end_jst": "2026-04-09T08:00:00+09:00",
+      "open_price": 159.52,
+      "high_price": 159.61,
+      "low_price": 157.86,
+      "close_price": 158.58
+    },
+    {
+      "window_start_jst": "2026-04-09T08:00:00+09:00",
+      "window_end_jst": "2026-04-10T08:00:00+09:00",
+      "open_price": 158.55,
+      "high_price": 159.29,
+      "low_price": 158.43,
+      "close_price": 158.94
+    },
+    {
+      "window_start_jst": "2026-04-10T08:00:00+09:00",
+      "window_end_jst": "2026-04-13T08:00:00+09:00",
+      "open_price": 158.95,
+      "high_price": 159.37,
+      "low_price": 158.9,
+      "close_price": 159.29
+    },
+    {
+      "window_start_jst": "2026-04-13T08:00:00+09:00",
+      "window_end_jst": "2026-04-14T08:00:00+09:00",
+      "open_price": 159.43,
+      "high_price": 159.86,
+      "low_price": 159.27,
+      "close_price": 159.44
+    },
+    {
+      "window_start_jst": "2026-04-14T08:00:00+09:00",
+      "window_end_jst": "2026-04-15T08:00:00+09:00",
+      "open_price": 159.44,
+      "high_price": 159.46,
+      "low_price": 158.59,
+      "close_price": 158.77
+    },
+    {
+      "window_start_jst": "2026-04-15T08:00:00+09:00",
+      "window_end_jst": "2026-04-16T08:00:00+09:00",
+      "open_price": 158.8,
+      "high_price": 159.15,
+      "low_price": 158.63,
+      "close_price": 158.96
+    },
+    {
+      "window_start_jst": "2026-04-16T08:00:00+09:00",
+      "window_end_jst": "2026-04-17T08:00:00+09:00",
+      "open_price": 159.0,
+      "high_price": 159.3,
+      "low_price": 158.25,
+      "close_price": 159.18
+    },
+    {
+      "window_start_jst": "2026-04-17T08:00:00+09:00",
+      "window_end_jst": "2026-04-20T08:00:00+09:00",
+      "open_price": 159.12,
+      "high_price": 159.52,
+      "low_price": 157.57,
+      "close_price": 158.61
+    },
+    {
+      "window_start_jst": "2026-04-20T08:00:00+09:00",
+      "window_end_jst": "2026-04-21T08:00:00+09:00",
+      "open_price": 158.59,
+      "high_price": 159.2,
+      "low_price": 158.54,
+      "close_price": 158.79
+    },
+    {
+      "window_start_jst": "2026-04-21T08:00:00+09:00",
+      "window_end_jst": "2026-04-22T08:00:00+09:00",
+      "open_price": 158.76,
+      "high_price": 159.64,
+      "low_price": 158.66,
+      "close_price": 159.37
+    },
+    {
+      "window_start_jst": "2026-04-22T08:00:00+09:00",
+      "window_end_jst": "2026-04-23T08:00:00+09:00",
+      "open_price": 159.36,
+      "high_price": 159.57,
+      "low_price": 159.08,
+      "close_price": 159.48
+    },
+    {
+      "window_start_jst": "2026-04-23T08:00:00+09:00",
+      "window_end_jst": "2026-04-24T08:00:00+09:00",
+      "open_price": 159.49,
+      "high_price": 159.84,
+      "low_price": 159.28,
+      "close_price": 159.71
+    },
+    {
+      "window_start_jst": "2026-04-24T08:00:00+09:00",
+      "window_end_jst": "2026-04-27T08:00:00+09:00",
+      "open_price": 159.6,
+      "high_price": 159.84,
+      "low_price": 159.29,
+      "close_price": 159.37
+    },
+    {
+      "window_start_jst": "2026-04-27T08:00:00+09:00",
+      "window_end_jst": "2026-04-28T08:00:00+09:00",
+      "open_price": 159.6,
+      "high_price": 159.63,
+      "low_price": 159.08,
+      "close_price": 159.42
+    },
+    {
+      "window_start_jst": "2026-04-28T08:00:00+09:00",
+      "window_end_jst": "2026-04-29T08:00:00+09:00",
+      "open_price": 159.41,
+      "high_price": 159.78,
+      "low_price": 158.93,
+      "close_price": 159.61
+    },
+    {
+      "window_start_jst": "2026-04-29T08:00:00+09:00",
+      "window_end_jst": "2026-04-30T08:00:00+09:00",
+      "open_price": 159.58,
+      "high_price": 160.47,
+      "low_price": 159.49,
+      "close_price": 160.39
+    },
+    {
+      "window_start_jst": "2026-04-30T08:00:00+09:00",
+      "window_end_jst": "2026-05-01T08:00:00+09:00",
+      "open_price": 160.39,
+      "high_price": 160.72,
+      "low_price": 155.54,
+      "close_price": 156.57
+    },
+    {
       "window_start_jst": "2026-05-01T08:00:00+09:00",
       "window_end_jst": "2026-05-04T08:00:00+09:00",
-      "open_price": 156.99400329589844,
-      "high_price": 157.3090057373047,
-      "low_price": 155.51600646972656,
-      "close_price": 156.97799682617188
+      "open_price": 156.57,
+      "high_price": 157.32,
+      "low_price": 155.51,
+      "close_price": 157.03
     },
     {
       "window_start_jst": "2026-05-04T08:00:00+09:00",
       "window_end_jst": "2026-05-05T08:00:00+09:00",
-      "open_price": 156.89999389648438,
-      "high_price": 157.27699279785156,
-      "low_price": 155.81500244140625,
-      "close_price": 156.8459930419922
+      "open_price": 156.77,
+      "high_price": 157.3,
+      "low_price": 155.87,
+      "close_price": 157.22
     },
     {
       "window_start_jst": "2026-05-05T08:00:00+09:00",
       "window_end_jst": "2026-05-06T08:00:00+09:00",
-      "open_price": 157.2050018310547,
-      "high_price": 157.8350067138672,
-      "low_price": 157.12100219726562,
-      "close_price": 157.19400024414062
+      "open_price": 157.21,
+      "high_price": 157.92,
+      "low_price": 157.07,
+      "close_price": 157.87
     },
     {
       "window_start_jst": "2026-05-06T08:00:00+09:00",
       "window_end_jst": "2026-05-07T08:00:00+09:00",
-      "open_price": 157.6649932861328,
-      "high_price": 157.88900756835938,
-      "low_price": 155.0469970703125,
-      "close_price": 157.677001953125
+      "open_price": 157.86,
+      "high_price": 157.93,
+      "low_price": 155.02,
+      "close_price": 156.39
     },
     {
       "window_start_jst": "2026-05-07T08:00:00+09:00",
       "window_end_jst": "2026-05-08T08:00:00+09:00",
-      "open_price": 156.51100158691406,
-      "high_price": 156.51100158691406,
-      "low_price": 156.03599548339844,
-      "close_price": 156.50799560546875
+      "open_price": 156.38,
+      "high_price": 156.95,
+      "low_price": 156.0,
+      "close_price": 156.91
     },
     {
       "window_start_jst": "2026-05-08T08:00:00+09:00",
       "window_end_jst": "2026-05-11T08:00:00+09:00",
-      "open_price": 156.83799743652344,
-      "high_price": 156.97300720214844,
-      "low_price": 156.4459991455078,
-      "close_price": 156.82899475097656
+      "open_price": 156.89,
+      "high_price": 156.99,
+      "low_price": 156.42,
+      "close_price": 156.65
     },
     {
       "window_start_jst": "2026-05-11T08:00:00+09:00",
       "window_end_jst": "2026-05-12T08:00:00+09:00",
-      "open_price": 156.88900756835938,
-      "high_price": 157.16900634765625,
-      "low_price": 156.85499572753906,
-      "close_price": 156.85800170898438
+      "open_price": 156.39,
+      "high_price": 157.27,
+      "low_price": 156.39,
+      "close_price": 157.16
     },
     {
       "window_start_jst": "2026-05-12T08:00:00+09:00",
       "window_end_jst": "2026-05-13T08:00:00+09:00",
-      "open_price": 157.27000427246094,
-      "high_price": 157.74600219726562,
-      "low_price": 156.8090057373047,
-      "close_price": 157.2310028076172
+      "open_price": 157.15,
+      "high_price": 157.76,
+      "low_price": 157.04,
+      "close_price": 157.61
     },
     {
       "window_start_jst": "2026-05-13T08:00:00+09:00",
       "window_end_jst": "2026-05-14T08:00:00+09:00",
-      "open_price": 157.6750030517578,
-      "high_price": 157.89100646972656,
-      "low_price": 157.57899475097656,
-      "close_price": 157.67100524902344
+      "open_price": 157.59,
+      "high_price": 157.92,
+      "low_price": 157.51,
+      "close_price": 157.85
     },
     {
       "window_start_jst": "2026-05-14T08:00:00+09:00",
       "window_end_jst": "2026-05-15T08:00:00+09:00",
-      "open_price": 157.8470001220703,
-      "high_price": 158.18299865722656,
-      "low_price": 157.60899353027344,
-      "close_price": 157.8509979248047
+      "open_price": 157.83,
+      "high_price": 158.42,
+      "low_price": 157.4,
+      "close_price": 158.35
     },
     {
       "window_start_jst": "2026-05-15T08:00:00+09:00",
       "window_end_jst": "2026-05-18T08:00:00+09:00",
-      "open_price": 158.39300537109375,
-      "high_price": 158.73800659179688,
-      "low_price": 158.30499267578125,
-      "close_price": 158.3820037841797
+      "open_price": 158.36,
+      "high_price": 158.84,
+      "low_price": 158.27,
+      "close_price": 158.76
     },
     {
       "window_start_jst": "2026-05-18T08:00:00+09:00",
       "window_end_jst": "2026-05-19T08:00:00+09:00",
-      "open_price": 158.86900329589844,
-      "high_price": 159.0590057373047,
-      "low_price": 158.63999938964844,
-      "close_price": 158.843994140625
+      "open_price": 158.51,
+      "high_price": 159.08,
+      "low_price": 158.5,
+      "close_price": 158.83
     },
     {
       "window_start_jst": "2026-05-19T08:00:00+09:00",
       "window_end_jst": "2026-05-20T08:00:00+09:00",
-      "open_price": 158.875,
-      "high_price": 159.24200439453125,
-      "low_price": 158.7779998779297,
-      "close_price": 158.86099243164062
+      "open_price": 158.79,
+      "high_price": 159.25,
+      "low_price": 158.7,
+      "close_price": 159.04
     },
     {
       "window_start_jst": "2026-05-20T08:00:00+09:00",
       "window_end_jst": "2026-05-21T08:00:00+09:00",
-      "open_price": 159.05299377441406,
-      "high_price": 159.16600036621094,
-      "low_price": 158.593994140625,
-      "close_price": 159.03500366210938
+      "open_price": 159.05,
+      "high_price": 159.16,
+      "low_price": 158.57,
+      "close_price": 158.91
     },
     {
       "window_start_jst": "2026-05-21T08:00:00+09:00",
       "window_end_jst": "2026-05-22T08:00:00+09:00",
-      "open_price": 158.88800048828125,
-      "high_price": 159.3179931640625,
-      "low_price": 158.8179931640625,
-      "close_price": 158.88800048828125
+      "open_price": 158.88,
+      "high_price": 159.34,
+      "low_price": 158.77,
+      "close_price": 158.96
     },
     {
       "window_start_jst": "2026-05-22T08:00:00+09:00",
       "window_end_jst": "2026-05-25T08:00:00+09:00",
-      "open_price": 159.04800415039062,
-      "high_price": 159.22500610351562,
-      "low_price": 159.0,
-      "close_price": 159.01800537109375
+      "open_price": 158.95,
+      "high_price": 159.23,
+      "low_price": 158.87,
+      "close_price": 159.19
     },
     {
       "window_start_jst": "2026-05-25T08:00:00+09:00",
       "window_end_jst": "2026-05-26T08:00:00+09:00",
-      "open_price": 158.94200134277344,
-      "high_price": 159.03700256347656,
-      "low_price": 158.75900268554688,
-      "close_price": 158.9459991455078
+      "open_price": 158.9,
+      "high_price": 159.04,
+      "low_price": 158.74,
+      "close_price": 158.89
     },
     {
       "window_start_jst": "2026-05-26T08:00:00+09:00",
       "window_end_jst": "2026-05-27T08:00:00+09:00",
-      "open_price": 158.947998046875,
-      "high_price": 159.3719940185547,
-      "low_price": 158.90699768066406,
-      "close_price": 158.95399475097656
+      "open_price": 158.89,
+      "high_price": 159.38,
+      "low_price": 158.81,
+      "close_price": 159.29
     },
     {
       "window_start_jst": "2026-05-27T08:00:00+09:00",
       "window_end_jst": "2026-05-28T08:00:00+09:00",
-      "open_price": 159.2239990234375,
-      "high_price": 159.51800537109375,
-      "low_price": 159.1739959716797,
-      "close_price": 159.2429962158203
+      "open_price": 159.28,
+      "high_price": 159.58,
+      "low_price": 159.16,
+      "close_price": 159.51
     },
     {
       "window_start_jst": "2026-05-28T08:00:00+09:00",
       "window_end_jst": "2026-05-29T08:00:00+09:00",
-      "open_price": 159.57400512695312,
-      "high_price": 159.64300537109375,
-      "low_price": 159.16600036621094,
-      "close_price": 159.5679931640625
+      "open_price": 159.51,
+      "high_price": 159.65,
+      "low_price": 159.11,
+      "close_price": 159.23
     },
     {
       "window_start_jst": "2026-05-29T08:00:00+09:00",
       "window_end_jst": "2026-06-01T08:00:00+09:00",
-      "open_price": 159.26100158691406,
-      "high_price": 159.37600708007812,
-      "low_price": 159.0989990234375,
-      "close_price": 159.27000427246094
+      "open_price": 159.21,
+      "high_price": 159.37,
+      "low_price": 159.08,
+      "close_price": 159.26
     },
     {
       "window_start_jst": "2026-06-01T08:00:00+09:00",
       "window_end_jst": "2026-06-02T08:00:00+09:00",
-      "open_price": 159.38299560546875,
-      "high_price": 159.74899291992188,
-      "low_price": 159.3679962158203,
-      "close_price": 159.3679962158203
+      "open_price": 159.3,
+      "high_price": 159.76,
+      "low_price": 159.21,
+      "close_price": 159.65
     },
     {
       "window_start_jst": "2026-06-02T08:00:00+09:00",
       "window_end_jst": "2026-06-03T08:00:00+09:00",
-      "open_price": 159.63999938964844,
-      "high_price": 159.89500427246094,
-      "low_price": 159.63600158691406,
-      "close_price": 159.63600158691406
+      "open_price": 159.65,
+      "high_price": 159.98,
+      "low_price": 159.55,
+      "close_price": 159.89
     },
     {
       "window_start_jst": "2026-06-03T08:00:00+09:00",
       "window_end_jst": "2026-06-04T08:00:00+09:00",
-      "open_price": 159.97500610351562,
-      "high_price": 159.99400329589844,
-      "low_price": 159.51199340820312,
-      "close_price": 159.96800231933594
+      "open_price": 159.89,
+      "high_price": 160.09,
+      "low_price": 159.35,
+      "close_price": 160.03
     },
     {
       "window_start_jst": "2026-06-04T08:00:00+09:00",
       "window_end_jst": "2026-06-05T08:00:00+09:00",
-      "open_price": 159.9459991455078,
-      "high_price": 160.02099609375,
-      "low_price": 159.75,
-      "close_price": 159.94000244140625
+      "open_price": 160.03,
+      "high_price": 160.07,
+      "low_price": 159.7,
+      "close_price": 160.01
     },
     {
       "window_start_jst": "2026-06-05T08:00:00+09:00",
       "window_end_jst": "2026-06-08T08:00:00+09:00",
-      "open_price": 159.99000549316406,
-      "high_price": 160.2899932861328,
-      "low_price": 159.82400512695312,
-      "close_price": 159.99000549316406
+      "open_price": 160.01,
+      "high_price": 160.34,
+      "low_price": 159.82,
+      "close_price": 160.29
     },
     {
       "window_start_jst": "2026-06-08T08:00:00+09:00",
       "window_end_jst": "2026-06-09T08:00:00+09:00",
-      "open_price": 160.3280029296875,
-      "high_price": 160.38800048828125,
-      "low_price": 159.906005859375,
-      "close_price": 160.32699584960938
+      "open_price": 160.14,
+      "high_price": 160.39,
+      "low_price": 159.87,
+      "close_price": 160.17
     },
     {
       "window_start_jst": "2026-06-09T08:00:00+09:00",
       "window_end_jst": "2026-06-10T08:00:00+09:00",
-      "open_price": 160.1820068359375,
-      "high_price": 160.2989959716797,
-      "low_price": 160.05499267578125,
-      "close_price": 160.1739959716797
+      "open_price": 160.12,
+      "high_price": 160.44,
+      "low_price": 160.03,
+      "close_price": 160.36
     },
     {
       "window_start_jst": "2026-06-10T08:00:00+09:00",
       "window_end_jst": "2026-06-11T08:00:00+09:00",
-      "open_price": 160.3820037841797,
-      "high_price": 160.52099609375,
-      "low_price": 160.25100708007812,
-      "close_price": 160.38400268554688
+      "open_price": 160.34,
+      "high_price": 160.57,
+      "low_price": 160.21,
+      "close_price": 160.53
     },
     {
       "window_start_jst": "2026-06-11T08:00:00+09:00",
       "window_end_jst": "2026-06-12T08:00:00+09:00",
-      "open_price": 160.50799560546875,
-      "high_price": 160.58599853515625,
-      "low_price": 160.427001953125,
-      "close_price": 160.52699279785156
+      "open_price": 160.5,
+      "high_price": 160.59,
+      "low_price": 159.64,
+      "close_price": 159.92
     },
     {
       "window_start_jst": "2026-06-12T08:00:00+09:00",
       "window_end_jst": "2026-06-15T08:00:00+09:00",
-      "open_price": 160.16799926757812,
-      "high_price": 160.36900329589844,
-      "low_price": 159.97300720214844,
-      "close_price": 160.1300048828125
+      "open_price": 159.92,
+      "high_price": 160.37,
+      "low_price": 159.87,
+      "close_price": 160.21
     },
     {
       "window_start_jst": "2026-06-15T08:00:00+09:00",
       "window_end_jst": "2026-06-16T08:00:00+09:00",
-      "open_price": 159.91600036621094,
-      "high_price": 160.2220001220703,
-      "low_price": 159.88699340820312,
-      "close_price": 159.9550018310547
+      "open_price": 160.22,
+      "high_price": 160.39,
+      "low_price": 159.72,
+      "close_price": 160.32
     },
     {
       "window_start_jst": "2026-06-16T08:00:00+09:00",
       "window_end_jst": "2026-06-17T08:00:00+09:00",
-      "open_price": 160.24000549316406,
-      "high_price": 160.45799255371094,
-      "low_price": 160.05799865722656,
-      "close_price": 160.22900390625
+      "open_price": 160.3,
+      "high_price": 160.48,
+      "low_price": 160.03,
+      "close_price": 160.45
     },
     {
       "window_start_jst": "2026-06-17T08:00:00+09:00",
       "window_end_jst": "2026-06-18T08:00:00+09:00",
-      "open_price": 160.41400146484375,
-      "high_price": 160.4219970703125,
-      "low_price": 160.1179962158203,
-      "close_price": 160.41900634765625
+      "open_price": 160.38,
+      "high_price": 160.79,
+      "low_price": 160.1,
+      "close_price": 160.63
     },
     {
       "window_start_jst": "2026-06-18T08:00:00+09:00",
       "window_end_jst": "2026-06-19T08:00:00+09:00",
-      "open_price": 160.5500030517578,
-      "high_price": 161.36599731445312,
-      "low_price": 160.53900146484375,
-      "close_price": 160.60000610351562
+      "open_price": 160.66,
+      "high_price": 161.8,
+      "low_price": 160.46,
+      "close_price": 161.37
     },
     {
       "window_start_jst": "2026-06-19T08:00:00+09:00",
       "window_end_jst": "2026-06-22T08:00:00+09:00",
-      "open_price": 161.2480010986328,
-      "high_price": 161.44900512695312,
-      "low_price": 161.00599670410156,
-      "close_price": 161.28900146484375
+      "open_price": 161.37,
+      "high_price": 161.45,
+      "low_price": 160.98,
+      "close_price": 161.28
     },
     {
       "window_start_jst": "2026-06-22T08:00:00+09:00",
       "window_end_jst": "2026-06-23T08:00:00+09:00",
-      "open_price": 161.43299865722656,
-      "high_price": 161.91400146484375,
-      "low_price": 161.10299682617188,
-      "close_price": 161.43299865722656
+      "open_price": 161.26,
+      "high_price": 161.92,
+      "low_price": 161.06,
+      "close_price": 161.54
     },
     {
       "window_start_jst": "2026-06-23T08:00:00+09:00",
       "window_end_jst": "2026-06-24T08:00:00+09:00",
-      "open_price": 161.5469970703125,
-      "high_price": 161.73300170898438,
-      "low_price": 161.30999755859375,
-      "close_price": 161.57000732421875
+      "open_price": 161.52,
+      "high_price": 161.73,
+      "low_price": 161.25,
+      "close_price": 161.57
     },
     {
       "window_start_jst": "2026-06-24T08:00:00+09:00",
       "window_end_jst": "2026-06-25T08:00:00+09:00",
-      "open_price": 161.55799865722656,
-      "high_price": 161.802001953125,
-      "low_price": 161.531005859375,
-      "close_price": 161.5989990234375
+      "open_price": 161.48,
+      "high_price": 161.83,
+      "low_price": 161.46,
+      "close_price": 161.77
     },
     {
       "window_start_jst": "2026-06-25T08:00:00+09:00",
       "window_end_jst": "2026-06-26T08:00:00+09:00",
-      "open_price": 161.73300170898438,
-      "high_price": 161.93499755859375,
-      "low_price": 161.58700561523438,
-      "close_price": 161.76300048828125
+      "open_price": 161.76,
+      "high_price": 161.94,
+      "low_price": 161.54,
+      "close_price": 161.78
     },
     {
       "window_start_jst": "2026-06-26T08:00:00+09:00",
       "window_end_jst": "2026-06-29T08:00:00+09:00",
-      "open_price": 161.7899932861328,
-      "high_price": 161.84300231933594,
-      "low_price": 161.53500366210938,
-      "close_price": 161.80499267578125
+      "open_price": 161.78,
+      "high_price": 161.84,
+      "low_price": 161.51,
+      "close_price": 161.73
     },
     {
       "window_start_jst": "2026-06-29T08:00:00+09:00",
       "window_end_jst": "2026-06-30T08:00:00+09:00",
-      "open_price": 161.76300048828125,
-      "high_price": 161.9550018310547,
-      "low_price": 161.718994140625,
-      "close_price": 161.78700256347656
+      "open_price": 161.71,
+      "high_price": 161.97,
+      "low_price": 161.68,
+      "close_price": 161.94
     },
     {
       "window_start_jst": "2026-06-30T08:00:00+09:00",
       "window_end_jst": "2026-07-01T08:00:00+09:00",
-      "open_price": 161.9199981689453,
-      "high_price": 162.6510009765625,
-      "low_price": 161.9199981689453,
-      "close_price": 161.92300415039062
+      "open_price": 161.93,
+      "high_price": 162.66,
+      "low_price": 161.83,
+      "close_price": 162.54
     },
     {
       "window_start_jst": "2026-07-01T08:00:00+09:00",
       "window_end_jst": "2026-07-02T08:00:00+09:00",
-      "open_price": 162.66000366210938,
-      "high_price": 162.83599853515625,
-      "low_price": 162.29400634765625,
-      "close_price": 162.6280059814453
+      "open_price": 162.52,
+      "high_price": 162.83,
+      "low_price": 162.28,
+      "close_price": 162.56
     },
     {
       "window_start_jst": "2026-07-02T08:00:00+09:00",
       "window_end_jst": "2026-07-03T08:00:00+09:00",
-      "open_price": 162.54200744628906,
-      "high_price": 162.58399963378906,
-      "low_price": 160.68800354003906,
-      "close_price": 162.53900146484375
+      "open_price": 162.6,
+      "high_price": 162.6,
+      "low_price": 160.62,
+      "close_price": 161.09
     },
     {
       "window_start_jst": "2026-07-03T08:00:00+09:00",
       "window_end_jst": "2026-07-06T08:00:00+09:00",
-      "open_price": 161.4040069580078,
-      "high_price": 161.49400329589844,
-      "low_price": 160.6199951171875,
-      "close_price": 161.44900512695312
+      "open_price": 161.09,
+      "high_price": 161.51,
+      "low_price": 160.51,
+      "close_price": 161.37
     },
     {
       "window_start_jst": "2026-07-06T08:00:00+09:00",
       "window_end_jst": "2026-07-07T08:00:00+09:00",
-      "open_price": 161.48699951171875,
-      "high_price": 162.4239959716797,
-      "low_price": 161.46499633789062,
-      "close_price": 161.46499633789062
+      "open_price": 161.35,
+      "high_price": 162.42,
+      "low_price": 161.22,
+      "close_price": 162.08
     },
     {
       "window_start_jst": "2026-07-07T08:00:00+09:00",
       "window_end_jst": "2026-07-08T08:00:00+09:00",
-      "open_price": 162.09500122070312,
-      "high_price": 162.17300415039062,
-      "low_price": 161.68800354003906,
-      "close_price": 162.08799743652344
+      "open_price": 162.08,
+      "high_price": 162.18,
+      "low_price": 161.66,
+      "close_price": 162.09
     },
     {
       "window_start_jst": "2026-07-08T08:00:00+09:00",
       "window_end_jst": "2026-07-09T08:00:00+09:00",
-      "open_price": 162.36199951171875,
-      "high_price": 162.697998046875,
-      "low_price": 162.0800018310547,
-      "close_price": 162.36300659179688
+      "open_price": 162.09,
+      "high_price": 162.7,
+      "low_price": 162.05,
+      "close_price": 162.58
     },
     {
       "window_start_jst": "2026-07-09T08:00:00+09:00",
       "window_end_jst": "2026-07-10T08:00:00+09:00",
-      "open_price": 162.50999450683594,
-      "high_price": 162.56500244140625,
-      "low_price": 162.2469940185547,
-      "close_price": 162.53900146484375
+      "open_price": 162.58,
+      "high_price": 162.62,
+      "low_price": 162.23,
+      "close_price": 162.37
     },
     {
       "window_start_jst": "2026-07-10T08:00:00+09:00",
       "window_end_jst": "2026-07-13T08:00:00+09:00",
-      "open_price": 162.3350067138672,
-      "high_price": 162.41900634765625,
-      "low_price": 161.29200744628906,
-      "close_price": 162.36300659179688
+      "open_price": 162.37,
+      "high_price": 162.42,
+      "low_price": 161.26,
+      "close_price": 161.69
     },
     {
       "window_start_jst": "2026-07-13T08:00:00+09:00",
       "window_end_jst": "2026-07-14T08:00:00+09:00",
-      "open_price": 161.88600158691406,
-      "high_price": 162.39300537109375,
-      "low_price": 161.88600158691406,
-      "close_price": 161.88600158691406
+      "open_price": 161.56,
+      "high_price": 162.48,
+      "low_price": 161.55,
+      "close_price": 162.42
     },
     {
       "window_start_jst": "2026-07-14T08:00:00+09:00",
       "window_end_jst": "2026-07-15T08:00:00+09:00",
-      "open_price": 162.41299438476562,
-      "high_price": 162.46600341796875,
-      "low_price": 161.69500732421875,
-      "close_price": 162.4290008544922
+      "open_price": 162.42,
+      "high_price": 162.46,
+      "low_price": 161.62,
+      "close_price": 162.23
     },
     {
       "window_start_jst": "2026-07-15T08:00:00+09:00",
       "window_end_jst": "2026-07-16T08:00:00+09:00",
-      "open_price": 162.18699645996094,
-      "high_price": 162.4149932861328,
-      "low_price": 161.9669952392578,
-      "close_price": 162.18699645996094
+      "open_price": 162.16,
+      "high_price": 162.42,
+      "low_price": 161.87,
+      "close_price": 162.18
     },
     {
       "window_start_jst": "2026-07-16T08:00:00+09:00",
       "window_end_jst": "2026-07-17T08:00:00+09:00",
-      "open_price": 162.08399963378906,
-      "high_price": 162.468994140625,
-      "low_price": 161.97999572753906,
-      "close_price": 162.07200622558594
+      "open_price": 162.18,
+      "high_price": 162.54,
+      "low_price": 161.96,
+      "close_price": 162.38
     },
     {
       "window_start_jst": "2026-07-17T08:00:00+09:00",
       "window_end_jst": "2026-07-20T08:00:00+09:00",
-      "open_price": 162.38099670410156,
-      "high_price": 162.4669952392578,
-      "low_price": 162.14700317382812,
-      "close_price": 162.37600708007812
+      "open_price": 162.38,
+      "high_price": 162.51,
+      "low_price": 162.12,
+      "close_price": 162.39
     },
     {
       "window_start_jst": "2026-07-20T08:00:00+09:00",
       "window_end_jst": "2026-07-21T08:00:00+09:00",
-      "open_price": 162.52499389648438,
-      "high_price": 162.58299255371094,
-      "low_price": 162.27099609375,
-      "close_price": 162.51199340820312
+      "open_price": 162.36,
+      "high_price": 162.59,
+      "low_price": 162.23,
+      "close_price": 162.49
     },
     {
       "window_start_jst": "2026-07-21T08:00:00+09:00",
       "window_end_jst": "2026-07-22T08:00:00+09:00",
-      "open_price": 162.47999572753906,
-      "high_price": 163.031005859375,
-      "low_price": 162.44000244140625,
-      "close_price": 162.48699951171875
+      "open_price": 162.47,
+      "high_price": 163.23,
+      "low_price": 162.41,
+      "close_price": 163.16
     },
     {
       "window_start_jst": "2026-07-22T08:00:00+09:00",
       "window_end_jst": "2026-07-23T08:00:00+09:00",
-      "open_price": 163.16799926757812,
-      "high_price": 163.197998046875,
-      "low_price": 162.85000610351562,
-      "close_price": 163.18600463867188
+      "open_price": 163.16,
+      "high_price": 163.22,
+      "low_price": 162.77,
+      "close_price": 163.13
     }
   ],
-  "completed_window_count": 59,
+  "completed_window_count": 100,
   "newest_completed_window_end_jst": "2026-07-23T08:00:00+09:00",
-  "generated_at_utc": "2026-07-23T09:24:56Z"
+  "generated_at_utc": "2026-07-23T12:20:04Z"
 }
