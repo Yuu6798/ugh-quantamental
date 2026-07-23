@@ -1,6 +1,6 @@
 {
   "as_of_jst": "2026-07-23T08:00:00+09:00",
-  "provider_name": "alpha_vantage",
+  "provider_name": "yahoo_finance",
   "versions": {
     "theory_version": "v2",
     "engine_version": "v2.5",
@@ -9,7 +9,7 @@
   },
   "forecast_batch_id": "fb_USDJPY_20260723T080000_v1_cc7a6c949ff21cbd",
   "outcome_id": "oc_USDJPY_20260722T080000_20260723T080000_v1_0b054078b3376d30",
-  "forecast_created": true,
+  "forecast_created": false,
   "outcome_recorded": true,
   "evaluation_count": 7,
   "csv_paths": {
@@ -20,6 +20,6 @@
   "manifest_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/latest/manifest.json",
   "snapshot_lag_business_days": 0,
   "used_fallback_adjustment": false,
-  "run_status": "ok",
-  "generated_at_utc": "2026-07-23T07:38:03Z"
+  "run_status": "idempotent_skip",
+  "generated_at_utc": "2026-07-23T09:24:56Z"
 }
