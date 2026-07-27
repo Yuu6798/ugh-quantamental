@@ -95,6 +95,30 @@ Interpretation rules learned over the series — apply, don't re-derive:
   close error, not direction. Track the retreat/release timing vs what the
   market did next — the 7/3 (worked) vs 7/10 (didn't) pair is the reference.
 
+## 4b. リピート注文モニタ (live position watch)
+
+The user runs a Rakuten FX repeat-order grid, live since **2026-07-27**:
+buy USDJPY 161.500–163.500, 25 pips grid / 25 pips take-profit, 10,000
+units per order (9 levels, no stop configured — the agreed manual exit
+line is a clear break of 160.50, the July low).
+
+While this grid is active, add a `## リピート注文モニタ` section to the
+weekly report (after 運用ヘルス) answering, from the week's OHLC:
+
+- Weekly low / close vs the grid floor 161.50 and the exit line 160.50 —
+  state plainly whether the band held, was dipped into and recovered, or
+  was broken (a close below 160.50 is the escalation: lead the chat
+  summary with it, don't bury it).
+- Days whose range overlapped the band vs days spent entirely above it
+  (price above 163.50 = grid idle, not at risk).
+- Any shock day (−0.9 円級, the 7/2 / 7/13 pattern) that would have
+  filled multiple levels at once.
+
+Estimated fill counts from daily OHLC are order-of-magnitude only — say
+so rather than implying precision. If the user reports changed or closed
+settings, update this section (or delete it) in the same commit as the
+report.
+
 ## 5. Deliver
 
 1. Commit the report to the session's working branch (never main, never
