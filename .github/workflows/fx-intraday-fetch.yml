@@ -1,0 +1,75 @@
+name: FX Intraday Fetch (one-off analysis)
+
+# Manual-only helper: fetches recent USDJPY hourly bars from the same Yahoo
+# Finance chart API the daily protocol already uses, and commits them as a CSV
+# to the triggering branch for offline grid-replay analysis. Not part of the
+# scheduled pipeline.
+
+on:
+  workflow_dispatch:
+    inputs:
+      range:
+        description: "Yahoo range parameter (e.g. 3mo)"
+        required: false
+        default: "3mo"
+      interval:
+        description: "Yahoo interval parameter (e.g. 60m)"
+        required: false
+        default: "60m"
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch hourly bars
+        env:
+          YF_RANGE: ${{ inputs.range }}
+          YF_INTERVAL: ${{ inputs.interval }}
+        run: |
+          python3 - <<'EOF'
+          import csv, json, os, urllib.request
+
+          rng = os.environ.get("YF_RANGE", "3mo")
+          interval = os.environ.get("YF_INTERVAL", "60m")
+          url = (
+              "https://query2.finance.yahoo.com/v8/finance/chart/USDJPY=X"
+              f"?interval={interval}&range={rng}"
+          )
+          req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+          with urllib.request.urlopen(req, timeout=30) as resp:
+              payload = json.load(resp)
+
+          result = payload["chart"]["result"][0]
+          ts = result["timestamp"]
+          q = result["indicators"]["quote"][0]
+          os.makedirs("analysis", exist_ok=True)
+          out = f"analysis/usdjpy_{interval}_{rng}.csv"
+          n = 0
+          with open(out, "w", newline="") as fh:
+              w = csv.writer(fh)
+              w.writerow(["ts_utc", "open", "high", "low", "close"])
+              for i, t in enumerate(ts):
+                  o, h, l, c = (q["open"][i], q["high"][i], q["low"][i], q["close"][i])
+                  if None in (o, h, l, c):
+                      continue
+                  w.writerow([t, f"{o:.4f}", f"{h:.4f}", f"{l:.4f}", f"{c:.4f}"])
+                  n += 1
+          print(f"wrote {out}: {n} bars")
+          EOF
+
+      - name: Commit CSV to triggering branch
+        run: |
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add analysis/
+          if git diff --cached --quiet; then
+            echo "No changes."
+          else
+            git commit -m "Fetch USDJPY intraday bars for grid replay analysis"
+            git push origin HEAD:"${GITHUB_REF_NAME}"
+          fi
