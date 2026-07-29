@@ -5,17 +5,15 @@ name: FX Intraday Fetch (one-off analysis)
 # to the triggering branch for offline grid-replay analysis. Not part of the
 # scheduled pipeline.
 
+# workflow_dispatch only works for workflows present on the default branch,
+# so this fires on pushes that touch this file itself on the analysis branch.
+# The CSV commit it makes does not match the path filter, so it cannot loop.
 on:
-  workflow_dispatch:
-    inputs:
-      range:
-        description: "Yahoo range parameter (e.g. 3mo)"
-        required: false
-        default: "3mo"
-      interval:
-        description: "Yahoo interval parameter (e.g. 60m)"
-        required: false
-        default: "60m"
+  push:
+    branches:
+      - "claude/**"
+    paths:
+      - ".github/workflows/fx-intraday-fetch.yml"
 
 permissions:
   contents: write
@@ -28,8 +26,8 @@ jobs:
 
       - name: Fetch hourly bars
         env:
-          YF_RANGE: ${{ inputs.range }}
-          YF_INTERVAL: ${{ inputs.interval }}
+          YF_RANGE: "3mo"
+          YF_INTERVAL: "60m"
         run: |
           python3 - <<'EOF'
           import csv, json, os, urllib.request
