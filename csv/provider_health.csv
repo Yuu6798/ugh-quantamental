@@ -245,3 +245,4 @@ as_of_jst,generated_at_utc,provider_name,newest_completed_window_end_jst,snapsho
 2026-07-29T08:00:00+09:00,2026-07-29T09:35:44Z,alpha_vantage,2026-07-29T08:00:00+09:00,0,False,idempotent_skip,
 2026-07-29T08:00:00+09:00,2026-07-29T12:56:34Z,alpha_vantage,2026-07-29T08:00:00+09:00,0,False,idempotent_skip,
 2026-07-30T08:00:00+09:00,2026-07-30T07:38:10Z,alpha_vantage,2026-07-30T08:00:00+09:00,0,False,ok,
+2026-07-30T08:00:00+09:00,2026-07-30T09:28:40Z,alpha_vantage,2026-07-30T08:00:00+09:00,0,False,idempotent_skip,
