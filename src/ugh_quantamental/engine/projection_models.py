@@ -117,7 +117,15 @@ class ProjectionConfig(BaseModel):
     bounds_low_conf_coef: FiniteFloat = Field(default=0.25, ge=0.0)
     bounds_urgency_coef: FiniteFloat = Field(default=0.15, ge=0.0)
     bounds_max_width: FiniteFloat = Field(default=1.0, gt=0.0)
-    range_width_scale: FiniteFloat = Field(default=2.0, ge=0.0)
+    # v2.6 (FX-RANGE-DECOUPLE): both are now multipliers on
+    # ``trailing_mean_range_price`` (the mean realized high-low of the last 20
+    # windows), giving the half-width of the expected-range envelope directly.
+    # Before v2.6 they scaled projection-snapshot uncertainty against
+    # ``trailing_mean_abs_close_change_bp``, which sized a range from a
+    # close-change statistic and covered only 45.5% of closes. 1.25 puts
+    # coverage at ~95% on the 2026-04..07 replay; the floor keeps the envelope
+    # non-degenerate if the scale is configured to 0.
+    range_width_scale: FiniteFloat = Field(default=1.25, ge=0.0)
     range_width_floor_ratio: FiniteFloat = Field(default=0.25, ge=0.0)
     # v2.5 volatility-expansion magnitude term (FX-MAG-EXPANSION). On
     # high-catalyst/urgency/fire days the signed magnitude of an already-non-FLAT

@@ -56,7 +56,7 @@ HAS_SQLALCHEMY = importlib.util.find_spec("sqlalchemy") is not None
 
 if HAS_SQLALCHEMY:
     from ugh_quantamental.fx_protocol.forecasting import (
-        _build_range_from_projection_width,
+        _build_range_from_trailing_volatility,
         _direction_from_bp_with_epsilon,
         build_prev_day_direction_forecast,
         build_random_walk_forecast,
@@ -65,7 +65,7 @@ if HAS_SQLALCHEMY:
         run_daily_forecast_workflow,
     )
 else:
-    _build_range_from_projection_width = None
+    _build_range_from_trailing_volatility = None
     _direction_from_bp_with_epsilon = None
     build_prev_day_direction_forecast = None
     build_random_walk_forecast = None
@@ -369,62 +369,44 @@ def test_ugh_variant_preserves_caller_flat_epsilon_overrides(monkeypatch) -> Non
     assert rec.expected_close_change_bp == pytest.approx(2.0)
     assert rec.expected_range is not None
     range_center = (rec.expected_range.low_price + rec.expected_range.high_price) / 2.0
-    expected_center = req.baseline_context.current_spot * (1.0 + 2.0 / 10000.0)
-    assert range_center == pytest.approx(expected_center)
-    assert range_center != pytest.approx(req.baseline_context.current_spot)
+    # v2.6 (FX-RANGE-DECOUPLE): the envelope is centred on spot, NOT re-centred on
+    # the expected close change. Re-centring shifted the band by a point forecast
+    # whose error the band exists to absorb, and measured worse on replay
+    # (88% at 0.5x shift / 72% at 1.0x vs 95% un-shifted).
+    assert range_center == pytest.approx(req.baseline_context.current_spot)
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
-def test_projection_width_range_builder_enforces_half_width_floor() -> None:
+def test_trailing_volatility_range_builder_enforces_half_width_floor() -> None:
     config = ProjectionConfig(range_width_scale=0.0, range_width_floor_ratio=0.5)
-    snapshot = ProjectionSnapshot(
-        projection_id="Will USDJPY close higher?",
-        horizon_days=1,
-        point_estimate=0.2,
-        lower_bound=0.2,
-        upper_bound=0.2,
-        confidence=0.8,
-    )
 
-    expected_range = _build_range_from_projection_width(
+    expected_range = _build_range_from_trailing_volatility(
         current_spot=150.0,
-        expected_close_change_bp=10.0,
-        trailing_mean_abs_close_change_bp=20.0,
-        projection_snapshot=snapshot,
+        trailing_mean_range_price=0.4,
         config=config,
     )
 
     center = (expected_range.low_price + expected_range.high_price) / 2.0
     half_width = (expected_range.high_price - expected_range.low_price) / 2.0
-    assert center == pytest.approx(150.0 * (1.0 + 10.0 / 10000.0))
-    assert half_width == pytest.approx(150.0 * (20.0 * 0.5) / 10000.0)
+    assert center == pytest.approx(150.0)
+    assert half_width == pytest.approx(0.4 * 0.5)
     assert expected_range.low_price <= expected_range.high_price
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
-def test_projection_width_range_builder_preserves_order_for_extreme_floor() -> None:
+def test_trailing_volatility_range_builder_preserves_order_for_extreme_floor() -> None:
     config = ProjectionConfig(range_width_scale=0.0, range_width_floor_ratio=1.0)
-    snapshot = ProjectionSnapshot(
-        projection_id="Will USDJPY close higher?",
-        horizon_days=1,
-        point_estimate=0.0,
-        lower_bound=0.0,
-        upper_bound=0.0,
-        confidence=0.8,
-    )
 
-    expected_range = _build_range_from_projection_width(
+    expected_range = _build_range_from_trailing_volatility(
         current_spot=1.0,
-        expected_close_change_bp=0.0,
-        trailing_mean_abs_close_change_bp=20000.0,
-        projection_snapshot=snapshot,
+        trailing_mean_range_price=2.0,
         config=config,
     )
 
     half_width = (expected_range.high_price - expected_range.low_price) / 2.0
     assert expected_range.low_price > 0.0
     assert expected_range.low_price <= expected_range.high_price
-    assert half_width == pytest.approx(1.0 * 20000.0 / 10000.0)
+    assert half_width == pytest.approx(2.0)
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
@@ -544,27 +526,30 @@ def test_daily_workflow_generates_seven_with_shared_metadata(db_session, monkeyp
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
-def test_ugh_variant_ranges_diverge_with_projection_configs(db_session) -> None:
-    req = _request(engine_version="v2.3")
+def test_ugh_variants_share_one_envelope_but_scale_is_configurable() -> None:
+    """v2.6: the envelope is variant-independent, reversing ENGINE-P3B (PR #111).
 
-    result = run_daily_forecast_workflow(db_session, req)
+    P3B made the envelope variant-specific by deriving it from each variant's
+    projection width. v2.6 derives it from realized volatility instead, which is
+    a property of the market rather than of a variant's direction weights, so
+    all four variants share one envelope. Variants still differ where they
+    should — direction and close-change magnitude. ``range_width_scale`` remains
+    the knob if a variant ever needs its own width.
+    """
+    common = {"current_spot": 150.0, "trailing_mean_range_price": 0.4}
+    default = ProjectionConfig()
+    # Variant configs differ in direction weights / conviction floor, not width.
+    variant_like = ProjectionConfig(u_weight=0.6, t_weight=0.1, conviction_floor=0.8)
 
-    ugh_ranges = {
-        (
-            round(f.expected_range.low_price, 8),
-            round(f.expected_range.high_price, 8),
-        )
-        for f in result.forecasts
-        if f.strategy_kind
-        in {
-            StrategyKind.ugh_v2_alpha,
-            StrategyKind.ugh_v2_beta,
-            StrategyKind.ugh_v2_gamma,
-            StrategyKind.ugh_v2_delta,
-        }
-        and f.expected_range is not None
-    }
-    assert len(ugh_ranges) >= 2
+    assert _build_range_from_trailing_volatility(
+        **common, config=default
+    ) == _build_range_from_trailing_volatility(**common, config=variant_like)
+
+    wider = _build_range_from_trailing_volatility(
+        **common, config=ProjectionConfig(range_width_scale=2.5)
+    )
+    base = _build_range_from_trailing_volatility(**common, config=default)
+    assert wider.high_price - wider.low_price > base.high_price - base.low_price
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")

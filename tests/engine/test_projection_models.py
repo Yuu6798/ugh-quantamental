@@ -103,7 +103,10 @@ def test_projection_config_flat_epsilon_defaults() -> None:
 def test_projection_config_range_width_defaults() -> None:
     config = ProjectionConfig()
 
-    assert config.range_width_scale == pytest.approx(2.0)
+    # v2.6: multiplier on trailing_mean_range_price (was 2.0 against
+    # projection-width × trailing_mean_abs_close_change_bp before the
+    # FX-RANGE-DECOUPLE rebase of what these coefficients scale).
+    assert config.range_width_scale == pytest.approx(1.25)
     assert config.range_width_floor_ratio == pytest.approx(0.25)
 
 
