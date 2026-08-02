@@ -116,8 +116,8 @@ fields that v1 computed but did not consume.
 | `conviction_floor` | `0.5` (matches `ugh_v2_alpha`) | Multiplier when `fire_probability == 0`; also sets the `fire_probability == 0.5` shrink. Default value reproduces the alpha variant's behavior. |
 | `direction_flat_epsilon_ratio` | `0.0` | Optional volatility-scaled FLAT threshold ratio for UGH variant forecast labels. Default is disabled after replay showed ratio-scaled thresholds over-flatten UGH outputs. |
 | `direction_flat_epsilon_floor_bp` | `3.0` | Fixed minimum FLAT threshold in bp for UGH variants. With the default ratio of `0.0`, v2.2 uses a fixed 3.0 bp epsilon. |
-| `range_width_scale` | `2.0` | Multiplier that maps projection-snapshot uncertainty width from score space into bp for UGH expected ranges. Calibrated on the 2026-05 replay to avoid both 100% shared-band behavior and over-narrow misses. |
-| `range_width_floor_ratio` | `0.25` | Minimum half-width as a ratio of `trailing_mean_abs_close_change_bp`, preventing overconfident near-zero ranges. |
+| `range_width_scale` | `1.25` (v2.6) | Multiplier on `trailing_mean_range_price` giving the expected-range half-width. Calibrated on the 2026-04..07 replay to ~95% close coverage. Before v2.6 it scaled projection-snapshot width against `trailing_mean_abs_close_change_bp` and defaulted to `2.0`. |
+| `range_width_floor_ratio` | `0.25` | Minimum half-width as a ratio of `trailing_mean_range_price` (v2.6; previously of `trailing_mean_abs_close_change_bp`), preventing degenerate near-zero ranges when the scale is configured to `0`. |
 
 The defaults are chosen so that `ProjectionConfig()` (no-argument
 construction) keeps working everywhere it is currently called — most
@@ -179,38 +179,69 @@ projection snapshot already contains `point_estimate ± width`, where
 
 `width_score = max(abs(upper_bound - point_estimate), abs(point_estimate - lower_bound))`
 
-The forecast layer converts that score-space width into a price range:
+`width_score` still feeds the projection snapshot's own bounds, but **as of
+v2.6 it no longer sizes the forecast price range** (FX-RANGE-DECOUPLE).
 
-`half_width_bp = max(width_score * trailing_mean_abs_close_change_bp * range_width_scale, trailing_mean_abs_close_change_bp * range_width_floor_ratio)`
+#### 5.1.2.1 Expected range (v2.6)
 
-`half_width_price = current_spot * half_width_bp / 10000`
+The envelope is a *coverage interval* — "where will tomorrow's close land" —
+not a second point forecast. It is therefore centred on spot and sized from
+realized volatility:
 
-The v2.3 defaults are `range_width_scale=2.0` and
-`range_width_floor_ratio=0.25`. On the 2026-05 60-record replay this
-produced 43/60 range hits (71.7%) and at least one variant-level hit
-difference, so the metric exits the prior 100% shared-band regime while
-remaining in a usable calibration band.
+`half_width_price = trailing_mean_range_price * max(range_width_scale, range_width_floor_ratio)`
 
-The range center is the persisted point forecast:
+`low/high = current_spot -/+ half_width_price`
 
-- when the UGH direction epsilon emits `FLAT`, `expected_close_change_bp`
-  is persisted as `0.0`, so the expected range is centered on
-  `current_spot` and is left/right symmetric around spot.
-- otherwise the range is centered on
-  `current_spot * (1 + expected_close_change_bp / 10000)`, so the range
-  moves with the engine's point forecast.
+`trailing_mean_range_price` is the mean realized `high - low` over the last 20
+windows, already carried on `BaselineContext`.
 
-This makes `expected_range_low/high` variant-specific because each
-variant's `ProjectionConfig` changes both point estimate and uncertainty
-width. The previous `ugh_v2_ensemble` row was only a Phase-A reporting
-artifact for the shared-range period; v2.3 removes it and returns
-`range_hit` aggregation to normal per-variant rows. Baseline strategies
-still do not emit expected ranges.
+**Why this replaced the v2.3–v2.5 construction.** That version sized the range
+from projection uncertainty scaled by `trailing_mean_abs_close_change_bp` and
+re-centred it on `expected_close_change_bp`. Both halves measured the wrong
+thing: a *range* was derived from a *close-change* statistic, and the centre
+was shifted by a point forecast whose error the envelope exists to absorb. The
+2026-07 monthly review measured the result at 45.5% coverage overall and
+**0 of 32** sessions that moved more than 30bp — the envelope failed exactly
+when it mattered. Correlation over 60 sessions confirmed the inputs carried no
+signal for width (expected vs realized width `r = +0.026`).
 
-Conviction intentionally appears on both axes: it increases point
-magnitude through the existing `(0.5 + 0.5 * conviction)` multiplier, and
-it tightens width through `bounds_low_conf_coef * (1 - conviction)`.
-This is a coherent uncertainty model, not an accidental double count.
+Both changes are verified on the 2026-04..07 replay:
+
+| | v2.3–v2.5 | **v2.6** |
+|---|---|---|
+| \|Δclose\| < 30bp | 71% | **100%** |
+| 30–100bp | **0%** | **86%** |
+| >= 100bp | 0% | 0% (by design) |
+| overall | 45.5% | **95%** |
+
+Centring on spot also beat re-centring directly (95% vs 88% at a 0.5x shift and
+72% at 1.0x), so the FLAT/non-FLAT centre distinction is gone: every UGH range
+is symmetric around `current_spot`.
+
+**Tail sessions are out of scope by design.** No width calibrated for typical
+sessions absorbs a −237bp day (2026-07-30), and widening until it fits would
+make the envelope useless for every other day. Tail moves belong to an alert
+layer, not to the forecast envelope.
+
+**Variant independence.** The envelope no longer depends on a variant's
+`ProjectionConfig` direction weights, so all four UGH variants emit the same
+range — reversing the variant-specific range that ENGINE-P3B introduced in
+v2.3. Realized volatility is a property of the market, not of a variant's
+direction weighting; variants continue to differ on direction and magnitude,
+which is where their configuration actually applies. `range_width_scale`
+remains available per-config if a variant ever needs its own width. The
+`ugh_v2_ensemble` row stays removed and `range_hit` aggregation stays on
+per-variant rows.
+
+**Conviction no longer appears on the width axis.** It still scales point
+magnitude through `(0.5 + 0.5 * conviction)` and still tightens the projection
+snapshot's own bounds via `bounds_low_conf_coef`, but it no longer reaches the
+forecast envelope. The 2026-07 review found conviction correlates *negatively*
+with realized magnitude (`r = -0.282`): the engine predicted smallest on the
+days the market moved most. Keeping a reliability scaler out of a coverage
+interval removes that inversion from the range path. The point-magnitude
+coupling is retained deliberately — replacing it was tested and did not improve
+close error (see `docs/engine_review_2026_07_findings.md` §5.6).
 
 ### 5.1.3 Volatility-expansion magnitude term (v2.5)
 
