@@ -233,6 +233,11 @@ remains available per-config if a variant ever needs its own width. The
 `ugh_v2_ensemble` row stays removed and `range_hit` aggregation stays on
 per-variant rows.
 
+`engine_version` bumps `v2.5 → v2.6` (synced across `automation_models.py`,
+`fx-daily-protocol.yml`, and `scripts/run_fx_daily_protocol.py` — the manual
+runner passes its own default explicitly, so leaving it behind would persist
+v2.6 range math under a v2.5 label).
+
 **Conviction no longer appears on the width axis.** It still scales point
 magnitude through `(0.5 + 0.5 * conviction)` and still tightens the projection
 snapshot's own bounds via `bounds_low_conf_coef`, but it no longer reaches the

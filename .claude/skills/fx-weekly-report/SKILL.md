@@ -121,8 +121,12 @@ report.
 
 ## 5. Deliver
 
-1. Commit the report to the session's working branch (never main, never
-   `fx-daily-data`) and `git push -u origin <branch>`. Do not open a PR
+1. **Only commit and push when the report was asked for as a deliverable** —
+   a scheduled run, or a request to write/save/update the weekly report. When
+   someone is just asking what happened last week, answer with the summary and
+   leave the tree alone; an unrequested commit is a side effect they did not
+   ask for. When you do commit, use the session's working branch (never main,
+   never `fx-daily-data`) and `git push -u origin <branch>`. Never open a PR
    unless asked.
 2. Send the file to the user (SendUserFile if available).
 3. Reply in Japanese: 結論 first (bold, one sentence), the day table, then
