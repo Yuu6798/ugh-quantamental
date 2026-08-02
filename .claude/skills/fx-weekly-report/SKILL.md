@@ -48,10 +48,14 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
 
 ## 3. Collect the numbers
 
-1. **Weekly v2 artifact** (source of truth for aggregates): the analysis
-   pipeline writes `csv/analytics/weekly/<saturday YYYYMMDD>/weekly_report.md`
-   on Friday ~12:00–13:00 UTC with window `<start>`–`<end>` — verify the
-   window in its title line. If it is missing or the window is wrong,
+1. **Weekly v2 artifact** (source of truth for aggregates):
+   `csv/analytics/weekly/<saturday YYYYMMDD>/weekly_report.md`, written Friday
+   ~12:00–13:00 UTC with window `<start>`–`<end>`. **Always verify the window
+   in its title line** — two directories exist per week and they cover
+   different weeks: the Saturday-dated one is the week that just closed, while
+   `fx-analysis-pipeline.yml`'s Monday run writes a *Monday*-dated directory
+   covering the **previous** week. Reading the Monday directory silently gives
+   you last week's numbers. If it is missing or the window is wrong,
    regenerate without touching the branch:
    `FX_CSV_OUTPUT_DIR=<scratchpad>/fxdata/csv FX_REPORT_DATE=<next Monday> FX_WEEK_DAYS=5 python scripts/run_fx_weekly_report.py`
    (report date = next Monday makes the window land on `<start>`–`<end>`).
