@@ -29,7 +29,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e .
-          python -m pip install pytest ruff
+          # ruff is pinned: an unpinned install picks up whatever is latest at
+          # run time, so a release that changes default rules turns CI red on
+          # untouched code. 0.16.0 did exactly that — it reports 390 findings on
+          # main. Adopting the new rules is its own task; this keeps CI
+          # reproducible and matching local runs in the meantime.
+          python -m pip install pytest 'ruff==0.15.8'
 
       - name: Lint
         run: ruff check .

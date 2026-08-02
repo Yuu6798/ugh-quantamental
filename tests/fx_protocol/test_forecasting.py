@@ -536,7 +536,7 @@ def test_ugh_variants_share_one_envelope_but_scale_is_configurable() -> None:
     should — direction and close-change magnitude. ``range_width_scale`` remains
     the knob if a variant ever needs its own width.
     """
-    common = dict(current_spot=150.0, trailing_mean_range_price=0.4)
+    common = {"current_spot": 150.0, "trailing_mean_range_price": 0.4}
     default = ProjectionConfig()
     # Variant configs differ in direction weights / conviction floor, not width.
     variant_like = ProjectionConfig(u_weight=0.6, t_weight=0.1, conviction_floor=0.8)
