@@ -134,6 +134,11 @@ summarise the news.
 - Search is US-centric and English-first; Japanese-language and domestic policy
   detail may be thin. Search in Japanese too when the driver is domestic
   (`日銀`, `為替介入`, `財務省`).
+- **Some primary sources are unreachable from this environment** — `federalreserve.gov`
+  is blocked by the egress proxy, and BoJ schedules live in PDFs that search does not
+  surface well. When a calendar date cannot be confirmed, write "取得できず" with the
+  reason rather than filling it from a plausible pattern; a guessed date is worse than
+  an admitted gap, because the next reader cannot tell them apart.
 - Results reflect what was *published*, which lags and skews toward consensus.
 - **You are not forecasting.** Context explains what happened and frames what
   could repeat. If a report starts predicting from news, cut it back.
