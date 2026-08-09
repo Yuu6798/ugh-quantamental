@@ -18,16 +18,32 @@ a textbook selling climax, and the 8/3–8/6 rebound looks like a technical
 bottom forming.
 
 Public sources say otherwise: the move was a **suspected MoF/BoJ intervention
-plus a yen carry-trade unwind**, and on 8/2 the US joined a **coordinated
-intervention** (confirmed by Treasury Secretary Bessent). The "climax" candle
-was a policy action, not exhausted sellers.
+plus a yen carry-trade unwind**, and the US joined a **coordinated intervention**
+(confirmed by Treasury Secretary Bessent). The "climax" candle was a policy
+action, not exhausted sellers.
+
+Note what went wrong on the way to that conclusion, because it is the same class
+of error: the first write-up dated the coordinated intervention "Friday (August
+2)" straight from a source, but 2026-08-02 was a Sunday. **Check dates against
+the calendar before building a chronology on them** — a wrong date silently
+reassigns cause to the wrong session.
 
 **The lesson to carry into every analysis: a chart pattern and its cause are
-different objects, and the cause changes what the pattern implies.** A bottom
-made by exhausted sellers tends to hold; a bottom made by intervention holds
-only while the authorities stay engaged, and the underlying rate differential
-that drove the trend is untouched. Never describe a top, bottom or reversal from
-price structure alone — check the context first.
+different objects, and the cause does not follow from the pattern.** A bottom
+made by exhausted sellers tends to hold; a bottom made by intervention holds only
+while the authorities stay engaged, and the rate differential that drove the
+trend is untouched. But the candle looks identical either way — you cannot read
+which one it was off the chart. Never describe a top, bottom or reversal from
+price structure alone.
+
+This applies to the engine's own labels too. `classify_realized_state` is
+documented as a **coarse, direction-agnostic** heuristic that cannot even
+separate `exhaustion` from `failure`; an `exhaustion` label means "wide range,
+close did not follow through", not "sellers exhausted" and not "a reversal
+happened". A later analysis treated it as a reversal ground truth and was wrong
+on the data as well — 7/31's realized `exhaustion` was followed by another
+236pip decline. Treat realized labels as descriptions, never as causes or
+predictions.
 
 ## 1. When to run
 
