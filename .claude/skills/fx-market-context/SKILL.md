@@ -29,12 +29,18 @@ the calendar before building a chronology on them** — a wrong date silently
 reassigns cause to the wrong session.
 
 **The lesson to carry into every analysis: a chart pattern and its cause are
-different objects, and the cause does not follow from the pattern.** A bottom
-made by exhausted sellers tends to hold; a bottom made by intervention holds only
-while the authorities stay engaged, and the rate differential that drove the
-trend is untouched. But the candle looks identical either way — you cannot read
-which one it was off the chart. Never describe a top, bottom or reversal from
-price structure alone.
+different objects, and the cause does not follow from the pattern.** The candle
+looks identical whichever it was — you cannot read the cause off the chart.
+Never describe a top, bottom or reversal from price structure alone.
+
+**Get the direction of the operation right before reasoning from it.** A
+yen-buying intervention sells USD and buys JPY, so it pushes USDJPY *down*: in
+this episode it is a candidate cause of the 163→155 selloff, not something
+holding the 8/3 low up, and it cannot explain the rebound that followed. An
+earlier draft of this file had that backwards and described the low as
+"supported" by intervention. Whenever an official operation enters the analysis,
+state which currency is being bought and which way that pushes the pair, then
+check the price actually moved that way.
 
 This applies to the engine's own labels too. `classify_realized_state` is
 documented as a **coarse, direction-agnostic** heuristic that cannot even

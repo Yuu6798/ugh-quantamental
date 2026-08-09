@@ -457,8 +457,16 @@ forecast_direction = _direction_from_bp_with_epsilon(pre_expansion_bp, ..., conf
 | 8/5 | 0.340 | 0.160 | 0.245 | 0.135 | **0.340** |
 
 6 状態で最大 0.27–0.34。**ただし §10.2 のとおり dominant_state は方向計算に
-入らない**ため、これは方向精度の説明にはならない。効くのは stC と、state を
-参照する下流 (hysteresis の FLAT 退避経路など) であり、そちらの診断値として扱う。
+入らない**ため、これは方向精度の説明にはならない。
+
+⚠️ **初版はここで「hysteresis の FLAT 退避経路」を state の下流として挙げたが、
+これも誤り** (PR #123 レビュー)。repo 全体を検索しても forecast 側で
+`dominant_state` を消費する箇所はなく、FLAT は
+`_direction_from_bp_with_epsilon` の epsilon 判定だけで決まる。実証的にも、
+β/δ が FLAT を出した日の state は α/γ と同じ `fire` であり、**同じ state から
+異なる出力が出ている**以上 state は原因ではない。`dominant_state` の実際の
+consumer は評価 (stC / state_proxy_hit)、集計・レポート、次期 state 計算の
+tie-break のみ。したがって本節は **stC の診断値としてのみ**意味を持つ。
 
 ### 10.4 conviction 較正は条件付きの可能性 (n=4、断定不可)
 
@@ -491,7 +499,8 @@ state → 方向の因果が否定された以上、その説明は成り立た�
    signal features と、その更新が急変後にどれだけ速く効くか。
    7/13 週の「退避解除の遅れ」、7/27 週の「fire/down 固執」と同じ症状に見えるが、
    **同じ経路かどうかも未検証**であり、まず経路の切り分けから始める。
-2. **state 分類器の改善は stC と下流 (退避判断) の課題として独立に扱う** —
-   方向精度は改善しない (§10.2)。優先度は 1 より下。
+2. **state 分類器の改善は stC 専用の課題として独立に扱う** — 方向にも FLAT にも
+   効かない (§10.2 / §10.3)。改善しても動くのは stC と state 別集計の解釈だけ
+   なので、優先度は 1 より明確に下。
 3. **レンジ幅の robust statistic 化** (§10.1) — 9 月の月次レビューで検証。
 4. **conviction 較正の再判定** (§10.4) — n=4 では判定不能。標本待ち。
