@@ -64,6 +64,15 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    — prints per-day forecast vs realized per strategy, the UGH alpha
    state/conviction trajectory, annotation labels, failure reasons, and the
    previous-Friday carry-over row. Read-only.
+3. **Market context** — invoke the `fx-market-context` skill. The protocol
+   records no reason for anything it sees (`event_tags` is auto-derived and
+   near-empty), so a policy event and a technical pattern look identical in the
+   OHLC. The 2026-07-30 week showed why: 8/3 looks like a textbook selling
+   climax on the chart, and an official intervention is a documented candidate
+   cause of the 163→155 selloff around it — but neither the chart nor the public
+   record establishes what produced that particular low. Run it every week, and
+   treat it as mandatory before writing any sentence about tops, bottoms,
+   reversals or regime change.
 
 ## 4. Write the report
 
@@ -75,11 +84,14 @@ as the existing reports (keep headings verbatim so the series stays greppable):
 2. `## TL;DR` — the week's conclusion in one paragraph, not a metrics dump
 3. `## 先週持ち越し: …` — how the previous Friday's pending forecast resolved
 4. `## 週間値動きと日次結果` — the 5-row day table (Friday row = 未確定)
-5. `## 戦略別サマリー` — per-strategy table from the weekly artifact
-6. One section for **the week's structural observation** — the thing worth
+5. `## 相場コンテキスト (公開情報)` — from `fx-market-context`. Omit only when
+   the week was genuinely quiet and the search turned up nothing that changes
+   the reading; never omit it after a shock day.
+6. `## 戦略別サマリー` — per-strategy table from the weekly artifact
+7. One section for **the week's structural observation** — the thing worth
    remembering (e.g. magnitude under-call in strong trends, retreat-release
    lag). This is the report's reason to exist beyond the tables.
-7. `## スライス別の傾向` / `## 運用ヘルス` / `## 次週への持ち越し` (numbered,
+8. `## スライス別の傾向` / `## 運用ヘルス` / `## 次週への持ち越し` (numbered,
    each item either new or explicitly carried from last week)
 
 Interpretation rules learned over the series — apply, don't re-derive:

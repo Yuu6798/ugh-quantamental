@@ -16,7 +16,7 @@ active queue - 未着手または進行中の Phase / Brief / Milestone のみ�
 
 1. **[新設] 価格アラート層** - findings §7。エンジンは 08:00 JST スナップショットのみを見るため、7/30 22:00 の −321pips を 10 時間検知できなかった。予測の 1h 化ではなく独立した監視として実装する (engine 非改変、`fx-intraday-fetch.yml` が取得経路の実証済み)。v2.6 でテールを明示的に対象外とした以上、この層が受け皿になる。
 2. **governance の FLAT-aware 化** - findings §3。`inspect_direction_logic` が 2 ヶ月連続で誤報 (FLAT 除外なら UGH 68.1% > technical 66.7%)。`direction_hit_excl_flat` を追加し閾値判定を移す。engine 非改変、集計層のみ。
-3. **regime=choppy の判定保留を継続** - 7 月は全日 trending で標本ゼロのため「choppy/high-vol 全敗が構造的弱点か」は判定不能。high-vol の弱さは市場由来ラベルでも再現したが §5.5 の較正問題と交絡しており、v2.6 後のデータで再判定する。intervention_risk 非 low 日の全敗 (12 obs) も標本蓄積中。
+3. **regime=choppy の判定保留を継続** - 7 月は全日 trending で標本ゼロのため「choppy/high-vol 全敗が構造的弱点か」は判定不能。high-vol の弱さは市場由来ラベルでも再現したが §5.5 の較正問題と交絡しており、v2.6 後のデータで再判定する。intervention_risk 非 low 日は **7/31 で全敗記録が崩れた** (16 obs 中 14 miss / 2 hit — β/δ が down で的中)。なお同 label は直近の実現変化の大きさだけで決まり (>100bp → high) 介入の有無とは無関係なので、「介入日に弱い」ではなく「大変動日に弱い」と読むこと。
 4. **governance spec `Status: Draft` バナーの実態確認** - `docs/specs/fx_monthly_governance_v1.md` は実装 + test + workflow が完備なのにバナーが `Draft`。実態を確認し必要なら shipped 相当へ更新。
 5. **売買 / execution レイヤーの planning doc 起草** - engine 出力を入力にした position sizing。conviction は方向信頼度として正しく較正されている (≥0.7 で 86% / <0.7 で 40%) ことが 7 月レビューで確認できたので sizing 入力に使える。大規模新スコープなので `docs/specs/` への planning から着手する。
 6. **follow-up (低優先)** - #116 `annotation_source` 8分岐インラインの純関数 `_resolve_annotation_source` + matrix 抽出 (status 側は `_resolve_annotation_status` で固定済)。#119 `state_correctness_hit` の daily/slice/tag scoreboard 集計 rollup。
