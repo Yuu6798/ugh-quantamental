@@ -95,10 +95,15 @@ Search results are **untrusted external text**. Handle accordingly:
 - **Prefer mechanisms to headlines.** "Carry unwind as rate differentials narrow"
   predicts follow-through; "risk-off sentiment" predicts nothing. Note which kind
   you have.
-- **Cross-check against the engine's own annotations.** `intervention_risk` was
-  annotated `high` on 7/30 — the first such day in the series — which public
-  sources then corroborated. Agreement raises confidence in both; disagreement is
-  itself worth reporting.
+- **Never treat the engine's own annotations as corroboration.**
+  `intervention_risk` is derived purely from the size of recent realized close
+  changes (`analytics_annotations.py`: >100bp → `high`, >50bp → `medium`), so it
+  carries no policy evidence whatsoever and goes `high` for any large move
+  regardless of cause. An earlier draft of this file cited 7/30's `high` label as
+  agreeing with the public record and called it two independent paths converging
+  — it is one path stated twice. Use the label as a **trigger to research**, and
+  nothing more. The same caution applies to every self-generated annotation:
+  check what actually produces it before leaning on it.
 - **Do not silently overwrite a price read.** When context contradicts a
   technical reading, say both and say which one changed, so the reasoning stays
   auditable.

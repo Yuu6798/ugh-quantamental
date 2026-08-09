@@ -67,9 +67,12 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
 3. **Market context** — invoke the `fx-market-context` skill. The protocol
    records no reason for anything it sees (`event_tags` is auto-derived and
    near-empty), so a policy event and a technical pattern look identical in the
-   OHLC. On 2026-07-30 that mattered: what reads as a selling climax on 8/3 was
-   a coordinated intervention. Run it every week, and treat it as mandatory
-   before writing any sentence about tops, bottoms, reversals or regime change.
+   OHLC. The 2026-07-30 week showed why: 8/3 looks like a textbook selling
+   climax on the chart, and an official intervention is a documented candidate
+   cause of the 163→155 selloff around it — but neither the chart nor the public
+   record establishes what produced that particular low. Run it every week, and
+   treat it as mandatory before writing any sentence about tops, bottoms,
+   reversals or regime change.
 
 ## 4. Write the report
 
