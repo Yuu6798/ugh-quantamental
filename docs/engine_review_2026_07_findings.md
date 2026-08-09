@@ -464,12 +464,18 @@ forecast_direction = _direction_from_bp_with_epsilon(pre_expansion_bp, ..., conf
   8/6 (+43.1bp) を外した。
 - 予測 state も全日 fire で固定。実現 state (exhaustion / expansion / setup) とは
   一致せず、stC は 0%。
-- **両者が同時に転換に追随しなかったのは、独立した2つの故障ではなく同一の故障の
-  2つの表示である可能性が高い。** state は projection 出力 (`e_star` / conviction /
-  urgency) を入力に取る部分的下流なので (`compute_state_evidence`)、projection が
-  弱気に固まれば state 側も引きずられる。調査は projection / e_star 経路の一本に
-  集約してよく、follow-up 実験の設計でもこの依存を前提に置くこと (state 側を
-  独立変数として動かす実験は成立しない)。
+- **state は projection の部分的下流だが、fire 固執を「弱気 e_star の別表示」と
+  片付けることはできない。** `compute_state_evidence` (`engine/state.py`) で
+  fire evidence は `0.35×catalyst + 0.35×prior_fire + 0.15×urgency +
+  0.15×follow_through` — projection 由来は urgency (重み 0.15) だけで、主項は
+  **前日 fire 確率の自己強化と event features** である。しかもマイナス e_star は
+  fire ではなく **failure evidence を押し上げる**側に入る (negative_e /
+  disconfirmation 経路)。つまり「projection が弱気に固まったから state も fire に
+  固まった」は成立せず、fire 固執には state 側固有の寄与 (prior 自己強化、
+  catalyst / follow_through の与え方) が残る。follow-up 実験では **projection 結果を
+  固定して prior state や `StateEventFeatures` を動かす実験が成立する**し、
+  fire 固執の切り分けにはそれが必要 — 初版がここで「state 側を独立変数として
+  動かす実験は成立しない」と書いたのは過剰な一本化で、誤り。
 
 ### 10.3 state 確率がほぼフラット — 診断上の観測 (方向とは別経路)
 
@@ -525,6 +531,9 @@ state → 方向の因果が否定された以上、その説明は成り立た�
    **同じ経路かどうかも未検証**であり、まず経路の切り分けから始める。
 2. **state 分類器の改善は stC 専用の課題として独立に扱う** — 方向にも FLAT にも
    効かない (§10.2 / §10.3)。改善しても動くのは stC と state 別集計の解釈だけ
-   なので、優先度は 1 より明確に下。
+   なので、優先度は 1 より明確に下。fire 固執そのものの診断は state 側の実験で
+   切り分けられる (§10.2 末尾 — projection 結果を固定して prior state /
+   `StateEventFeatures` を動かす。fire evidence の主項は prior 自己強化と
+   event features であり e_star ではない)。
 3. **レンジ幅の robust statistic 化** (§10.1) — 9 月の月次レビューで検証。
 4. **conviction 較正の再判定** (§10.4) — n=4 では判定不能。標本待ち。
