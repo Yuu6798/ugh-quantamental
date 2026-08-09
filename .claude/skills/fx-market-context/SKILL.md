@@ -17,10 +17,12 @@ On 2026-07-30 USDJPY fell 237bp, then 119bp more on 7/31, bottoming at 155.21 on
 a textbook selling climax, and the 8/3–8/6 rebound looks like a technical
 bottom forming.
 
-Public sources say otherwise: the move was a **suspected MoF/BoJ intervention
-plus a yen carry-trade unwind**, and the US joined a **coordinated intervention**
-(confirmed by Treasury Secretary Bessent). The "climax" candle was a policy
-action, not exhausted sellers.
+Public sources give the surrounding episode a different frame: a **suspected
+MoF/BoJ intervention plus a yen carry-trade unwind**, with the US joining a
+**coordinated intervention** (confirmed by Treasury Secretary Bessent). That is
+a candidate cause of the 163→155 selloff — **not** an explanation of the 8/3
+candle itself, which remains unattributed. The point is that a plausible
+policy-driven account existed and the chart alone gave no hint of it.
 
 Note what went wrong on the way to that conclusion, because it is the same class
 of error: the first write-up dated the coordinated intervention "Friday (August
