@@ -421,8 +421,11 @@ forecast_direction = _direction_from_bp_with_epsilon(pre_expansion_bp, ..., conf
 に確信度下限を設けても FLAT にはならない (初版 §10.6 の処方箋 2 は無効)。
 
 正しい記述: **8/3–8/7 の down は `e_star` が全日マイナス (−0.158〜−0.513) だった
-ことによる。** state が同時に fire だったのは、同じ signal features から独立に
-計算された並行観測であって、原因ではない。
+ことによる。** なお state が同時に fire だったのは無関係な偶然ではない —
+`compute_state_evidence` (`engine/state.py`) は projection 結果の `e_star` /
+`conviction` / `urgency` を直接入力に取るため、**state は projection の部分的な
+下流**にある。因果の向きは「projection → 方向」と「projection → state」であり、
+「state → 方向」ではない、というのが正確な構図。
 
 #### 誤り 2: `exhaustion` を転換の ground truth として使った
 
@@ -461,8 +464,12 @@ forecast_direction = _direction_from_bp_with_epsilon(pre_expansion_bp, ..., conf
   8/6 (+43.1bp) を外した。
 - 予測 state も全日 fire で固定。実現 state (exhaustion / expansion / setup) とは
   一致せず、stC は 0%。
-- **両者が同時に転換に追随しなかったのは事実だが、片方がもう片方を引き起こした
-  証拠はない。** 共通の上流 (signal features / projection 入力) を疑うのが筋。
+- **両者が同時に転換に追随しなかったのは、独立した2つの故障ではなく同一の故障の
+  2つの表示である可能性が高い。** state は projection 出力 (`e_star` / conviction /
+  urgency) を入力に取る部分的下流なので (`compute_state_evidence`)、projection が
+  弱気に固まれば state 側も引きずられる。調査は projection / e_star 経路の一本に
+  集約してよく、follow-up 実験の設計でもこの依存を前提に置くこと (state 側を
+  独立変数として動かす実験は成立しない)。
 
 ### 10.3 state 確率がほぼフラット — 診断上の観測 (方向とは別経路)
 
