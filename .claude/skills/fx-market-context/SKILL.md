@@ -134,11 +134,15 @@ summarise the news.
 - Search is US-centric and English-first; Japanese-language and domestic policy
   detail may be thin. Search in Japanese too when the driver is domestic
   (`日銀`, `為替介入`, `財務省`).
-- **Some primary sources are unreachable from this environment** — `federalreserve.gov`
-  is blocked by the egress proxy, and BoJ schedules live in PDFs that search does not
-  surface well. When a calendar date cannot be confirmed, write "取得できず" with the
-  reason rather than filling it from a plausible pattern; a guessed date is worse than
-  an admitted gap, because the next reader cannot tell them apart.
+- **Exhaust targeted searches before writing 取得できず.** A first draft marked the
+  BoJ September meeting and US CPI/payrolls dates unobtainable after one generic
+  English query — all three resolved immediately once searched properly (the BoJ
+  date via a Japanese query, per this skill's own guidance above; the US releases
+  via one query each against secondary calendar sources). `federalreserve.gov`
+  being blocked by the egress proxy is not a blocker: calendar aggregators carry
+  the same dates. The bar for 取得できず is one targeted query **per event, in the
+  right language** — only after that does an admitted gap beat a guessed date
+  (which it still does: the next reader cannot tell a guess from a fact).
 - Results reflect what was *published*, which lags and skews toward consensus.
 - **You are not forecasting.** Context explains what happened and frames what
   could repeat. If a report starts predicting from news, cut it back.
