@@ -22,3 +22,7 @@
 ## 2026-08-02 (PR #122 merge sweep overflow)
 
 - **PR #111** (2026-06-01) - ENGINE-P3B variant-specific expected_range。projection width 一本化で range 生成、非 FLAT recenter + 半幅 floor + `range_width_scale=2.0`、`ugh_v2_ensemble` 撤去で per-variant 集計復帰、engine default を v2.3 に bump。(注: この range 構成は 2026-07 月次レビューで包含率 45.5% と判明し、PR #122 (v2.6) が実現ボラ基準へ置換。variant 固有レンジも意図的に反転している。)
+
+## 2026-08-09 (PR #123 merge sweep overflow)
+
+- **PR #112** (2026-06-01) - ENGINE-P4 conviction 意味論明文化 (docs-only)。conviction = prediction reliability + magnitude scaler の二重役割を spec/docstring に明記、dormant↔magnitude は Option B (decouple) を記録。engine_version 据え置き。
