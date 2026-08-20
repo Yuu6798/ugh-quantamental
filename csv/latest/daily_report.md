@@ -1,6 +1,6 @@
 # FX Daily Report — 2026-08-20
 
-Generated: 2026-08-20T05:36:27Z
+Generated: 2026-08-20T07:39:19Z
 
 ## Run Summary
 
