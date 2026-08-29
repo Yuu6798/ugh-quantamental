@@ -64,7 +64,18 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    — prints per-day forecast vs realized per strategy, the UGH alpha
    state/conviction trajectory, annotation labels, failure reasons, and the
    previous-Friday carry-over row. Read-only.
-3. **Market context** — invoke the `fx-market-context` skill. The protocol
+3. **Ops health is two-layered** — `provider_health.csv` / the artifact's
+   Provider Health section only see runs that *executed the protocol script*.
+   Check the `fx-daily-protocol.yml` Actions run conclusions for the week as
+   well (`actions_list`, newest ~15): a red conclusion with data present means a
+   post-protocol step failed (e.g. the 2026-08 Gmail-535 notification failure —
+   two weekly reports said 安定稼働 while every run was red and the user's
+   daily emails silently stopped); missing runs or runs landing on the wrong
+   JST day mean scheduler delay (the 2026-08-28 gap: crons fired ~11h late,
+   landed on Saturday JST, and the business-day guard refused them — no Friday
+   forecast, no Thursday evaluation, no weekly artifact). A missing Saturday
+   artifact is a symptom: find which run failed to produce it and report why.
+4. **Market context** — invoke the `fx-market-context` skill. The protocol
    records no reason for anything it sees (`event_tags` is auto-derived and
    near-empty), so a policy event and a technical pattern look identical in the
    OHLC. The 2026-07-30 week showed why: 8/3 looks like a textbook selling
