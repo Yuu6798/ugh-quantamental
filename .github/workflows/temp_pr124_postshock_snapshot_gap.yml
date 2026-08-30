@@ -49,7 +49,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip install -e '.[dev]'
+          python -m pip install -e .
+          python -m pip install ruff pytest
           ruff check src/ugh_quantamental/fx_protocol/automation.py tests/fx_protocol/test_forecast_snapshot_immutability.py
           pytest -q tests/fx_protocol/test_forecast_snapshot_immutability.py
           git diff --check
