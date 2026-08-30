@@ -30,6 +30,14 @@ engine 改変は本 brief のスコープ外 (結果を見て次 brief で判断
       符号一致・日付一致だけの表からの因果結論は不可 (`fundamental_score` は
       compute_u / alignment / gravity 経由で間接的に効き、clamp 下で相互作用する
       ため、同時転換は律速の証明にならない)
+- [ ] **介入は raw statistic 水準で行い、下流の派生入力を全て再構築する**:
+      介入対象は `compute_snapshot_statistics` の出力 (例: `spot_vs_sma20`) と
+      明記し、そこから `derive_signal_features` → alignment gaps (d_qf〜d_tp) →
+      `narrative_dispersion` → projection request までを毎回組み直す。built 済み
+      request の 1 score だけ差し替えるのは不可 — `narrative_dispersion` は
+      gravity_bias に、alignment gaps は元 score 群に依存しており、stale な派生
+      入力が残ると介入と無関係な理由で e_star が動く。test: 「無介入の再構築 =
+      本番系列と一致」を fixture で確認してから介入系列を比較する
 - [ ] `fundamental_score` の clamp 飽和 (|spot_vs_sma20×100| ≥ 1.0) だった営業日数が
       期間中で定量化される
 - [ ] 分析結論 (主因 feature、飽和の寄与、engine 改変の要否と候補) を
