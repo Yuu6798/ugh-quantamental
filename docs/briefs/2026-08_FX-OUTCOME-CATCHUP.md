@@ -17,6 +17,14 @@ daily run が 1 日飛ぶと outcome 評価が恒久欠測する構造 (`previou
       `FX_OUTCOME_CATCHUP_DAYS` (default 5) 営業日分**評価する
 - [ ] 既存挙動の後方互換: 欠測がない通常日は従来どおり直前 window 1 件のみが評価
       され、出力 (CSV / DB 行) は現行と同一 (既存 test 無改変で pass)
+- [ ] **result contract を複数回収に対応させる**: `FxDailyAutomationResult` の
+      単数フィールド (`outcome_id` / `outcome_csv_path` / `evaluation_csv_path` /
+      `evaluation_count`) は**従来どおり「直前 window」の値のみ**を指すと定義し
+      (catch-up が直前 window しか回収しない通常日は現行と完全一致)、catch-up で
+      追加回収した window は**新設の typed per-window リストフィールド** (frozen
+      model への追加、default 空) で報告する。CLI / observability の既存 consumer
+      は無改変で従来値を読み続けられること。複数 window 回収時の result 内容を
+      test で固定する
 - [ ] 冪等: 同日に複数回 run しても評価は重複登録されない (既存の idempotent 経路を
       catch-up 分にも適用)
 - [ ] catch-up で回収した outcome / evaluation も **元 forecast batch の history
