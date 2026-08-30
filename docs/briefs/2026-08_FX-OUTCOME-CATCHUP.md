@@ -46,7 +46,11 @@ daily run が 1 日飛ぶと outcome 評価が恒久欠測する構造 (`previou
       必要なら `request_builders.py` (新 helper 追加は可、`previous_window_matches`
       の既存 semantics は温存)、`csv_exports.py` (history 専用 export 経路の追加のみ
       — 既存 `publish_csv_to_layout` の挙動は不変)、`scripts/run_fx_daily_protocol.py`
-      (env → config への受け渡しのみ)、対応 test、spec 追記
+      (env → config への受け渡しのみ)、`.github/workflows/fx-daily-protocol.yml`
+      (**env 配線のみ**: `FX_OUTCOME_CATCHUP_DAYS: ${{ vars.FX_OUTCOME_CATCHUP_DAYS || '5' }}`
+      を既存 env ブロックに追加 — repository variable は明示 mapping なしでは job に
+      渡らないため、これがないと「設定可能」が絵に描いた餅になる。cron・他 step は
+      不変)、対応 test、spec 追記
 - OUT: forecast 発行側 (business-day ガード含む — JST 土日に発行しない現行挙動は
       正しい)、`engine/`、persistence の ORM 列 (新列不要のはず — 必要になったら
       escalation)、cron スケジュール

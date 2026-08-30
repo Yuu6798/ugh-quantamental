@@ -70,10 +70,14 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    whole `<start>`–`<end>` interval as well (`actions_list` — the workflow
    schedules three runs per weekday, so ~15 newest entries cover only about
    one current week; for an explicitly requested past week, paginate until
-   the target dates are covered): a red conclusion with data present means a
-   post-protocol step failed (e.g. the 2026-08 Gmail-535 notification failure —
-   two weekly reports said 安定稼働 while every run was red and the user's
-   daily emails silently stopped); missing runs or runs landing on the wrong
+   the target dates are covered): a red conclusion needs its **failed step
+   inspected (`get_job_logs` with `failed_only`) before assigning a cause** —
+   data being present does not prove a post-protocol failure, because an
+   earlier retry can have committed the data while the final 11:00 UTC retry
+   still fails hard on a fetch error (`FX_LAST_RETRY=1`). The 2026-08 Gmail-535
+   case (every run red at the mail step while data flowed; two weekly reports
+   said 安定稼働 and the user's daily emails silently stopped) was one cause
+   among several possible; missing runs or runs landing on the wrong
    JST day mean scheduler delay (the 2026-08-28 gap: crons fired ~11h late,
    landed on Saturday JST, and the business-day guard refused them — no Friday
    forecast, no Thursday evaluation, no weekly artifact). A missing Saturday
