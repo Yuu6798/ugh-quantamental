@@ -1,7 +1,5 @@
 from pathlib import Path
 
-STATUS = "idempotent_skip_snapshot_unavailable"
-
 
 def replace_once(path: str, old: str, new: str) -> None:
     p = Path(path)
@@ -32,11 +30,13 @@ replace_once(
     new_status,
 )
 
-replace_once(
-    "docs/specs/fx_observability_artifacts_v1.md",
-    '| run_status | string | "ok" or "idempotent_skip" |\n',
-    '| run_status | string | "ok", "idempotent_skip", or "idempotent_skip_snapshot_unavailable" (existing batch has no immutable forecast-time input snapshot; retry fails closed without synthesizing provenance) |\n',
-)
+spec_path = Path("docs/specs/fx_observability_artifacts_v1.md")
+spec_text = spec_path.read_text(encoding="utf-8")
+old_spec = '| run_status | string | "ok" or "idempotent_skip" |\n'
+new_spec = '| run_status | string | "ok", "idempotent_skip", or "idempotent_skip_snapshot_unavailable" (existing batch has no immutable forecast-time input snapshot; retry fails closed without synthesizing provenance) |\n'
+if spec_text.count(old_spec) != 2:
+    raise SystemExit(f"{spec_path}: target count={spec_text.count(old_spec)}")
+spec_path.write_text(spec_text.replace(old_spec, new_spec), encoding="utf-8")
 
 test_path = Path("tests/fx_protocol/test_provider_health_status_rollups.py")
 if test_path.exists():
