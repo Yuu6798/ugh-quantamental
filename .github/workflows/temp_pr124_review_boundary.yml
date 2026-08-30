@@ -1,0 +1,60 @@
+name: temp-pr124-review-boundary
+on:
+  push:
+    branches: [claude/weekly-report-jun29-jul3-gw058t]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/weekly-report-jun29-jul3-gw058t
+          fetch-depth: 0
+      - name: Apply review fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          report = Path('docs/reports/fx_weekly_report_20260817_20260821.md')
+          skill = Path('.claude/skills/fx-weekly-report/SKILL.md')
+
+          report_text = report.read_text(encoding='utf-8')
+          old = '''## 運用ヘルス\n\nパイプラインは安定稼働: alpha_vantage 15 runs (success 5 / skipped 10 / failed 0)、\nfallback 0、lag 0。AI annotation 28/28 (event_tags は仕様どおり全日空)。\nfailure_reason は direction_miss 15 件のみ。\n'''
+          new = '''## 運用ヘルス — 訂正あり\n\n**訂正 (2026-08-30): この「安定稼働」という結論は撤回する。** 当時は\n`provider_health.csv` の provider 層だけを見ており、GitHub Actions の run conclusion を\n確認していなかった。後続の 8/24–8/28 週報で、少なくとも 8/17 以降の全 run が\nGmail SMTP `535 BadCredentials` の通知 step で failure になっていたことを確認した。\nprotocol 本体のデータ生成・push は継続していたため provider health は健全に見えたが、\nメール通知は不達で、Actions 上の運用状態は安定ではなかった。\n\nprovider 層の観測自体は: alpha_vantage 15 runs (success 5 / skipped 10 / failed 0)、\nfallback 0、lag 0。AI annotation 28/28 (event_tags は仕様どおり全日空)。\nfailure_reason は direction_miss 15 件のみ。\n'''
+          if report_text.count(old) != 1:
+              raise SystemExit(f'report health block count={report_text.count(old)}')
+          report.write_text(report_text.replace(old, new, 1), encoding='utf-8')
+
+          skill_text = skill.read_text(encoding='utf-8')
+          marker = '''Interpretation rules learned over the series — apply, don't re-derive:\n\n'''
+          added = '''- **Direction scoring remains binary.** `direction_hit` follows exact forecast-direction\n  equality with the realized direction in `src/ugh_quantamental/fx_protocol/outcomes.py`. A\n  `FLAT` forecast on any nonzero realized close move is therefore a direction miss, even when\n  the move is small. Do not reinterpret the legacy direction rate as epsilon-aware; any\n  tolerance-based metric must be separately named and reported.\n'''
+          if skill_text.count(marker) != 1:
+              raise SystemExit(f'interpretation marker count={skill_text.count(marker)}')
+          if 'Direction scoring remains binary.' in skill_text:
+              raise SystemExit('binary scoring rule already present')
+          skill.write_text(skill_text.replace(marker, marker + added, 1), encoding='utf-8')
+          PY
+      - name: Validate review fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          grep -Fq '**訂正 (2026-08-30): この「安定稼働」という結論は撤回する。**' docs/reports/fx_weekly_report_20260817_20260821.md
+          grep -Fq 'Gmail SMTP `535 BadCredentials`' docs/reports/fx_weekly_report_20260817_20260821.md
+          grep -Fq '**Direction scoring remains binary.**' .claude/skills/fx-weekly-report/SKILL.md
+          grep -Fq '`FLAT` forecast on any nonzero realized close move is therefore a direction miss' .claude/skills/fx-weekly-report/SKILL.md
+      - name: Commit fixes and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/temp_pr124_review_boundary.yml
+          git config user.name 'Yuu6798'
+          git config user.email 'kkoo6798@gmail.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'docs(fx): correct ops health and preserve FLAT scoring rule'
+          git push origin HEAD:claude/weekly-report-jun29-jul3-gw058t
