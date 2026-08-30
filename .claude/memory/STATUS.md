@@ -1,6 +1,6 @@
 # STATUS - ugh-quantamental
 
-最終更新: 2026-08-09
+最終更新: 2026-08-29
 
 このファイルは日次の project snapshot として、現在フェーズ、次の発行順序、直近 merged を保持する。安定方針は `CLAUDE.md` / `AGENTS.md` に置き、canonical な milestone 表は `PLANS.md`、フェーズ計画は `docs/engine_review_2026_05_planning.md` / `docs/specs/` を参照する。
 
@@ -8,18 +8,22 @@
 
 ## Phase
 
-Milestones 1-18 完了、2026-05 / 2026-06 / 2026-07 engine review とも全フェーズクローズ済み (engine default **v2.6**)。2026-07 月次レビュー (`docs/engine_review_2026_07_findings.md`) で expected_range の系統的欠陥を特定し FX-RANGE-DECOUPLE (#122) を実装: 幅を projection 由来から 実現ボラ (`trailing_mean_range_price` × 1.25) へ置換、recenter 撤去、包含率 45.5% → 95% (中変動帯 0% → 86%)。テール (≥100bp) は明示的に対象外とし警告層へ委譲。magnitude の conviction 依存は逆相関 (−0.282) を確認しつつ代替 5 案が close error を改善せず据え置き。次は監視 (価格アラート) と governance の FLAT-aware 化。
+Milestones 1-18 完了、engine default **v2.6** (FX-RANGE-DECOUPLE #122)。2026-08 月次レビュー (`docs/engine_review_2026_08_findings.md`) 完了: 8 月の方向不振は **ショック後 e_star 転換遅延** (9 営業日 / +420pips、仮説 = SMA20 系 `fundamental_score` の clamp 飽和) に集約、conviction 較正は e_star 符号の従属変数と判明。Range は月間 14/15 で較正の両側基準点 (8/10 上 6pips miss / 8/19 下 9pips hit) が揃い、幅較正 brief は自然縮小後の標本を待って 9 月中旬。運用インシデント 2 件: Gmail 535 (メール通知は**ユーザー判断で廃止**、`continue-on-error` で赤ノイズのみ解消) / スケジューラ遅延で 8/28 欠測 (評価恒久欠測の構造露呈)。briefs 4 本発行 (ESTAR-LAG / GOV-FLAT-AWARE / OUTCOME-CATCHUP / PRICE-ALERT)、反映 PR #124 レビュー中。
 
 ## 次の発行順序
 
 active queue - 未着手または進行中の Phase / Brief / Milestone のみを置く。終了した項目は wrap-up step 4 で `## 直近 merged` に移す。
 
-1. **[新設] 価格アラート層** - findings §7。エンジンは 08:00 JST スナップショットのみを見るため、7/30 22:00 の −321pips を 10 時間検知できなかった。予測の 1h 化ではなく独立した監視として実装する (engine 非改変、`fx-intraday-fetch.yml` が取得経路の実証済み)。v2.6 でテールを明示的に対象外とした以上、この層が受け皿になる。
-2. **governance の FLAT-aware 化** - findings §3。`inspect_direction_logic` が 2 ヶ月連続で誤報 (FLAT 除外なら UGH 68.1% > technical 66.7%)。`direction_hit_excl_flat` を追加し閾値判定を移す。engine 非改変、集計層のみ。
-3. **regime=choppy の判定保留を継続** - 7 月は全日 trending で標本ゼロのため「choppy/high-vol 全敗が構造的弱点か」は判定不能。high-vol の弱さは市場由来ラベルでも再現したが §5.5 の較正問題と交絡しており、v2.6 後のデータで再判定する。intervention_risk 非 low 日は **7/31 で全敗記録が崩れた** (16 obs 中 14 miss / 2 hit — β/δ が down で的中)。なお同 label は直近の実現変化の大きさだけで決まり (>100bp → high) 介入の有無とは無関係なので、「介入日に弱い」ではなく「大変動日に弱い」と読むこと。
-4. **governance spec `Status: Draft` バナーの実態確認** - `docs/specs/fx_monthly_governance_v1.md` は実装 + test + workflow が完備なのにバナーが `Draft`。実態を確認し必要なら shipped 相当へ更新。
-5. **売買 / execution レイヤーの planning doc 起草** - engine 出力を入力にした position sizing。conviction は方向信頼度として正しく較正されている (≥0.7 で 86% / <0.7 で 40%) ことが 7 月レビューで確認できたので sizing 入力に使える。大規模新スコープなので `docs/specs/` への planning から着手する。
-6. **follow-up (低優先)** - #116 `annotation_source` 8分岐インラインの純関数 `_resolve_annotation_source` + matrix 抽出 (status 側は `_resolve_annotation_status` で固定済)。#119 `state_correctness_hit` の daily/slice/tag scoreboard 集計 rollup。
+1. **PR #124 を merge まで運転** - 8 月週報 3 本 + 2026-08 findings + briefs 4 本 + CI 修正 (mail step `continue-on-error`) + skill 更新。CI 修正は merge されるまで効かない。
+2. **[brief 発行済] FX-GOV-FLAT-AWARE** (`docs/briefs/2026-08_FX-GOV-FLAT-AWARE.md`) - `direction_hit_excl_flat` 追加 + `inspect_direction_logic` の判定移行。9/1 月次 governance の誤報を止めるため最優先で Codex へ。
+3. **[brief 発行済] FX-OUTCOME-CATCHUP** (`docs/briefs/2026-08_FX-OUTCOME-CATCHUP.md`) - outcome 評価の有界遡及。8/27 発行分の backfill を実地受け入れ確認に使う。
+4. **[brief 発行済] FX-ESTAR-LAG** (`docs/briefs/2026-08_FX-ESTAR-LAG.md`) - 転換遅延の feature 別 replay 分析。engine 改変はこの結果を見てから。
+5. **[brief 発行済] FX-PRICE-ALERT** (`docs/briefs/2026-08_FX-PRICE-ALERT.md`) - GitHub Issue ベースの価格閾値 + データ欠測監視 (メール不使用)。
+6. **レンジ幅較正の brief 化 — 9 月中旬** - robust statistic + 中心の置き方 + 終値軸目標。7/30 が 20 窓から抜けた後 (8/31〜) の幅を 2 週分観測してから。基準点: 8/10 上 6pips miss / 8/19 下 9pips hit。
+7. **regime=choppy の判定保留を継続** - 標本ゼロ 9 週目。intervention_risk 非 low 日は 28 obs 中 26 miss / 2 hit (方向のみ弱い。レンジは 8 月の非 low 日 8/8 全的中)。label は move-size 由来、「大変動日に弱い」と読む。
+8. **governance spec `Status: Draft` バナーの実態確認** - 実装完備なのにバナーが `Draft`。確認し必要なら更新。
+9. **売買 / execution レイヤーの planning doc 起草** - conviction は e_star 符号整合時のみ信頼可 (2026-08 findings §1) — sizing 入力設計はこの条件付けを織り込む。
+10. **follow-up (低優先)** - #116 `_resolve_annotation_source` 純関数化 / #119 stC scoreboard rollup。グリッド方針判断 (5 週目) + 160.50 リセット定義は**ユーザー判断待ち** (週報で追跡)。
 
 ## 直近 merged
 
