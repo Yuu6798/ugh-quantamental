@@ -114,6 +114,11 @@ as the existing reports (keep headings verbatim so the series stays greppable):
 
 Interpretation rules learned over the series — apply, don't re-derive:
 
+- **Direction scoring remains binary.** `direction_hit` follows exact forecast-direction
+  equality with the realized direction in `src/ugh_quantamental/fx_protocol/outcomes.py`. A
+  `FLAT` forecast on any nonzero realized close move is therefore a direction miss, even when
+  the move is small. Do not reinterpret the legacy direction rate as epsilon-aware; any
+  tolerance-based metric must be separately named and reported.
 - **Before committing, verify every aggregate or chronology claim in prose
   against the day table it summarizes.** This series' recurring failure mode
   (PR #124: five review rounds) is prose contradicted by its own tables:
