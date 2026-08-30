@@ -21,10 +21,11 @@ daily run が 1 日飛ぶと outcome 評価が恒久欠測する構造 (`previou
       単数フィールド (`outcome_id` / `outcome_csv_path` / `evaluation_csv_path` /
       `evaluation_count`) は**従来どおり「直前 window」の値のみ**を指すと定義し
       (catch-up が直前 window しか回収しない通常日は現行と完全一致)、catch-up で
-      追加回収した window は**新設の typed per-window リストフィールド** (frozen
-      model への追加、default 空) で報告する。CLI / observability の既存 consumer
-      は無改変で従来値を読み続けられること。複数 window 回収時の result 内容を
-      test で固定する
+      追加回収した window は**新設の typed per-window tuple フィールド**で報告する。
+      frozen model の nested collection も不変に保つため Python `list` は使わず、
+      `tuple[CatchupWindowResult, ...]` 相当・default `()` とする。CLI / observability の
+      既存 consumer は無改変で従来値を読み続けられること。複数 window 回収時の
+      result 内容・順序と、構築後に append/remove/reorder できないことを test で固定する
 - [ ] 冪等: 同日に複数回 run しても評価は重複登録されない (既存の idempotent 経路を
       catch-up 分にも適用)
 - [ ] catch-up で回収した outcome / evaluation も **元 forecast batch の history
