@@ -126,20 +126,23 @@ Interpretation rules learned over the series — apply, don't re-derive:
 
 The user runs a Rakuten FX repeat-order grid, live since **2026-07-27**:
 buy USDJPY 161.500–163.500, 25 pips grid / 25 pips take-profit, 10,000
-units per order (9 levels, no stop configured — the agreed manual exit
-line is a clear break of 160.50, the July low).
+units per order (9 levels, no stop configured).
+
+**Policy tracking is closed** (2026-08-30, user decision): the exit
+question, the 160.50 line, and any reset definition are the user's own
+call — do not track them, escalate them, or carry a 方針判断 item in
+次週への持ち越し. The section reports the week's facts only.
 
 While this grid is active, add a `## リピート注文モニタ` section to the
 weekly report (after 運用ヘルス) answering, from the week's OHLC:
 
-- Weekly low / close vs the grid floor 161.50 and the exit line 160.50 —
-  state plainly whether the band held, was dipped into and recovered, or
-  was broken (a close below 160.50 is the escalation: lead the chat
-  summary with it, don't bury it).
-- Days whose range overlapped the band vs days spent entirely above it
-  (price above 163.50 = grid idle, not at risk).
+- Weekly low / high / close vs the band 161.50–163.50 — held below,
+  dipped into, or spent above (above 163.50 = grid idle, not at risk).
+- Days whose range overlapped the band, and estimated fills/take-profits.
 - Any shock day (−0.9 円級, the 7/2 / 7/13 pattern) that would have
   filled multiple levels at once.
+- Unrealized P/L at the week's close and the margin-ratio estimate,
+  stated with the usual assumptions.
 
 Estimated fill counts from daily OHLC are order-of-magnitude only — say
 so rather than implying precision. If the user reports changed or closed
