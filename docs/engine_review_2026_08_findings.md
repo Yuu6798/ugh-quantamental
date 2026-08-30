@@ -86,8 +86,9 @@ conviction とも 7 月の較正水準に戻った。v2.6 のレンジは月間 
 ### 4.1 メール通知の Gmail 535 (少なくとも 8/17 以降)
 
 通知 step が `535 BadCredentials` で毎回失敗 → 全 run が赤 → **本物の障害が赤ノイズに
-埋没**。protocol 本体は正常で provider_health.csv は健全に見えた (週報 2 本が「安定
-稼働」と誤記載 → 訂正済み、skill に 2 層チェックを追記済み)。
+埋没**。protocol 本体は正常で provider_health.csv は健全に見えた (確認済みの 8/17–8/21 週報が「安定
+稼働」と誤記載 → 訂正済み。8/16 以前の Actions run は未確認で、同じ根拠では撤回していない。
+skill に 2 層チェックを追記済み)。
 **ユーザー判断 (2026-08-29): メール通知の復旧は不要 — 見送り。** よって通知チャネル
 としてのメールは今後当てにしない。`continue-on-error` 追加 (branch) で赤ノイズのみ
 解消する。今後の通知は GitHub-native (Issue / run conclusion) に寄せる (§5 B3/B4)。
