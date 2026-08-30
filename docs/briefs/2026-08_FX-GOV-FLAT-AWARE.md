@@ -24,9 +24,14 @@ FLAT 予測日 (実現が小動きでも binary miss になる) が direction �
       consumer / test / spec 記述の全 occurrence で grep 同期済み
 
 ## Scope
-- IN: `src/ugh_quantamental/fx_protocol/analytics_annotations.py` /
-      `reporting.py` / `monthly_review.py` / `monthly_governance.py` (flag 文言の
-      追従のみ)、対応 test、`docs/specs/fx_monthly_governance_v1.md` の該当節追記
+- IN: `src/ugh_quantamental/fx_protocol/weekly_reports_v2.py` (**実働の週次
+      集計 — `run_fx_weekly_report.py` → `analytics_rebuild.rebuild_weekly_report`
+      経由で呼ばれるのはこちら**。列リストもここが持つ) /
+      `monthly_review_exports.py` (月次 CSV 列リスト) /
+      `analytics_annotations.py` / `analytics_rebuild.py` / `monthly_review.py` /
+      `monthly_governance.py` (flag 文言の追従のみ)、対応 test、
+      `docs/specs/fx_monthly_governance_v1.md` の該当節追記。
+      `reporting.py` は legacy 経路 — 触るのは追従が自明な場合のみ
 - OUT: `engine/` 一切、FLAT epsilon の値や `_direction_from_bp_with_epsilon` の
       挙動 (予測側は不変)、既存 CSV 列のリネーム・削除、engine_version
 

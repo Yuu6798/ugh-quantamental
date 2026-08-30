@@ -16,8 +16,13 @@ engine 改変は本 brief のスコープ外 (結果を見て次 brief で判断
       再実行し、日別の `fundamental_score` / `technical_score` /
       `price_implied_score` / `e_raw` / `gravity_bias` / `e_star` を CSV +
       Markdown 表で出力する (read-only、ネットワークなし、決定的)
-- [ ] 出力に「各 feature が負に転じた日 / 正に戻った日」の一覧が含まれ、e_star の
-      符号転換日 (α: 8/21) をどの feature が律速したかが表から読める
+- [ ] 出力に「各 feature が負に転じた日 / 正に戻った日」の一覧が含まれる (記述統計)
+- [ ] **律速の判定は counterfactual/ablation で行う**: 少なくとも α について、
+      feature を 1 つずつショック前水準 (または中立値) に固定して projection を
+      再実行し、e_star の符号転換日が何営業日動くかを feature 別に比較する。
+      符号一致・日付一致だけの表からの因果結論は不可 (`fundamental_score` は
+      compute_u / alignment / gravity 経由で間接的に効き、clamp 下で相互作用する
+      ため、同時転換は律速の証明にならない)
 - [ ] `fundamental_score` の clamp 飽和 (|spot_vs_sma20×100| ≥ 1.0) だった営業日数が
       期間中で定量化される
 - [ ] 分析結論 (主因 feature、飽和の寄与、engine 改変の要否と候補) を
