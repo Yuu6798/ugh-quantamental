@@ -66,8 +66,11 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    previous-Friday carry-over row. Read-only.
 3. **Ops health is two-layered** — `provider_health.csv` / the artifact's
    Provider Health section only see runs that *executed the protocol script*.
-   Check the `fx-daily-protocol.yml` Actions run conclusions for the week as
-   well (`actions_list`, newest ~15): a red conclusion with data present means a
+   Check the `fx-daily-protocol.yml` Actions run conclusions covering the
+   whole `<start>`–`<end>` interval as well (`actions_list` — the workflow
+   schedules three runs per weekday, so ~15 newest entries cover only about
+   one current week; for an explicitly requested past week, paginate until
+   the target dates are covered): a red conclusion with data present means a
    post-protocol step failed (e.g. the 2026-08 Gmail-535 notification failure —
    two weekly reports said 安定稼働 while every run was red and the user's
    daily emails silently stopped); missing runs or runs landing on the wrong
@@ -107,7 +110,15 @@ as the existing reports (keep headings verbatim so the series stays greppable):
 
 Interpretation rules learned over the series — apply, don't re-derive:
 
-- Direction hit is binary; a FLAT forecast on a small-move day scores as miss.
+- **Before committing, verify every aggregate or chronology claim in prose
+  against the day table it summarizes.** This series' recurring failure mode
+  (PR #124: five review rounds) is prose contradicted by its own tables:
+  a "9/9" that was 12/12, an "all up days missed" beside a β up-HIT row, an
+  e_star turn dated 8 business days late. Three mechanical checks: (a) recount
+  any N/M by multiplying the table out; (b) an `up`/`down` forecast implies
+  the same e_star sign — never narrate a sign transition later than the first
+  such forecast in the table; (c) count business-day spans on a calendar, don't
+  estimate them.
   Quote median close error and range hit alongside direction rate whenever
   FLAT days distort it (e.g. 7/13 week: 25% direction but best-in-series
   median error).
