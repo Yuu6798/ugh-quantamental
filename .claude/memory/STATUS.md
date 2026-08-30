@@ -23,7 +23,7 @@ active queue - 未着手または進行中の Phase / Brief / Milestone のみ�
 7. **regime=choppy の判定保留を継続** - 標本ゼロ 9 週目。intervention_risk 非 low 日は 28 obs 中 26 miss / 2 hit (方向のみ弱い。レンジは 8 月の非 low 日 8/8 全的中)。label は move-size 由来、「大変動日に弱い」と読む。
 8. **governance spec `Status: Draft` バナーの実態確認** - 実装完備なのにバナーが `Draft`。確認し必要なら更新。
 9. **売買 / execution レイヤーの planning doc 起草** - conviction は e_star 符号整合時のみ信頼可 (2026-08 findings §1) — sizing 入力設計はこの条件付けを織り込む。
-10. **follow-up (低優先)** - #116 `_resolve_annotation_source` 純関数化 / #119 stC scoreboard rollup。グリッド方針判断 (5 週目) + 160.50 リセット定義は**ユーザー判断待ち** (週報で追跡)。
+10. **follow-up (低優先)** - #116 `_resolve_annotation_source` 純関数化 / #119 stC scoreboard rollup。グリッド方針 (B7) は **2026-08-30 ユーザー判断で終了 — 追跡・エスカレーション対象外** (週報モニタは事実報告のみ継続)。
 
 ## 直近 merged
 
