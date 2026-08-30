@@ -11,7 +11,7 @@ daily run が 1 日飛ぶと outcome 評価が恒久欠測する構造 (`previou
 受け入れ確認になる。
 
 ## Acceptance Criteria
-- [ ] `run_fx_daily_automation` (automation.py) の outcome 段が、snapshot の
+- [ ] `run_fx_daily_protocol_once` (automation.py) の outcome 段が、snapshot の
       `completed_windows` のうち「complete な forecast batch (`EXPECTED_DAILY_BATCH_SIZE`
       本) が存在し、かつ evaluation 未登録」の window を **古い順に最大
       `FX_OUTCOME_CATCHUP_DAYS` (default 5) 営業日分**評価する
@@ -19,6 +19,11 @@ daily run が 1 日飛ぶと outcome 評価が恒久欠測する構造 (`previou
       され、出力 (CSV / DB 行) は現行と同一 (既存 test 無改変で pass)
 - [ ] 冪等: 同日に複数回 run しても評価は重複登録されない (既存の idempotent 経路を
       catch-up 分にも適用)
+- [ ] catch-up で回収した outcome / evaluation も **元 forecast batch の history
+      ディレクトリ (`history/{date_str}/{forecast_batch_id}/evaluation.csv` —
+      `csv_exports.py` の既存レイアウト) に export される**。DB 登録だけでは
+      `rebuild_fx_analytics.py` / `run_fx_monthly_review.py` が CSV history を読む
+      ため欠測のまま残る — CSV export まで含めて回収完了とする test を置く
 - [ ] 途中 1 window の評価失敗が他 window の評価とその日の forecast 発行を巻き込まない
       (batch 不在/不完全は skip + observability 記録、raise しない — 現行の
       `_prior_batch_ready` ガードと同じ防御思想)

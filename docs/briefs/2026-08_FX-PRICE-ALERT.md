@@ -14,14 +14,21 @@ engine 非改変の独立監視層。通知はメール不使用 (2026-08-29 ユ
 - [ ] `scripts/run_fx_price_alert.py` (新規) が以下を判定する:
       (a) 直近スポット vs 最終 protocol 終値の乖離 ≥ `FX_ALERT_MOVE_BP` (default 60)
       (b) 監視ライン横断 — `FX_ALERT_LINES` (default "160.50,161.50") を直近バーが跨いだ
-      (c) データ欠測 — 最終 forecast の as_of が現在から 1 protocol 営業日超過去
+      (c) データ欠測 — **schedule-aware 判定**: 当日 (JST 営業日) の最終試行時刻
+      (20:00 JST = 11:00 UTC + 猶予 2h) を過ぎても当日 as_of の forecast が存在
+      しなければ発報する。「1 営業日超過去」のような age 閾値は不可 — 金曜の run
+      欠測 (8/28 の実例) では木曜分がちょうど 1 営業日前のため月曜まで検知でき
+      ない。土日は前営業日 (金曜) 分の存在を確認する
 - [ ] 判定ロジックは純関数 (入力: バー列 + 最終 forecast メタ + 閾値、出力: alert
       リスト) として分離され、ネットワークなしの unit test を持つ
 - [ ] 発報は GitHub Issue: label `fx-alert` の open Issue があれば comment 追記、
       なければ新規作成。**同一 alert 種の連続発報は状態比較で抑止** (毎時 cron でも
       同じ乖離で Issue が毎時伸びない)
 - [ ] `.github/workflows/fx-price-alert.yml` (新規) が平日 2 時間毎 + 土日 6 時間毎に
-      走り、alert なし時は何も書き込まず green で終わる
+      走り、alert なし時は何も書き込まず green で終わる。**`permissions:` を明示
+      宣言する: `issues: write` + `contents: read`** (restricted default token では
+      未宣言だと Issue 作成が 403 になる。他 workflow も全て明示宣言が本 repo の
+      慣例)
 - [ ] スポット取得は Yahoo chart API (`query2.finance.yahoo.com/v8/finance/chart/USDJPY=X`
       — `fx-intraday-fetch.yml` で実証済みの経路) を使い、取得失敗はそれ自体を
       (c) と同様に Issue で可視化する (silent skip 禁止)
