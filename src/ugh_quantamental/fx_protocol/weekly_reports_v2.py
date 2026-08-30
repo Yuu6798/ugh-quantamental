@@ -516,7 +516,12 @@ def build_provider_health_summary(
             success_count += 1
         elif status in ("failed", "error"):
             failed_count += 1
-        elif status in ("skipped", "skip", "idempotent_skip"):
+        elif status in (
+            "skipped",
+            "skip",
+            "idempotent_skip",
+            "idempotent_skip_snapshot_unavailable",
+        ):
             skipped_count += 1
 
     return {
