@@ -17,6 +17,10 @@ engine 非改変の独立監視層。通知はメール不使用 (2026-08-29 ユ
       Yahoo の `regularMarketPrice` は completed bar close とは別に取得され、forecast 時点で
       engine が見た正確な spot は `input_snapshot.json` の `current_spot` に保存されるため、
       ここを基準にして「前回 snapshot 後の新規 move」だけを測る
+      前提不変条件: 同一 forecast batch の `history/.../input_snapshot.json` は
+      **初回 forecast 生成時の snapshot を保持し、idempotent retry で再生成しない**。
+      automation の回帰 test で forecast 後に spot が変わった retry でも保存 spot が
+      変化しないことを固定する
       (b) 監視ライン横断 — `FX_ALERT_LINES` (default "161.50" — グリッド下限のみ。
       160.50 は 2026-08-30 のユーザー判断で追跡終了しており default に含めない。
       ユーザーが必要なら variable で追加する) を直近バーが跨いだ

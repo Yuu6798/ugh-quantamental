@@ -15,6 +15,8 @@ engine 改変は本 brief のスコープ外 (結果を見て次 brief で判断
 - [ ] `scripts/analyze_estar_lag.py` が `fx-daily-data` の
       **`history/{date}/{batch_id}/input_snapshot.json`** (`observability.py` が
       永続化する当日実測の `current_spot` + completed windows) を入力に、
+      **この history snapshot は forecast batch 作成時点で固定され、後続の
+      idempotent retry では上書きされないことを automation の回帰 test で保証する**。
       2026-07-22〜2026-08-28 の各営業日について `compute_snapshot_statistics` →
       `derive_signal_features` → projection を再実行し、日別の
       `fundamental_score` / `technical_score` / `price_implied_score` / `e_raw` /
