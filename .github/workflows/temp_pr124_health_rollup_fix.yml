@@ -1,0 +1,39 @@
+name: temp-pr124-health-rollup-fix
+on: [push]
+permissions:
+  contents: write
+jobs:
+  fix:
+    if: github.ref == 'refs/heads/claude/weekly-report-jun29-jul3-gw058t'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/weekly-report-jun29-jul3-gw058t
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply review fix
+        run: python .github/scripts/temp_pr124_health_rollup_fix.py
+      - name: Focused validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install -e .
+          python -m pip install pytest
+          python -m compileall -q src/ugh_quantamental/fx_protocol/weekly_reports_v2.py src/ugh_quantamental/fx_protocol/monthly_review.py tests/fx_protocol/test_provider_health_status_rollups.py
+          pytest -q tests/fx_protocol/test_provider_health_status_rollups.py
+          python -c "from pathlib import Path; s=Path('docs/specs/fx_observability_artifacts_v1.md').read_text(encoding='utf-8'); assert 'idempotent_skip_snapshot_unavailable' in s"
+          git diff --check
+      - name: Commit production fix and remove temporary files
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/temp_pr124_health_rollup_fix.yml .github/scripts/temp_pr124_health_rollup_fix.py
+          git config user.name 'Yuu6798'
+          git config user.email 'kkoo6798@gmail.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(fx): classify unavailable snapshot retries in health rollups'
+          git push origin HEAD:claude/weekly-report-jun29-jul3-gw058t
