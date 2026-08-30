@@ -26,6 +26,12 @@ engine 非改変の独立監視層。通知はメール不使用 (2026-08-29 ユ
 - [ ] 発報は GitHub Issue: label `fx-alert` の open Issue があれば comment 追記、
       なければ新規作成。**同一 alert 種の連続発報は状態比較で抑止** (毎時 cron でも
       同じ乖離で Issue が毎時伸びない)
+- [ ] **解除→再発火の re-arm を永続 state で扱う**: 条件が一旦クリアされたら
+      その遷移を記録し (例: Issue へ「cleared」comment または close)、次に同条件を
+      跨いだら新規発報する。「アラートなし run は何も書かない」の例外はこの
+      clear 遷移の記録のみ (クリア継続中の run は引き続き何も書かない)。バー時刻を
+      state に含めて毎 poll 発報させる逃げは不可。test: 発火→クリア→再発火の系列で
+      2 度目が抑止されないこと
 - [ ] `.github/workflows/fx-price-alert.yml` (新規) が平日 2 時間毎 + 土日 6 時間毎に
       走り、alert なし時は何も書き込まず green で終わる。**`permissions:` を明示
       宣言する: `issues: write` + `contents: read`** (restricted default token では

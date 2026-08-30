@@ -24,6 +24,12 @@ daily run が 1 日飛ぶと outcome 評価が恒久欠測する構造 (`previou
       `csv_exports.py` の既存レイアウト) に export される**。DB 登録だけでは
       `rebuild_fx_analytics.py` / `run_fx_monthly_review.py` が CSV history を読む
       ため欠測のまま残る — CSV export まで含めて回収完了とする test を置く
+- [ ] **catch-up の export は history 専用経路で行い、`latest/` を汚さない**:
+      既存 `publish_csv_to_layout` は history と同時に `latest/*.csv` も上書きする
+      (`csv_exports.py:390-419`) ため、過去 batch の回収にそのまま使うと `latest/`
+      が歴史データを指して当日 run と矛盾する。history のみ書く経路を追加するか、
+      全 catch-up 後に当日分で `latest/` を復元する。test で「catch-up 後の
+      `latest/` が当日 batch を指したまま」を検証
 - [ ] 途中 1 window の評価失敗が他 window の評価とその日の forecast 発行を巻き込まない
       (batch 不在/不完全は skip + observability 記録、raise しない — 現行の
       `_prior_batch_ready` ガードと同じ防御思想)
@@ -38,8 +44,9 @@ daily run が 1 日飛ぶと outcome 評価が恒久欠測する構造 (`previou
       `automation_models.py` (**`FxDailyAutomationConfig` に catch-up 日数の typed
       field を追加** — frozen / `extra="forbid"` のため env の直読みでは通せない)、
       必要なら `request_builders.py` (新 helper 追加は可、`previous_window_matches`
-      の既存 semantics は温存)、`scripts/run_fx_daily_protocol.py` (env → config
-      への受け渡しのみ)、対応 test、spec 追記
+      の既存 semantics は温存)、`csv_exports.py` (history 専用 export 経路の追加のみ
+      — 既存 `publish_csv_to_layout` の挙動は不変)、`scripts/run_fx_daily_protocol.py`
+      (env → config への受け渡しのみ)、対応 test、spec 追記
 - OUT: forecast 発行側 (business-day ガード含む — JST 土日に発行しない現行挙動は
       正しい)、`engine/`、persistence の ORM 列 (新列不要のはず — 必要になったら
       escalation)、cron スケジュール
