@@ -34,10 +34,12 @@ daily run が 1 日飛ぶと outcome 評価が恒久欠測する構造 (`previou
       順序・冪等) を追記
 
 ## Scope
-- IN: `src/ugh_quantamental/fx_protocol/automation.py`、必要なら
-      `request_builders.py` (新 helper 追加は可、`previous_window_matches` の既存
-      semantics は温存)、`scripts/run_fx_daily_protocol.py` (env 読み取りのみ)、
-      対応 test、spec 追記
+- IN: `src/ugh_quantamental/fx_protocol/automation.py` /
+      `automation_models.py` (**`FxDailyAutomationConfig` に catch-up 日数の typed
+      field を追加** — frozen / `extra="forbid"` のため env の直読みでは通せない)、
+      必要なら `request_builders.py` (新 helper 追加は可、`previous_window_matches`
+      の既存 semantics は温存)、`scripts/run_fx_daily_protocol.py` (env → config
+      への受け渡しのみ)、対応 test、spec 追記
 - OUT: forecast 発行側 (business-day ガード含む — JST 土日に発行しない現行挙動は
       正しい)、`engine/`、persistence の ORM 列 (新列不要のはず — 必要になったら
       escalation)、cron スケジュール

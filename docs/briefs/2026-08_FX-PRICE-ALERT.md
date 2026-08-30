@@ -13,7 +13,9 @@ engine 非改変の独立監視層。通知はメール不使用 (2026-08-29 ユ
 ## Acceptance Criteria
 - [ ] `scripts/run_fx_price_alert.py` (新規) が以下を判定する:
       (a) 直近スポット vs 最終 protocol 終値の乖離 ≥ `FX_ALERT_MOVE_BP` (default 60)
-      (b) 監視ライン横断 — `FX_ALERT_LINES` (default "160.50,161.50") を直近バーが跨いだ
+      (b) 監視ライン横断 — `FX_ALERT_LINES` (default "161.50" — グリッド下限のみ。
+      160.50 は 2026-08-30 のユーザー判断で追跡終了しており default に含めない。
+      ユーザーが必要なら variable で追加する) を直近バーが跨いだ
       (c) データ欠測 — **schedule-aware 判定**: 当日 (JST 営業日) の最終試行時刻
       (20:00 JST = 11:00 UTC + 猶予 2h) を過ぎても当日 as_of の forecast が存在
       しなければ発報する。「1 営業日超過去」のような age 閾値は不可 — 金曜の run
@@ -49,8 +51,8 @@ engine 非改変の独立監視層。通知はメール不使用 (2026-08-29 ユ
 - 「最終 protocol 終値 / 最終 forecast as_of」は `fx-daily-data` ブランチの
   `csv/forecasts/` 最新ファイル名と `csv/history/` 終値から読む (checkout は
   workflow 側で `ref: fx-daily-data` の read-only checkout を別 path に)
-- 監視ラインの default 160.50 / 161.50 はグリッドの撤退線と下限。ユーザーが設定を
-  変えたら repository variable で追従できるよう env 化する
+- 監視ラインの default 161.50 はグリッドの下限 (稼働帯への接近 = 事実情報)。
+  ユーザーが設定を変えたら repository variable で追従できるよう env 化する
 - 営業日判定は「土日 (JST) を除く」の簡易版で足りる (fx_protocol 非依存のため
   calendar.py は使わない — 精度より独立性を優先する設計判断。spec に明記)
 
