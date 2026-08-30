@@ -1,0 +1,67 @@
+name: temp-pr124-retraction-scope-fix
+on:
+  push:
+    branches: [claude/weekly-report-jun29-jul3-gw058t]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/weekly-report-jun29-jul3-gw058t
+          fetch-depth: 0
+      - name: Scope retraction to inspected interval
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('docs/reports/fx_weekly_report_20260824_20260828.md')
+          text = path.read_text(encoding='utf-8')
+
+          replacements = {
+              'しており、**日次メール通知は 2 週間以上不達**、かつ全 run が赤く見えるノイズが本物の\n欠落を隠していた。過去 2 週の週報が「安定稼働」と書いたのは provider 層しか見ていな\nかった誤りで、本レポートで訂正する。':
+              'しており、**確認済みの 8/17 以降は日次メール通知が不達**、かつ全 run が赤く見えるノイズが本物の\n欠落を隠していた。確認済み範囲では 8/17–8/21 週報の「安定稼働」記載が provider 層しか\n見ていなかった誤りであり、本レポートで訂正する。8/16 以前の Actions run は未確認のため、\nそれ以前の週報については撤回対象としない。',
+              '## 運用ヘルス — ⚠️ インシデント 2 件 (過去 2 週の「安定稼働」記載を訂正)':
+              '## 運用ヘルス — ⚠️ インシデント 2 件 (確認済みの 8/17–8/21 週報の「安定稼働」記載を訂正)',
+              '### 1. Gmail 認証エラーでメール通知が 2 週間以上不達 + 全 run が赤':
+              '### 1. Gmail 認証エラーで確認済みの 8/17 以降メール通知が不達 + 全 run が赤',
+          }
+
+          for old, new in replacements.items():
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'expected exactly one match for replacement, got {count}: {old[:80]!r}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Focused validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('docs/reports/fx_weekly_report_20260824_20260828.md').read_text(encoding='utf-8')
+          assert '過去 2 週の週報が「安定稼働」と書いた' not in text
+          assert 'メール通知が 2 週間以上不達' not in text
+          assert '確認済み範囲では 8/17–8/21 週報の「安定稼働」記載' in text
+          assert '8/16 以前の Actions run は未確認のため' in text
+          assert 'それ以前の週報については撤回対象としない' in text
+          assert '確認できた範囲で 8/17 以降の全 run、それ以前は未確認' in text
+          PY
+          git diff --check
+      - name: Commit fix and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/temp_pr124_retraction_scope_fix.yml
+          git config user.name 'Yuu6798'
+          git config user.email 'kkoo6798@gmail.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix(review): scope ops retraction to inspected week'
+          git push origin HEAD:claude/weekly-report-jun29-jul3-gw058t
