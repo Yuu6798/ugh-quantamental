@@ -24,9 +24,12 @@ engine 改変は本 brief のスコープ外 (結果を見て次 brief で判断
       再構築系列は本番 forecast と別物になり得る。snapshot 欠落日はその旨を
       出力に明記して skip する (補完しない)
 - [ ] 出力に「各 feature が負に転じた日 / 正に戻った日」の一覧が含まれる (記述統計)
-- [ ] **律速の判定は counterfactual/ablation で行う**: 少なくとも α について、
-      feature を 1 つずつ固定して projection を再実行し、e_star の符号転換日が
-      何営業日動くかを feature 別に比較する。**参照値は 2 種を両方実施する
+- [ ] **律速の判定は counterfactual/ablation で行う**: **α・β・δ の 3 variant**
+      (方向 weight 構成が相異なる代表 — β は α 比で p_weight 2 倍 / u_weight 半分
+      など `forecasting.py` の variant config 差があり、α 単独では「なぜ β が
+      8 営業日早く転換したか」を説明できない) について、feature を 1 つずつ固定して
+      projection を再実行し、e_star の符号転換日が何営業日動くかを feature 別・
+      variant 別に比較する。**参照値は 2 種を両方実施する
       (sensitivity pair — どちらか一方の選択は実装依存の結論差を生むため不可)**:
       (i) ショック前水準 = 当該 raw statistic の 2026-07-23〜07-29 (ショック前
       最後の 5 営業日: 7/23, 24, 27, 28, 29) の平均、(ii) 中立値 = 0.0。両参照で転換日シフトを並記し、
