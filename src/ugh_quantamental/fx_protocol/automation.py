@@ -478,10 +478,19 @@ def run_fx_daily_protocol_once(
             forecast_batch_id,
             "input_snapshot.json",
         )
-        if not forecast_created and os.path.isfile(history_snap_path):
-            os.makedirs(obs_base, exist_ok=True)
-            shutil.copy2(history_snap_path, snap_path)
-            input_snapshot_path = os.path.abspath(snap_path)
+        if not forecast_created:
+            if os.path.isfile(history_snap_path):
+                os.makedirs(obs_base, exist_ok=True)
+                shutil.copy2(history_snap_path, snap_path)
+                input_snapshot_path = os.path.abspath(snap_path)
+            else:
+                # A retry cannot reconstruct the forecast-time market snapshot.
+                # This occurs when the original supported run used
+                # write_csv_exports=False, so no immutable history artifact exists.
+                # Mark it unavailable rather than fabricating provenance from the
+                # retry-time fetch.
+                input_snapshot_path = None
+                _run_status = "idempotent_skip_snapshot_unavailable"
         else:
             snap_data = build_input_snapshot(snapshot, obs_now)
             input_snapshot_path = write_json_artifact(snap_path, snap_data)
