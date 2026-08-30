@@ -17,7 +17,12 @@ FLAT 予測日 (実現が小動きでも binary miss になる) が direction �
 - [ ] `monthly_review.py` の `inspect_direction_logic` flag (現行:
       `direction_accuracy_delta_vs_ugh` >
       `THRESHOLD_DIRECTION_DEFICIT_VS_TECHNICAL_PCT`) が excl_flat ベースの
-      delta で判定されるようになり、reason 文字列にも excl_flat と明記される
+      delta で判定されるようになり、reason 文字列にも excl_flat と明記される。
+      **比較は同一日付コホートで行う**: baseline 側の rate も「canonical UGH
+      variant が非 FLAT だった日付集合」の上で再計算する — 各戦略を独立に
+      excl_flat 集計して引き算すると、UGH が退避した日の baseline 成績が delta に
+      混入し、flag が誤発火/誤抑止する。UGH と baseline の FLAT 日が非対称な
+      合成データで test する
 - [ ] 判定移行を検証する test: 「FLAT 込みでは baseline 優位・FLAT 除外では UGH
       優位」の合成データで flag が立たないこと、および逆ケースで立つこと
 - [ ] 既存 CSV 列の名称・順序は不変 (新列は末尾追加)。新列名は producer /
