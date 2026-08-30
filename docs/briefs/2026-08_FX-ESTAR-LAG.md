@@ -37,6 +37,12 @@ engine 改変は本 brief のスコープ外 (結果を見て次 brief で判断
       符号一致・日付一致だけの表からの因果結論は不可 (`fundamental_score` は
       compute_u / alignment / gravity 経由で間接的に効き、clamp 下で相互作用する
       ため、同時転換は律速の証明にならない)
+- [ ] **介入対象の raw 変数を feature ごとに固定する** (曖昧さ排除):
+      `fundamental_score` → `spot_vs_sma20`、`technical_score` → `momentum_5d`、
+      `price_implied_score` → **分子 `prev_close_change_bp` のみ** (分母
+      `trailing_mean_abs_change_bp` は触らない — 分母を 0.0 にすると `_safe_div`
+      の default 挙動を踏み、比そのものの固定は「派生 score 差し替え」に退行する)。
+      これ以外の統計への介入は本 brief の対象外
 - [ ] **介入は raw statistic 水準で行い、その statistic の全消費者を再構築する**:
       介入対象は `compute_snapshot_statistics` の出力 (例: `spot_vs_sma20`、
       `momentum_5d`) と明記し、projection request 全体を statistics から毎回
@@ -56,9 +62,14 @@ engine 改変は本 brief のスコープ外 (結果を見て次 brief で判断
 
 ## Scope
 - IN: `scripts/analyze_estar_lag.py` (新規)、`docs/analysis/estar_lag_2026_08.md`
-      (新規)、`tests/fx_protocol/` の対応 test (新規)
-- OUT: `src/ugh_quantamental/engine/` と `src/ugh_quantamental/fx_protocol/` の
-      既存コード一切 (import して使うのみ)。パラメータ変更・engine_version bump 禁止
+      (新規)、`tests/fx_protocol/` の対応 test (新規)、
+      `src/ugh_quantamental/fx_protocol/market_ugh_builder.py` (**stats-aware な
+      注入点の追加のみ** — 既存 `build_ugh_request_from_snapshot` は statistics を
+      内部で再計算し override を受けないため、script 側で request 構築を複製すると
+      本番と乖離する。統計 dict を任意引数で受ける純関数分割など、既存呼び出しの
+      挙動を変えない後方互換の変更に限る + その test)
+- OUT: 上記以外の `src/ugh_quantamental/` 一切 (import して使うのみ)。
+      パラメータ変更・engine_version bump 禁止
 
 ## Implementation Hints
 - 入力系列は各日の `input_snapshot.json` を `FxProtocolMarketSnapshot` に戻して
