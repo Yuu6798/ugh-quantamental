@@ -1,0 +1,121 @@
+from pathlib import Path
+import textwrap
+
+
+automation = Path("src/ugh_quantamental/fx_protocol/automation.py")
+text = automation.read_text(encoding="utf-8")
+old = """        if not forecast_created and os.path.isfile(history_snap_path):
+            os.makedirs(obs_base, exist_ok=True)
+            shutil.copy2(history_snap_path, snap_path)
+            input_snapshot_path = os.path.abspath(snap_path)
+        else:
+            snap_data = build_input_snapshot(snapshot, obs_now)
+            input_snapshot_path = write_json_artifact(snap_path, snap_data)
+"""
+new = """        if not forecast_created:
+            if os.path.isfile(history_snap_path):
+                os.makedirs(obs_base, exist_ok=True)
+                shutil.copy2(history_snap_path, snap_path)
+                input_snapshot_path = os.path.abspath(snap_path)
+            else:
+                # A retry cannot reconstruct the forecast-time market snapshot.
+                # This occurs when the original supported run used
+                # write_csv_exports=False, so no immutable history artifact exists.
+                # Mark it unavailable rather than fabricating provenance from the
+                # retry-time fetch.
+                input_snapshot_path = None
+                _run_status = "idempotent_skip_snapshot_unavailable"
+        else:
+            snap_data = build_input_snapshot(snapshot, obs_now)
+            input_snapshot_path = write_json_artifact(snap_path, snap_data)
+"""
+if text.count(old) != 1:
+    raise SystemExit(f"automation target count={text.count(old)}")
+automation.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+test_path = Path("tests/fx_protocol/test_forecast_snapshot_immutability.py")
+test_text = test_path.read_text(encoding="utf-8")
+name = "test_idempotent_retry_does_not_synthesize_missing_forecast_snapshot"
+if name in test_text:
+    raise SystemExit("new regression test already present before patch")
+added = textwrap.dedent(
+    '''
+
+
+def test_idempotent_retry_does_not_synthesize_missing_forecast_snapshot() -> None:
+    from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+
+    first_snapshot = _make_snapshot()
+    retry_snapshot = first_snapshot.model_copy(update={"current_spot": 151.25})
+    provider = MagicMock(spec=FxMarketDataProvider)
+    provider.fetch_snapshot.side_effect = [first_snapshot, retry_snapshot]
+    session = _make_session()
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        create_cfg = FxDailyAutomationConfig(
+            run_outcome_evaluation=False,
+            run_forecast_generation=True,
+            write_csv_exports=False,
+            csv_output_dir=tmpdir,
+        )
+        retry_cfg = create_cfg.model_copy(update={"write_csv_exports": True})
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=first_snapshot.as_of_jst,
+        ), patch(
+            "ugh_quantamental.fx_protocol.automation.is_protocol_business_day",
+            return_value=True,
+        ):
+            first = run_fx_daily_protocol_once(create_cfg, provider, session)
+            session.commit()
+            retry = run_fx_daily_protocol_once(retry_cfg, provider, session)
+
+        assert first.forecast_created is True
+        assert retry.forecast_created is False
+        assert first.forecast_batch_id == retry.forecast_batch_id
+        assert first.forecast_batch_id is not None
+
+        date_str = first_snapshot.as_of_jst.strftime("%Y%m%d")
+        history_path = os.path.join(
+            tmpdir, "history", date_str, first.forecast_batch_id, "input_snapshot.json"
+        )
+        latest_path = os.path.join(tmpdir, "latest", "input_snapshot.json")
+        summary_path = os.path.join(tmpdir, "latest", "run_summary.json")
+
+        assert not os.path.exists(history_path)
+        assert not os.path.exists(latest_path)
+        with open(summary_path, encoding="utf-8") as fh:
+            summary = json.load(fh)
+        assert summary["run_status"] == "idempotent_skip_snapshot_unavailable"
+
+    session.close()
+'''
+)
+test_path.write_text(test_text + added, encoding="utf-8")
+
+
+brief = Path("docs/briefs/2026-08_FX-ESTAR-LAG.md")
+text = brief.read_text(encoding="utf-8")
+old = """      variant 別に比較する。**転換日の抽出規則を固定する**: 主指標は「**最初の持続
+      的正転**」= その日以降、分析窓の終端まで e_star が負に戻らない最初の正の日。
+      参考指標として「最初の正転 (単発可)」も並記する (β の断続正転のような
+      multi-crossing 系列で両者は乖離する)。multi-crossing の合成系列で抽出関数を
+      test すること。**参照値は 2 種を両方実施する
+"""
+new = """      variant 別に比較する。**転換日の抽出規則を固定する**: 転換検索の下限は
+      **2026-07-30 (ショック日)**、終端は 2026-08-28 とし、7/29 以前の正値を
+      転換候補に含めない。正転は「検索開始後に e_star <= 0 を少なくとも 1 回観測した
+      後の正値」に限る。主指標は「**最初の持続的正転**」= その条件を満たし、かつ
+      その日以降、分析窓の終端まで e_star が負に戻らない最初の正の日。参考指標として
+      「最初の正転 (単発可)」も並記する (β の断続正転のような multi-crossing 系列で
+      両者は乖離する)。**検索開始から終端まで一度も e_star <= 0 にならない系列は
+      `ALWAYS_POSITIVE_POST_SHOCK` として転換日 null / lag eliminated を報告し、
+      e_star <= 0 になった後に終端まで正へ戻らない系列は `NO_POST_SHOCK_RECOVERY` として
+      転換日 null を報告する**。pre-shock の正日へフォールバックしてはならない。
+      unit test は multi-crossing に加え always-positive / no-recovery の合成系列も含める。
+      **参照値は 2 種を両方実施する
+"""
+if text.count(old) != 1:
+    raise SystemExit(f"brief target count={text.count(old)}")
+brief.write_text(text.replace(old, new, 1), encoding="utf-8")
