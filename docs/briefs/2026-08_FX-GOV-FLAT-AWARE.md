@@ -35,7 +35,10 @@ FLAT 予測日 (実現が小動きでも binary miss になる) が direction �
       `monthly_review_exports.py` (月次 CSV 列リスト) /
       `analytics_annotations.py` / `analytics_rebuild.py` / `monthly_review.py` /
       `monthly_governance.py` (flag 文言の追従のみ)、対応 test、
-      `docs/specs/fx_monthly_governance_v1.md` の該当節追記。
+      spec 3 本の同期 — `docs/specs/fx_monthly_governance_v1.md` (flag 定義) に
+      加え、**新列の schema table を持つ `docs/specs/fx_weekly_report_v2.md` と
+      `docs/specs/fx_monthly_review_v1.md`** (戦略別 metric 列表に excl_flat 3 列を
+      追記)。
       `reporting.py` は legacy 経路 — 触るのは追従が自明な場合のみ
 - OUT: `engine/` 一切、FLAT epsilon の値や `_direction_from_bp_with_epsilon` の
       挙動 (予測側は不変)、既存 CSV 列のリネーム・削除、engine_version

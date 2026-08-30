@@ -82,7 +82,8 @@ engine 改変は本 brief のスコープ外 (結果を見て次 brief で判断
 ## Required Outputs
 - Branch name: `codex/fx-estar-lag-analysis`
 - PR title: `analysis: replay signal features to locate the post-shock e_star lag`
-- Expected files changed: 上記 IN の 3 点のみ
+- Expected files changed: 上記 IN の 4 点 (script / analysis doc / tests /
+  `market_ugh_builder.py` の stats-aware 注入点 + その test)
 - Required tests: 決定関数の unit test (合成 fixture)
 
 ## Done When
