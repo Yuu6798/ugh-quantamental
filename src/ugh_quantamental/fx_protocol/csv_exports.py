@@ -423,6 +423,55 @@ def publish_csv_to_layout(
     return result
 
 
+def publish_csv_to_history_only(
+    csv_output_dir: str,
+    date_str: str,
+    forecast_batch_id: str,
+    outcome_path: str | None,
+    evaluation_path: str | None,
+) -> dict[str, str | None]:
+    """Copy outcome/evaluation CSVs into ``history/`` only — never touches ``latest/``.
+
+    Used by the outcome catch-up path (``automation.py`` Step 4b) to backfill
+    ``history/{date_str}/{forecast_batch_id}/outcome.csv`` /
+    ``evaluation.csv`` for a forecast batch that is *not* the current day's
+    batch. ``publish_csv_to_layout`` intentionally writes both ``history/``
+    **and** ``latest/`` for the current-day path; recovering a historical
+    batch through that function would overwrite ``latest/`` with stale data,
+    leaving it pointing at a past batch instead of the current run's — this
+    function is the ``history/``-only half of that behaviour. It also never
+    writes or deletes ``forecast.csv``: the original batch's ``forecast.csv``
+    was already published to ``history/`` on its original run.
+
+    Layout written (only the entries whose path argument is not ``None``):
+
+    - ``history/{date_str}/{forecast_batch_id}/outcome.csv``
+    - ``history/{date_str}/{forecast_batch_id}/evaluation.csv``
+
+    Returns a ``dict`` whose values are paths **relative to** *csv_output_dir*,
+    keyed ``history_outcome`` / ``history_evaluation`` (``None`` for an absent
+    optional file).
+    """
+    base = os.path.abspath(csv_output_dir)
+    history_dir = os.path.join(base, "history", date_str, forecast_batch_id)
+    os.makedirs(history_dir, exist_ok=True)
+
+    result: dict[str, str | None] = {
+        "history_outcome": None,
+        "history_evaluation": None,
+    }
+
+    if outcome_path is not None:
+        shutil.copy2(outcome_path, os.path.join(history_dir, "outcome.csv"))
+        result["history_outcome"] = f"history/{date_str}/{forecast_batch_id}/outcome.csv"
+
+    if evaluation_path is not None:
+        shutil.copy2(evaluation_path, os.path.join(history_dir, "evaluation.csv"))
+        result["history_evaluation"] = f"history/{date_str}/{forecast_batch_id}/evaluation.csv"
+
+    return result
+
+
 def write_latest_manifest(csv_output_dir: str, manifest_data: dict[str, object]) -> str:
     """Write *manifest_data* as formatted JSON to ``{csv_output_dir}/latest/manifest.json``.
 
