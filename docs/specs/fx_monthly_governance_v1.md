@@ -92,6 +92,7 @@ Source: `monthly_strategy_metrics.csv`
 For each baseline, evaluate deltas versus UGH:
 
 - `direction_accuracy_delta_vs_ugh`
+- `direction_accuracy_delta_vs_ugh_excl_flat` (FX-GOV-FLAT-AWARE — see Axis 6)
 - `mean_abs_close_error_bp_delta_vs_ugh`
 - `mean_abs_magnitude_error_bp_delta_vs_ugh`
 
@@ -137,7 +138,13 @@ Confirm the review flags produced by `fx_monthly_review_v1`:
 
 - `insufficient_data`
 - `inspect_magnitude_mapping`
-- `inspect_direction_logic`
+- `inspect_direction_logic` — re-based on the FLAT-excluded, same-date-cohort
+  delta (`direction_accuracy_delta_vs_ugh_excl_flat`; FX-GOV-FLAT-AWARE): a
+  `flat` forecast is always a binary miss, so the FLAT-inclusive rate
+  previously caused this flag to misfire (or wrongly stay silent) in months
+  where UGH's actual directional calls out- or under-performed
+  `baseline_simple_technical`. The reason string names `excl_flat` so this
+  is visible without re-deriving it from the raw metrics.
 - `inspect_state_mapping`
 - `low_annotation_coverage`
 - `provider_quality_issue`

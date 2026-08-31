@@ -85,6 +85,14 @@ Per-strategy aggregation for each of the four strategies:
 | `median_abs_close_error_bp` | Median of `|close_error_bp|` |
 | `mean_abs_magnitude_error_bp` | Mean of `|magnitude_error_bp|` |
 | `median_abs_magnitude_error_bp` | Median of `|magnitude_error_bp|` |
+| `direction_hit_excl_flat_count` | Direction hits among non-`flat`-forecast observations only (FX-GOV-FLAT-AWARE) |
+| `direction_obs_excl_flat` | Denominator for the above — count of non-`flat`-forecast observations |
+| `direction_hit_excl_flat_rate` | `direction_hit_excl_flat_count / direction_obs_excl_flat`; `None` when the denominator is 0 — never a fake 0%. `baseline_random_walk` is always `flat`, so its excl_flat rate is always `None` |
+
+A `forecast_direction == "flat"` observation is always a binary miss against
+an `up`/`down` realization, which drags the plain `direction_hit_rate` down
+without reflecting a genuine directional call. Appended at the end of the
+field list; existing column names/order are unchanged.
 
 ## Baseline Comparisons
 
@@ -97,6 +105,7 @@ For each baseline strategy, compute deltas vs UGH:
 | `mean_abs_close_error_bp_delta_vs_ugh` | `baseline_error - ugh_error` (positive = UGH better) |
 | `mean_abs_magnitude_error_bp_delta_vs_ugh` | Same for magnitude error |
 | `state_proxy_hit_rate_delta_vs_ugh` | Computed if both strategies have state proxy data |
+| `direction_accuracy_delta_vs_ugh_excl_flat` | FX-GOV-FLAT-AWARE. `baseline_rate_on_cohort - ugh_direction_hit_excl_flat_rate`, where `cohort` is the set of dates on which the **canonical UGH variant** made a non-`flat` forecast. The baseline's rate is re-aggregated over that same date cohort — not the baseline's own independent excl_flat aggregate — so a baseline's performance on days UGH sat out (FLAT) cannot leak into the delta. `None` when `observations` were not supplied to `compute_monthly_baseline_comparisons` or the cohort is empty |
 
 ## Annotation-Aware Analysis
 
@@ -143,7 +152,7 @@ Rule-based flags are computed from monthly metrics. Each flag includes a `flag` 
 |---|---|---|
 | `insufficient_data` | UGH forecast_count < minimum | `THRESHOLD_MINIMUM_OBSERVATIONS = 5` |
 | `inspect_magnitude_mapping` | UGH mean close error worse than random walk by threshold | `THRESHOLD_CLOSE_ERROR_VS_RANDOM_WALK_BP = 5.0` bp |
-| `inspect_direction_logic` | UGH direction accuracy below simple technical by threshold | `THRESHOLD_DIRECTION_DEFICIT_VS_TECHNICAL_PCT = 0.10` (10%) |
+| `inspect_direction_logic` | UGH direction accuracy (**excl_flat**, same non-FLAT date cohort anchored to the canonical UGH variant — FX-GOV-FLAT-AWARE) below simple technical (excl_flat, same cohort) by threshold. FLAT-inclusive rates are not used: a `flat` forecast is always a binary miss, so blending it in previously caused false positives/negatives. `None` when the cohort is unavailable (no observations supplied) — the flag is simply skipped, never a fallback to the FLAT-inclusive delta | `THRESHOLD_DIRECTION_DEFICIT_VS_TECHNICAL_PCT = 0.10` (10%) |
 | `inspect_state_mapping` | State proxy hit rate high but magnitude error also high | `THRESHOLD_STATE_HIT_HIGH = 0.70`, `THRESHOLD_MAGNITUDE_ERROR_DESPITE_STATE_HIT_BP = 30.0` bp |
 | `low_annotation_coverage` | Confirmed annotation coverage below threshold | `THRESHOLD_ANNOTATION_COVERAGE_LOW = 0.30` (30%) |
 | `provider_quality_issue` | Provider lag or fallback rate exceeds threshold | `THRESHOLD_PROVIDER_LAG_RATE = 0.30`, `THRESHOLD_PROVIDER_FALLBACK_RATE = 0.30` |
