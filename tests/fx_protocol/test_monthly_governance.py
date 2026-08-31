@@ -211,6 +211,25 @@ class TestBuildMonthlyDecisionLog:
         assert result["provider_annotation_concerns"] == []
         assert result["final_recommendation"] == "All good"
 
+    def test_baseline_summary_carries_excl_flat_delta(self) -> None:
+        """FX-GOV-FLAT-AWARE: the decision log must surface the same-cohort
+        FLAT-excluded delta that actually drives inspect_direction_logic,
+        alongside the legacy inclusive delta."""
+        comparisons = [
+            {
+                "baseline_strategy_kind": "baseline_simple_technical",
+                "direction_accuracy_delta_vs_ugh": 0.208,
+                "direction_accuracy_delta_vs_ugh_excl_flat": -0.014,
+                "mean_abs_close_error_bp_delta_vs_ugh": 5.0,
+                "mean_abs_magnitude_error_bp_delta_vs_ugh": 3.0,
+            }
+        ]
+        review = self._make_review(comparisons=comparisons)
+        result = build_monthly_decision_log(review, JUDGMENT_KEEP, [])
+        row = result["baseline_comparison_summary"][0]
+        assert row["direction_delta"] == 0.208
+        assert row["direction_delta_excl_flat"] == -0.014
+
     def test_logic_audit_candidates_populated(self) -> None:
         flags = [
             {"flag": "inspect_direction_logic", "reason": "Baseline outperforming"},

@@ -219,6 +219,10 @@ def build_monthly_decision_log(
         baseline_summary.append({
             "baseline": c.get("baseline_strategy_kind", ""),
             "direction_delta": c.get("direction_accuracy_delta_vs_ugh"),
+            # FX-GOV-FLAT-AWARE: the same-cohort FLAT-excluded delta is what
+            # actually drives inspect_direction_logic — surface it alongside
+            # the inclusive delta so the governance artifact matches the flag.
+            "direction_delta_excl_flat": c.get("direction_accuracy_delta_vs_ugh_excl_flat"),
             "close_error_delta": c.get("mean_abs_close_error_bp_delta_vs_ugh"),
             "magnitude_error_delta": c.get("mean_abs_magnitude_error_bp_delta_vs_ugh"),
         })
