@@ -1,0 +1,73 @@
+name: FX Price Alert
+
+# Independent monitoring layer (docs/specs/fx_price_alert_v1.md): watches
+# USDJPY price moves, monitored grid lines, and daily-protocol data gaps in
+# the hours the prediction stack does not itself look at, and reports them
+# as comments on a `fx-alert` labeled GitHub Issue. Deliberately independent
+# of the fx-daily-protocol pipeline (scripts/run_fx_price_alert.py imports
+# stdlib only) so it keeps working even if that pipeline is broken.
+#
+# Schedule is expressed in UTC, approximating JST weekday/weekend cadence
+# (same convention fx-daily-protocol.yml uses) — the script's own JST-aware
+# cutoff/business-day logic is authoritative regardless of exact invocation
+# time, so the day-boundary fuzziness near UTC midnight is not a
+# correctness issue, only a cadence one.
+on:
+  schedule:
+    # Every 2h, UTC Mon-Fri (approximates JST weekdays).
+    - cron: '0 */2 * * 1-5'
+    # Every 6h, UTC Sat-Sun (approximates JST weekend).
+    - cron: '0 */6 * * 0,6'
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  price-alert:
+    runs-on: ubuntu-latest
+
+    env:
+      FX_ALERT_MOVE_BP: ${{ vars.FX_ALERT_MOVE_BP || '60' }}
+      FX_ALERT_LINES: ${{ vars.FX_ALERT_LINES || '161.50' }}
+      FX_ALERT_ISSUE_LABEL: ${{ vars.FX_ALERT_ISSUE_LABEL || 'fx-alert' }}
+      FX_ALERT_SYMBOL: ${{ vars.FX_ALERT_SYMBOL || 'USDJPY=X' }}
+      FX_ALERT_DATA_DIR: ${{ github.workspace }}/fx-daily-data-readonly
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+
+    steps:
+      # Only scripts/run_fx_price_alert.py itself is used — it is stdlib
+      # only and does not import the installed package, so no pip install
+      # step is needed here.
+      - name: Check out code branch (read-only)
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            scripts/run_fx_price_alert.py
+          sparse-checkout-cone-mode: false
+
+      - name: Check out fx-daily-data branch (read-only, separate path)
+        id: checkout-data
+        run: |
+          data_branch="${{ vars.FX_DATA_BRANCH || 'fx-daily-data' }}"
+          if git clone \
+              --branch "$data_branch" \
+              --depth 1 \
+              --single-branch \
+              "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" \
+              "$FX_ALERT_DATA_DIR" 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Data branch '$data_branch' not found or empty; forecast metadata will be reported as a fetch failure."
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Run FX price alert check
+        run: python3 scripts/run_fx_price_alert.py

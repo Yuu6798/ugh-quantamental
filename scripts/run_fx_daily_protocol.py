@@ -24,6 +24,9 @@ FX_DISABLE_OUTCOME   : set to "1" to skip outcome/evaluation workflow
 FX_DISABLE_FORECAST  : set to "1" to skip forecast workflow
 FX_WRITE_CSV_EXPORTS : set to "0" to disable CSV export (default: enabled)
 FX_CSV_OUTPUT_DIR    : directory for CSV exports (default: ./data/csv)
+FX_OUTCOME_CATCHUP_DAYS : max protocol business days of closed-but-unevaluated
+                       forecast windows to recover per run, oldest first
+                       (default: 5; "0" disables catch-up entirely).
 FX_LAST_RETRY        : set to "1" on the final retry (16:00 JST) or manual dispatch.
                        When set, data-fetch errors fail hard (exit 1) instead of
                        skipping gracefully, so the data gap is visible in CI.
@@ -73,6 +76,18 @@ def main() -> None:
     run_forecast = _env("FX_DISABLE_FORECAST") != "1"
     write_csv_exports = _env("FX_WRITE_CSV_EXPORTS", "1") != "0"
     csv_output_dir = _env("FX_CSV_OUTPUT_DIR", "./data/csv") or "./data/csv"
+
+    outcome_catchup_days_raw = _env("FX_OUTCOME_CATCHUP_DAYS", "5")
+    try:
+        outcome_catchup_days = int(outcome_catchup_days_raw)
+    except ValueError:
+        _fail(
+            f"FX_OUTCOME_CATCHUP_DAYS must be an integer, got {outcome_catchup_days_raw!r}."
+        )
+        return
+    if outcome_catchup_days < 0:
+        _fail("FX_OUTCOME_CATCHUP_DAYS must be >= 0.")
+        return
 
     # Fail fast: csv_output_dir must be inside data_dir so that CSV files land
     # inside the data-branch checkout and get committed.  A relative path like
@@ -180,6 +195,7 @@ def main() -> None:
         run_forecast_generation=run_forecast,
         write_csv_exports=write_csv_exports,
         csv_output_dir=csv_output_dir,
+        outcome_catchup_days=outcome_catchup_days,
     )
 
     from ugh_quantamental.fx_protocol.data_sources import FxDataFetchError
@@ -223,6 +239,13 @@ def main() -> None:
         print(f"  evaluation_csv     : {automation_result.evaluation_csv_path}")
     if automation_result.manifest_path:
         print(f"  manifest           : {automation_result.manifest_path}")
+    if automation_result.catchup_windows:
+        print(f"  catchup_windows    : {len(automation_result.catchup_windows)} recovered")
+        for cu in automation_result.catchup_windows:
+            print(
+                f"    - {cu.window_start_jst.isoformat()} -> {cu.window_end_jst.isoformat()} "
+                f"(batch={cu.forecast_batch_id}, evaluations={cu.evaluation_count})"
+            )
     if automation_result.annotation_analytics:
         for key, val in automation_result.annotation_analytics.items():
             if val:

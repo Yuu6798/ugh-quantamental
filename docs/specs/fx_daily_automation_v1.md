@@ -157,7 +157,15 @@ The `ugh_request` parameter is a pre-built `FullWorkflowRequest` constructed by 
 
 ### `build_daily_outcome_request(snapshot, *, schema_version, protocol_version) -> DailyOutcomeWorkflowRequest`
 
-Builds a `DailyOutcomeWorkflowRequest` from the most recent completed window (newest in `completed_windows`).
+Builds a `DailyOutcomeWorkflowRequest` from the most recent completed window (newest in `completed_windows`). Delegates to `build_outcome_request_for_window` below.
+
+### `build_outcome_request_for_window(window, *, pair, market_data_provenance, schema_version, protocol_version) -> DailyOutcomeWorkflowRequest`
+
+Generalizes `build_daily_outcome_request` to an arbitrary `FxCompletedWindow` (not necessarily the newest). Used by outcome catch-up (§ below) to build an outcome request for any recovered window.
+
+### `catchup_window_candidates(snapshot, *, max_business_days) -> tuple[FxCompletedWindow, ...]`
+
+Returns the windows in `snapshot.completed_windows` whose business-day distance from `snapshot.as_of_jst` is between `1` and `max_business_days` inclusive, oldest first (distance `0` — the immediately-preceding window — is excluded; that one is `previous_window_matches`'s territory). `max_business_days <= 0` returns `()`. Only bounds the *candidate set*; batch-completeness and evaluation-idempotency are checked separately by the caller. See § Outcome catch-up below.
 
 ---
 
@@ -210,6 +218,21 @@ All values are clamped to their declared Pydantic field bounds. The same snapsho
 | `run_forecast_generation` | `bool` | Whether to run forecast workflow |
 | `write_csv_exports` | `bool` | Whether to write CSV exports after each run (default: `True`) |
 | `csv_output_dir` | `str` | Root directory for CSV output files (default: `./data/csv`) |
+| `outcome_catchup_days` | `int` | Max protocol business days of closed-but-unevaluated forecast windows to recover per run, oldest first (default: `5`, `ge=0`; `0` disables catch-up entirely) |
+
+### `CatchupWindowResult` (`automation_models.py`)
+
+One closed forecast window recovered by the outcome catch-up pass (§ Outcome catch-up below). Reported only for windows whose evaluation was newly registered during *that* run's catch-up pass — a window already fully evaluated by a prior run is an idempotent no-op and does not reappear.
+
+| Field | Type | Description |
+|---|---|---|
+| `window_start_jst` | `datetime` | Recovered window's start (= the original forecast's `as_of_jst`) |
+| `window_end_jst` | `datetime` | Recovered window's end |
+| `forecast_batch_id` | `str` | The *original* forecast batch this recovery evaluates |
+| `outcome_id` | `str` | Outcome ID recorded for this window |
+| `evaluation_count` | `int` | Number of evaluation records generated (== `EXPECTED_DAILY_BATCH_SIZE` on success) |
+| `outcome_csv_path` | `str \| None` | Path of the written outcome CSV (staging), or `None` if CSV exports disabled |
+| `evaluation_csv_path` | `str \| None` | Path of the written evaluation CSV (staging), or `None` if CSV exports disabled |
 
 ### `FxDailyAutomationResult` (`automation_models.py`)
 
@@ -226,6 +249,7 @@ All values are clamped to their declared Pydantic field bounds. The same snapsho
 | `outcome_csv_path` | `str \| None` | Absolute path of the written outcome CSV (staging), or `None` if skipped |
 | `evaluation_csv_path` | `str \| None` | Absolute path of the written evaluation CSV (staging), or `None` if skipped |
 | `manifest_path` | `str \| None` | Absolute path of `latest/manifest.json`, or `None` if CSV exports disabled |
+| `catchup_windows` | `tuple[CatchupWindowResult, ...]` | Windows recovered by the outcome catch-up pass this run (default `()`); see § Outcome catch-up |
 
 ### `run_fx_daily_protocol_once(config, provider, session) -> FxDailyAutomationResult`
 
@@ -237,12 +261,49 @@ Orchestration function in `automation.py`:
 4. Build `FullWorkflowRequest` (UGH inputs) from the snapshot via `build_ugh_request_from_snapshot`
 5. Build `DailyForecastWorkflowRequest` using request builders (injects UGH request + baseline context)
 6. If `config.run_forecast_generation`: call `run_daily_forecast_workflow`; idempotent
-6. If `config.run_outcome_evaluation` and prior window data is available in snapshot: call `run_daily_outcome_evaluation_workflow`; idempotent
+6. If `config.run_outcome_evaluation` and prior window data is available in snapshot: call `run_daily_outcome_evaluation_workflow` for the **immediately preceding window only** (`previous_window_matches` + `_prior_batch_ready`, unchanged); idempotent
+6b. **Outcome catch-up** (if `config.run_outcome_evaluation` and `config.outcome_catchup_days > 0`): recover older closed-but-unevaluated windows — see § Outcome catch-up below; reported via `catchup_windows`, never mutates the singular `outcome_id` / `outcome_recorded` / `evaluation_count` / `outcome_csv_path` / `evaluation_csv_path` fields from step 6
 7. If `config.write_csv_exports`: write forecast / outcome / evaluation CSVs under `config.csv_output_dir`; skipped gracefully when the relevant batch or outcome ID is `None`
 8. If `config.write_csv_exports` and forecast CSV was written: **publish to `latest/` and `history/` layout** via `publish_csv_to_layout`; absent outcome/evaluation files are **deleted** from `latest/`; **write `latest/manifest.json`** via `write_latest_manifest`
-9. Return `FxDailyAutomationResult` (includes `manifest_path`)
+9. Return `FxDailyAutomationResult` (includes `manifest_path`, `catchup_windows`)
 
-Idempotency: rerunning the same `as_of_jst` must not duplicate records. Both workflows are already idempotent per Milestones 14 and 15. CSV exports overwrite the same deterministic paths on each rerun.
+Idempotency: rerunning the same `as_of_jst` must not duplicate records. Both workflows are already idempotent per Milestones 14 and 15. CSV exports overwrite the same deterministic paths on each rerun. Outcome catch-up (step 6b) reuses the same idempotent `run_daily_outcome_evaluation_workflow` and additionally short-circuits before calling it once a window's evaluation is already complete, so a recovered window is never re-processed or re-reported on a later run.
+
+---
+
+## Outcome catch-up (bounded backward recovery)
+
+### Problem
+
+`previous_window_matches` (step 6 above) only evaluates the **immediately preceding** protocol window. If a day's run does not execute at all (business-day-guard refusal, scheduler delay, transient failure before this step runs), the forecast batch issued for that window is never evaluated — and once a later day's run makes a *different* window the "immediately preceding" one, that gap becomes **permanent**: nothing in the original single-window gate ever revisits it. This is exactly what happened to the real 2026-08-27 USDJPY batch (window 2026-08-27 08:00 → 2026-08-28 08:00 JST): the 2026-08-28 runs were refused by the business-day guard, so the batch sat closed, complete, and unevaluated.
+
+### Conditions
+
+A completed window `w` (drawn from `snapshot.completed_windows`, i.e. within the snapshot's trailing history — typically the last 20+ windows) is a catch-up **candidate** iff:
+
+1. Its business-day distance from `snapshot.as_of_jst` is `>= 1` (distance `0` is the immediately-preceding window, already handled by step 6 — catch-up never re-processes it) and `<= config.outcome_catchup_days`. Distance is measured by repeatedly applying `prev_as_of_jst` from `as_of_jst`; a window not landing on a business-day-aligned timestamp within the bound is excluded.
+2. Its forecast batch (`make_forecast_batch_id(pair, w.window_start_jst, protocol_version)`) exists and is **complete** (`len(forecasts) == EXPECTED_DAILY_BATCH_SIZE`). A missing or partial batch is skipped — logged, never raised.
+3. It is **not yet evaluated**: no `OutcomeRecord` exists for `(pair, w.window_start_jst, w.window_end_jst, schema_version)`, or one exists but its evaluation batch is incomplete. An already-complete window is a silent idempotent no-op (not re-reported in `catchup_windows`).
+
+Candidates are generated by `request_builders.catchup_window_candidates(snapshot, max_business_days=config.outcome_catchup_days)`, which bounds condition 1 only; conditions 2–3 are checked per-candidate in `automation.py` Step 4b.
+
+### Bound and order
+
+- **Bound**: at most `config.outcome_catchup_days` protocol business days behind `as_of_jst` (default `5`; `0` disables catch-up entirely). A window whose gap exceeds this bound is never recovered by this pass (it would need a config change or a manual replay).
+- **Order**: oldest first (largest distance first), so a multi-day backlog is recovered in chronological order.
+
+### Idempotency and failure isolation
+
+- Re-running the same `as_of_jst` (or a later run whose lookback window still covers an already-recovered window) does not duplicate outcome/evaluation records — condition 3 above short-circuits before calling `run_daily_outcome_evaluation_workflow`, and that workflow is itself idempotent.
+- One window's failure (batch missing/incomplete, or an unexpected exception during recovery) is caught, logged, and skipped — it never aborts another candidate window's recovery, the current window's evaluation (step 6), or the day's forecast generation (step 5). Same defensive posture as the existing `_prior_batch_ready` guard.
+
+### Result contract
+
+The singular `outcome_id` / `outcome_recorded` / `evaluation_count` / `outcome_csv_path` / `evaluation_csv_path` fields on `FxDailyAutomationResult` continue to describe **only** the window handled by step 6 (the immediately preceding one) — bit-identical to the pre-catch-up behaviour on a day with no gap. Catch-up recoveries are reported exclusively via the new `catchup_windows: tuple[CatchupWindowResult, ...]` field (default `()`), which is empty whenever there is nothing to recover.
+
+### CSV export: history-only
+
+A catch-up recovery writes its outcome/evaluation CSVs into the **original** forecast batch's `history/{date_str}/{forecast_batch_id}/` directory (`date_str` = the batch's own issuance date, i.e. `window_start_jst`), via `csv_exports.publish_csv_to_history_only` — a history-only counterpart to `publish_csv_to_layout` that never touches `latest/` and never writes `forecast.csv` (already published on the batch's original run). This keeps `latest/` pointing at the **current** day's batch even after a multi-window catch-up recovery, whereas `publish_csv_to_layout` (used for the current day's own window in step 8) intentionally updates both `history/` and `latest/`.
 
 ---
 
@@ -308,6 +369,7 @@ Set `ALPHAVANTAGE_API_KEY` as a **repository secret** (Settings → Secrets → 
 | `FX_PROTOCOL_VERSION` | Variable | No | Protocol version (default: `v1`) |
 | `FX_WRITE_CSV_EXPORTS` | Variable | No | Set to `"0"` to disable CSV exports (default: enabled) |
 | `FX_CSV_OUTPUT_DIR` | Variable | No | Root directory for CSV output; **must be inside `FX_DATA_DIR`** or the script fails fast. Default in Actions: `{github.workspace}/data/csv` (absolute path). |
+| `FX_OUTCOME_CATCHUP_DAYS` | Variable | No | Max protocol business days of closed-but-unevaluated forecast windows to recover per run (default: `5`; `0` disables catch-up). See § Outcome catch-up. |
 
 ---
 

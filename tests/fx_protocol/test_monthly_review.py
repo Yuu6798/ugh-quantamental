@@ -22,6 +22,7 @@ from ugh_quantamental.fx_protocol.monthly_review import (
     compute_review_flags,
     run_monthly_review,
     select_representative_cases,
+    THRESHOLD_DIRECTION_DEFICIT_VS_TECHNICAL_PCT,
     THRESHOLD_REGIME_DIRECTION_COLLAPSE_PCT,
 )
 
@@ -187,6 +188,42 @@ class TestMonthlyStrategyMetrics:
             assert row["range_hit_count"] == expected
             assert row["range_hit_rate"] == pytest.approx(expected / 5, abs=0.001)
 
+    def test_direction_hit_excl_flat_ignores_flat_forecasts(self) -> None:
+        obs = [
+            _make_obs(strategy_kind="ugh", direction_hit="True", forecast_direction="up"),
+            _make_obs(strategy_kind="ugh", direction_hit="False", forecast_direction="down"),
+            _make_obs(strategy_kind="ugh", direction_hit="False", forecast_direction="flat"),
+        ]
+        metrics = compute_monthly_strategy_metrics(obs)
+        ugh = next(m for m in metrics if m["strategy_kind"] == "ugh")
+        assert ugh["forecast_count"] == 3
+        assert ugh["direction_hit_count"] == 1
+        assert ugh["direction_hit_rate"] == pytest.approx(1 / 3, abs=0.001)
+        assert ugh["direction_obs_excl_flat"] == 2
+        assert ugh["direction_hit_excl_flat_count"] == 1
+        assert ugh["direction_hit_excl_flat_rate"] == pytest.approx(0.5, abs=0.001)
+
+    def test_direction_hit_excl_flat_empty_when_always_flat(self) -> None:
+        """baseline_random_walk is always FLAT: excl_flat rate must be None,
+        never a fake 0% (no division by zero)."""
+        obs = [
+            _make_obs(
+                strategy_kind="baseline_random_walk",
+                direction_hit="False",
+                forecast_direction="flat",
+            ),
+            _make_obs(
+                strategy_kind="baseline_random_walk",
+                direction_hit="False",
+                forecast_direction="flat",
+            ),
+        ]
+        metrics = compute_monthly_strategy_metrics(obs)
+        rw = next(m for m in metrics if m["strategy_kind"] == "baseline_random_walk")
+        assert rw["direction_obs_excl_flat"] == 0
+        assert rw["direction_hit_excl_flat_count"] == 0
+        assert rw["direction_hit_excl_flat_rate"] is None
+
 
 # ---------------------------------------------------------------------------
 # Tests: baseline comparisons
@@ -246,6 +283,121 @@ class TestMonthlyBaselineComparisons:
             "baseline_prev_day_direction",
             "baseline_simple_technical",
         }
+
+
+# ---------------------------------------------------------------------------
+# Tests: baseline comparisons — FLAT-excluded, same-date-cohort delta
+# (FX-GOV-FLAT-AWARE)
+# ---------------------------------------------------------------------------
+
+
+def _cohort_obs() -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Ten aligned (UGH, baseline_simple_technical) date rows with asymmetric
+    FLAT dates: UGH is FLAT on days 6-10, non-FLAT (up) on days 1-5.
+
+    UGH:      non-flat on 1-5 (all hits), flat on 6-10 (all misses)
+              -> incl_flat rate = 5/10 = 0.5, excl_flat rate = 5/5 = 1.0
+    baseline: hits on 1-4 (4/5 on the UGH-non-flat cohort), hits on 6-10
+              (5/5 on the UGH-flat days) -> incl_flat rate = 9/10 = 0.9,
+              rate on cohort (days 1-5) = 4/5 = 0.8
+    """
+    ugh: list[dict[str, str]] = []
+    baseline: list[dict[str, str]] = []
+    for day in range(1, 11):
+        as_of = f"2026-03-{day:02d}T08:00:00+09:00"
+        non_flat_day = day <= 5
+        ugh.append(_make_obs(
+            as_of_jst=as_of, forecast_batch_id=f"batch_{day:03d}",
+            strategy_kind="ugh",
+            forecast_direction="up" if non_flat_day else "flat",
+            direction_hit="True" if non_flat_day else "False",
+        ))
+        baseline_hit = "True" if (non_flat_day and day != 5) or not non_flat_day else "False"
+        baseline.append(_make_obs(
+            as_of_jst=as_of, forecast_batch_id=f"batch_{day:03d}",
+            strategy_kind="baseline_simple_technical",
+            forecast_direction="up",
+            direction_hit=baseline_hit,
+        ))
+    return ugh, baseline
+
+
+class TestBaselineComparisonsExclFlatCohort:
+    def test_same_cohort_delta_uses_ugh_non_flat_dates_only(self) -> None:
+        ugh, baseline = _cohort_obs()
+        obs = ugh + baseline
+        strategy_metrics = compute_monthly_strategy_metrics(obs)
+        comparisons = compute_monthly_baseline_comparisons(strategy_metrics, obs)
+        tech = next(
+            c for c in comparisons
+            if c["baseline_strategy_kind"] == "baseline_simple_technical"
+        )
+
+        # Blended (incl_flat) view: baseline looks much better than UGH
+        # because it wins on the days UGH sat out (FLAT).
+        assert tech["direction_accuracy_delta_vs_ugh"] == pytest.approx(0.4, abs=0.001)
+
+        # Same-cohort excl_flat view: baseline only 4/5 on the dates UGH
+        # actually called a direction, vs UGH's 5/5 on those same dates ->
+        # UGH is better once the FLAT-day mismatch is removed.
+        assert tech["direction_accuracy_delta_vs_ugh_excl_flat"] == pytest.approx(
+            0.8 - 1.0, abs=0.001
+        )
+
+    def test_independent_per_strategy_excl_flat_would_be_wrong(self) -> None:
+        """Guards against the rejected design: independently excl_flat-
+        aggregating each strategy (baseline has zero FLAT rows here, so its
+        own excl_flat rate equals its blended 0.9 rate) would leak the
+        UGH-FLAT-day baseline wins into the delta. The same-cohort delta
+        must NOT equal baseline's independent excl_flat rate minus UGH's."""
+        ugh, baseline = _cohort_obs()
+        obs = ugh + baseline
+        strategy_metrics = compute_monthly_strategy_metrics(obs)
+        baseline_metrics = next(
+            m for m in strategy_metrics if m["strategy_kind"] == "baseline_simple_technical"
+        )
+        # baseline_simple_technical is never FLAT in this fixture, so its
+        # independent excl_flat rate is just its blended rate (0.9).
+        assert baseline_metrics["direction_hit_excl_flat_rate"] == pytest.approx(0.9, abs=0.001)
+
+        comparisons = compute_monthly_baseline_comparisons(strategy_metrics, obs)
+        tech = next(
+            c for c in comparisons
+            if c["baseline_strategy_kind"] == "baseline_simple_technical"
+        )
+        wrong_independent_delta = (
+            baseline_metrics["direction_hit_excl_flat_rate"] - 1.0
+        )  # 0.9 - ugh_excl_flat_rate(1.0) = -0.1
+        assert tech["direction_accuracy_delta_vs_ugh_excl_flat"] != pytest.approx(
+            wrong_independent_delta, abs=0.001
+        )
+
+    def test_delta_is_none_without_observations(self) -> None:
+        """Backward compatibility: omitting observations yields None for the
+        excl_flat delta rather than raising or silently mis-computing."""
+        ugh, baseline = _cohort_obs()
+        strategy_metrics = compute_monthly_strategy_metrics(ugh + baseline)
+        comparisons = compute_monthly_baseline_comparisons(strategy_metrics)
+        tech = next(
+            c for c in comparisons
+            if c["baseline_strategy_kind"] == "baseline_simple_technical"
+        )
+        assert tech["direction_accuracy_delta_vs_ugh_excl_flat"] is None
+
+    def test_delta_is_none_when_baseline_always_random_walk_flat(self) -> None:
+        """baseline_random_walk is always FLAT; on the UGH non-flat cohort it
+        still has rows (it forecasts every day), so its rate on the cohort is
+        computed from its own direction_hit values on those dates — the
+        delta is only None when the cohort itself has no baseline rows."""
+        ugh, _ = _cohort_obs()
+        # baseline_random_walk rows only on days it was actually run (none),
+        # so it never appears in observations at all here.
+        strategy_metrics = compute_monthly_strategy_metrics(ugh)
+        comparisons = compute_monthly_baseline_comparisons(strategy_metrics, ugh)
+        rw = next(
+            c for c in comparisons if c["baseline_strategy_kind"] == "baseline_random_walk"
+        )
+        assert rw["direction_accuracy_delta_vs_ugh_excl_flat"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -666,8 +818,11 @@ class TestInspectDirectionLogicFlag:
             },
             {
                 "baseline_strategy_kind": "baseline_simple_technical",
-                # baseline direction 15% better than UGH
+                # Blended (incl_flat) delta is also 15% better for baseline here,
+                # but the flag (FX-GOV-FLAT-AWARE) reads the excl_flat field below.
                 "direction_accuracy_delta_vs_ugh": 0.15,
+                # baseline direction (excl_flat, same non-FLAT cohort) 15% better
+                "direction_accuracy_delta_vs_ugh_excl_flat": 0.15,
                 "mean_abs_close_error_bp_delta_vs_ugh": 0.0,
                 "mean_abs_magnitude_error_bp_delta_vs_ugh": 0.0,
                 "state_proxy_hit_rate_delta_vs_ugh": None,
@@ -687,6 +842,50 @@ class TestInspectDirectionLogicFlag:
         )
         flag_ids = [f["flag"] for f in flags]
         assert "inspect_direction_logic" in flag_ids
+        reason = next(f["reason"] for f in flags if f["flag"] == "inspect_direction_logic")
+        assert "excl_flat" in reason
+
+    def test_ignores_plain_incl_flat_delta(self) -> None:
+        """A large incl_flat delta must NOT fire the flag when the excl_flat
+        (same-cohort) delta is absent or within threshold — the flag is
+        re-based on excl_flat only (FX-GOV-FLAT-AWARE)."""
+        strategy_metrics = [
+            {
+                "strategy_kind": "ugh",
+                "forecast_count": 20,
+                "direction_hit_rate": 0.4,
+                "state_proxy_hit_rate": 0.4,
+                "mean_abs_close_error_bp": 15.0,
+                "mean_abs_magnitude_error_bp": 12.0,
+            },
+        ]
+        baseline_comparisons = [
+            {
+                "baseline_strategy_kind": "baseline_simple_technical",
+                # Blended delta looks like a big deficit...
+                "direction_accuracy_delta_vs_ugh": 0.30,
+                # ...but the excl_flat cohort comparison is unavailable
+                # (e.g. observations were not supplied to the comparison).
+                "direction_accuracy_delta_vs_ugh_excl_flat": None,
+                "mean_abs_close_error_bp_delta_vs_ugh": 0.0,
+                "mean_abs_magnitude_error_bp_delta_vs_ugh": 0.0,
+                "state_proxy_hit_rate_delta_vs_ugh": None,
+            },
+        ]
+        annotation_cov = {"annotation_coverage_rate": 0.8}
+        provider_health = {
+            "total_runs": 20,
+            "lagged_snapshot_count": 0,
+            "fallback_adjustment_count": 0,
+        }
+
+        flags = compute_review_flags(
+            strategy_metrics, baseline_comparisons,
+            annotation_cov, provider_health,
+            requested_window_count=20, missing_window_count=0,
+        )
+        flag_ids = [f["flag"] for f in flags]
+        assert "inspect_direction_logic" not in flag_ids
 
 
 class TestInspectStateMappingFlag:
@@ -946,6 +1145,100 @@ class TestRunMonthlyReview:
         )
         assert review["monthly_regime_metrics"] == []
         assert review["monthly_volatility_metrics"] == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: inspect_direction_logic flag re-based on excl_flat (FX-GOV-FLAT-AWARE)
+#
+# Reference behavior (2026-07 real data): FLAT-inclusive UGH 45.8% <
+# technical 66.7% (would flag) / FLAT-excluded UGH 68.1% > technical 66.7%
+# (must not flag). Both fixtures below use 10 aligned dates with asymmetric
+# FLAT days between UGH and baseline_simple_technical, so the same-cohort
+# delta computation is exercised, not an independent per-strategy one.
+# ---------------------------------------------------------------------------
+
+
+def _reverse_cohort_obs() -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """The mirror image of ``_cohort_obs``: FLAT-inclusive makes UGH look
+    fine (baseline blended rate is lower), but on the actual comparison
+    dates (UGH's non-FLAT cohort) baseline clearly outperforms.
+
+    UGH:      1/5 hits on non-flat days 1-5 (excl_flat = 0.2), all "hit" on
+              flat days 6-10 (incl_flat = 6/10 = 0.6)
+    baseline: 5/5 hits on the cohort (days 1-5), 0/5 on days 6-10
+              (incl_flat = 5/10 = 0.5)
+    """
+    ugh: list[dict[str, str]] = []
+    baseline: list[dict[str, str]] = []
+    for day in range(1, 11):
+        as_of = f"2026-03-{day:02d}T08:00:00+09:00"
+        non_flat_day = day <= 5
+        ugh.append(_make_obs(
+            as_of_jst=as_of, forecast_batch_id=f"batch_{day:03d}",
+            strategy_kind="ugh",
+            forecast_direction="up" if non_flat_day else "flat",
+            direction_hit="True" if (day == 1 or not non_flat_day) else "False",
+        ))
+        baseline.append(_make_obs(
+            as_of_jst=as_of, forecast_batch_id=f"batch_{day:03d}",
+            strategy_kind="baseline_simple_technical",
+            forecast_direction="up",
+            direction_hit="True" if non_flat_day else "False",
+        ))
+    return ugh, baseline
+
+
+class TestInspectDirectionLogicFlagExclFlatCohort:
+    def test_flag_does_not_fire_when_baseline_wins_only_on_ugh_flat_days(self) -> None:
+        """FLAT-inclusive: baseline_simple_technical looks 40pt better than
+        UGH. FLAT-excluded (same cohort): UGH is actually better. The flag
+        must not fire — this mirrors the 2026-07 reference month."""
+        ugh, baseline = _cohort_obs()
+        review = run_monthly_review(
+            ugh + baseline,
+            [],
+            review_generated_at_jst=_REVIEW_DATE,
+            business_day_count=10,
+        )
+        comparisons = review["monthly_baseline_comparisons"]
+        tech = next(
+            c for c in comparisons
+            if c["baseline_strategy_kind"] == "baseline_simple_technical"
+        )
+        # Blended delta alone would have crossed the 10pt threshold.
+        assert tech["direction_accuracy_delta_vs_ugh"] > THRESHOLD_DIRECTION_DEFICIT_VS_TECHNICAL_PCT
+        assert tech["direction_accuracy_delta_vs_ugh_excl_flat"] < 0
+
+        flag_ids = {f["flag"] for f in review["review_flags"]}
+        assert "inspect_direction_logic" not in flag_ids
+
+    def test_flag_fires_when_baseline_truly_wins_on_the_shared_cohort(self) -> None:
+        """Reverse case: FLAT-inclusive blended delta stays under threshold
+        (UGH looks fine), but on the shared non-FLAT cohort baseline clearly
+        outperforms. The flag must fire — blended metrics must not be able
+        to mask a real per-cohort deficit."""
+        ugh, baseline = _reverse_cohort_obs()
+        review = run_monthly_review(
+            ugh + baseline,
+            [],
+            review_generated_at_jst=_REVIEW_DATE,
+            business_day_count=10,
+        )
+        comparisons = review["monthly_baseline_comparisons"]
+        tech = next(
+            c for c in comparisons
+            if c["baseline_strategy_kind"] == "baseline_simple_technical"
+        )
+        # Blended delta alone would NOT have crossed the threshold.
+        assert tech["direction_accuracy_delta_vs_ugh"] <= THRESHOLD_DIRECTION_DEFICIT_VS_TECHNICAL_PCT
+        assert tech["direction_accuracy_delta_vs_ugh_excl_flat"] > THRESHOLD_DIRECTION_DEFICIT_VS_TECHNICAL_PCT
+
+        flag_ids = {f["flag"] for f in review["review_flags"]}
+        assert "inspect_direction_logic" in flag_ids
+        reason = next(
+            f["reason"] for f in review["review_flags"] if f["flag"] == "inspect_direction_logic"
+        )
+        assert "excl_flat" in reason
 
 
 class TestExistingForecastUnchanged:

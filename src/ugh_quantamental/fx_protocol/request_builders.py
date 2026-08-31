@@ -6,7 +6,9 @@ All builders are pure functions with no I/O.
 
 from __future__ import annotations
 
-from ugh_quantamental.fx_protocol.calendar import next_as_of_jst
+from datetime import datetime
+
+from ugh_quantamental.fx_protocol.calendar import next_as_of_jst, prev_as_of_jst
 from ugh_quantamental.fx_protocol.data_models import (
     FxCompletedWindow,
     FxProtocolMarketSnapshot,
@@ -15,6 +17,7 @@ from ugh_quantamental.fx_protocol.forecast_models import (
     BaselineContext,
     DailyForecastWorkflowRequest,
 )
+from ugh_quantamental.fx_protocol.models import CurrencyPair, MarketDataProvenance
 from ugh_quantamental.fx_protocol.outcome_models import DailyOutcomeWorkflowRequest
 from ugh_quantamental.workflows.models import FullWorkflowRequest
 
@@ -138,6 +141,55 @@ def build_daily_forecast_request(
     )
 
 
+def build_outcome_request_for_window(
+    window: FxCompletedWindow,
+    *,
+    pair: CurrencyPair,
+    market_data_provenance: MarketDataProvenance,
+    schema_version: str,
+    protocol_version: str,
+) -> DailyOutcomeWorkflowRequest:
+    """Build a ``DailyOutcomeWorkflowRequest`` for an arbitrary completed window.
+
+    Generalizes the window-selection logic of :func:`build_daily_outcome_request`
+    (which is pinned to ``snapshot.completed_windows[-1]``, the immediately
+    preceding window) to any window drawn from a snapshot's trailing history.
+    Used by the outcome catch-up path (``automation.py`` Step 4b /
+    :func:`catchup_window_candidates`) to recover older closed-but-unevaluated
+    windows without touching the single-window semantics of
+    :func:`build_daily_outcome_request`.
+
+    Parameters
+    ----------
+    window:
+        The completed window to build an outcome request for.
+    pair:
+        Currency pair.
+    market_data_provenance:
+        Source metadata for this outcome (typically ``snapshot.market_data_provenance``).
+    schema_version, protocol_version:
+        Protocol versioning metadata.
+
+    Returns
+    -------
+    DailyOutcomeWorkflowRequest
+        Fully populated outcome workflow request for *window*.
+    """
+    return DailyOutcomeWorkflowRequest(
+        pair=pair,
+        window_start_jst=window.window_start_jst,
+        window_end_jst=window.window_end_jst,
+        market_data_provenance=market_data_provenance,
+        realized_open=window.open_price,
+        realized_high=window.high_price,
+        realized_low=window.low_price,
+        realized_close=window.close_price,
+        event_tags=window.event_tags,
+        schema_version=schema_version,
+        protocol_version=protocol_version,
+    )
+
+
 def build_daily_outcome_request(
     snapshot: FxProtocolMarketSnapshot,
     *,
@@ -175,16 +227,10 @@ def build_daily_outcome_request(
 
     # The window end is the canonical next business-day 08:00 JST.
     # We already have it in the FxCompletedWindow.
-    return DailyOutcomeWorkflowRequest(
+    return build_outcome_request_for_window(
+        newest,
         pair=snapshot.pair,
-        window_start_jst=newest.window_start_jst,
-        window_end_jst=newest.window_end_jst,
         market_data_provenance=snapshot.market_data_provenance,
-        realized_open=newest.open_price,
-        realized_high=newest.high_price,
-        realized_low=newest.low_price,
-        realized_close=newest.close_price,
-        event_tags=newest.event_tags,
         schema_version=schema_version,
         protocol_version=protocol_version,
     )
@@ -214,3 +260,83 @@ def previous_window_matches(snapshot: FxProtocolMarketSnapshot) -> bool:
     # next_as_of_jst of the newest window's start must equal snapshot.as_of_jst
     expected_end = next_as_of_jst(newest.window_start_jst)
     return newest.window_end_jst == expected_end and newest.window_end_jst == snapshot.as_of_jst
+
+
+def _business_day_lag(window_end_jst: datetime, as_of_jst: datetime, *, max_lag: int) -> int | None:
+    """Return the protocol-business-day distance from *window_end_jst* to *as_of_jst*.
+
+    Counts how many :func:`prev_as_of_jst` steps from *as_of_jst* land exactly on
+    *window_end_jst*. A distance of ``0`` means *window_end_jst* IS *as_of_jst*
+    (the immediately preceding window — handled separately by
+    :func:`previous_window_matches`, not by catch-up).
+
+    Parameters
+    ----------
+    window_end_jst:
+        Window close time to measure.
+    as_of_jst:
+        Current run's canonical as-of time.
+    max_lag:
+        Upper bound on steps to walk before giving up. Bounds the loop so a
+        timestamp that is not business-day-aligned with *as_of_jst* cannot spin
+        indefinitely.
+
+    Returns
+    -------
+    int | None
+        The business-day distance, or ``None`` if *window_end_jst* is after
+        *as_of_jst*, or is not reached within *max_lag* steps.
+    """
+    if window_end_jst > as_of_jst:
+        return None
+    cursor = as_of_jst
+    lag = 0
+    while cursor > window_end_jst:
+        if lag >= max_lag:
+            return None
+        cursor = prev_as_of_jst(cursor)
+        lag += 1
+    return lag
+
+
+def catchup_window_candidates(
+    snapshot: FxProtocolMarketSnapshot,
+    *,
+    max_business_days: int,
+) -> tuple[FxCompletedWindow, ...]:
+    """Return closed windows eligible for outcome catch-up, oldest first.
+
+    A window is a catch-up *candidate* iff it is strictly older than the
+    immediately-preceding window handled by :func:`previous_window_matches`
+    (business-day distance >= 1 from ``snapshot.as_of_jst``) and its distance
+    is at most *max_business_days*. This function only bounds the *set* of
+    windows catch-up may draw from — callers (``automation.py`` Step 4b) still
+    need to check forecast-batch completeness and evaluation idempotency
+    before acting on a candidate, and must skip (never raise) on a window that
+    fails either check.
+
+    Parameters
+    ----------
+    snapshot:
+        Market snapshot (``completed_windows`` ordered oldest→newest).
+    max_business_days:
+        Maximum lookback distance in protocol business days
+        (``FxDailyAutomationConfig.outcome_catchup_days``). ``0`` disables
+        catch-up entirely (returns ``()``).
+
+    Returns
+    -------
+    tuple[FxCompletedWindow, ...]
+        Eligible windows ordered oldest first (largest distance first).
+    """
+    if max_business_days <= 0:
+        return ()
+
+    as_of_jst = snapshot.as_of_jst
+    dated: list[tuple[int, FxCompletedWindow]] = []
+    for window in snapshot.completed_windows:
+        lag = _business_day_lag(window.window_end_jst, as_of_jst, max_lag=max_business_days)
+        if lag is not None and lag >= 1:
+            dated.append((lag, window))
+    dated.sort(key=lambda item: item[0], reverse=True)
+    return tuple(window for _, window in dated)
