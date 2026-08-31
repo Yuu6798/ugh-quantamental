@@ -18,8 +18,8 @@
     "evaluation_csv_path": null
   },
   "manifest_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/latest/manifest.json",
-  "snapshot_lag_business_days": 0,
-  "used_fallback_adjustment": false,
+  "snapshot_lag_business_days": 1,
+  "used_fallback_adjustment": true,
   "run_status": "idempotent_skip",
-  "generated_at_utc": "2026-08-31T14:50:25Z"
+  "generated_at_utc": "2026-08-31T17:47:18Z"
 }
