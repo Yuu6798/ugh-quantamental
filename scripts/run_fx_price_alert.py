@@ -18,7 +18,9 @@ Environment variables
 ----------------------
 GITHUB_TOKEN         : required. Token used for the GitHub REST API (Issues).
 GITHUB_REPOSITORY    : required. ``owner/repo``, set automatically in Actions.
-FX_ALERT_MOVE_BP      : move-alert threshold in 1/100-yen "pips" (default 60).
+FX_ALERT_MOVE_BP      : move-alert threshold in true basis points of the
+                       baseline spot, i.e. |live - baseline| / baseline * 10_000
+                       (default 60, roughly 95 "pips" at USDJPY 159).
 FX_ALERT_LINES         : comma-separated monitored price lines (default "161.50").
 FX_ALERT_DATA_DIR      : read-only checkout of the ``fx-daily-data`` branch
                        (default "fx-daily-data"); reads
@@ -67,6 +69,7 @@ _STATE_MARKER_RE = re.compile(
 
 _SPOT_FETCH_KEY = "fetch_failure:spot"
 _FORECAST_FETCH_KEY = "fetch_failure:forecast"
+_CONFIG_KEY = "fetch_failure:config"
 _MOVE_KEY = "move"
 _GAP_KEY = "gap"
 
@@ -199,13 +202,20 @@ def gap_cutoff_reached(now_jst: datetime) -> bool:
 
 
 def evaluate_move(live_spot: float, baseline_spot: float, threshold_bp: float) -> tuple[bool, str]:
-    """Return (active, detail) for the move-vs-baseline check (AC a)."""
+    """Return (active, detail) for the move-vs-baseline check (AC a).
+
+    ``threshold_bp`` is true basis points of the baseline spot
+    (``|live - baseline| / baseline * 10_000``), matching FX_ALERT_MOVE_BP's
+    name and the rest of the system's bp conventions — not 1/100-yen "pips"
+    (a fixed-point count, unrelated to the baseline's magnitude). At the
+    default threshold of 60 bp this is roughly 95 pips at USDJPY 159.
+    """
     diff = live_spot - baseline_spot
-    diff_bp = round(abs(diff) * 100.0, 6)
-    active = diff_bp >= threshold_bp
+    move_bp = round(abs(diff) / baseline_spot * 10_000.0, 6) if baseline_spot else 0.0
+    active = move_bp >= threshold_bp
     detail = (
         f"live spot {live_spot:.3f} vs last-forecast baseline {baseline_spot:.3f} "
-        f"({diff:+.3f} / {diff_bp:.1f} pips, threshold {threshold_bp:.1f} pips)"
+        f"({diff:+.3f} / {move_bp:.1f} bp, threshold {threshold_bp:.1f} bp)"
     )
     return active, detail
 
@@ -218,13 +228,33 @@ def evaluate_line_cross(latest_bar: Bar, line: MonitoredLine) -> bool:
 
 
 def evaluate_data_gap(
-    now_jst: datetime, forecast: ForecastMeta | None
+    now_jst: datetime, forecast: ForecastMeta | None, *, was_active: bool = False
 ) -> tuple[bool, date, bool]:
-    """Return (active, target_business_date, cutoff_reached) for AC (c)."""
+    """Return (active, target_business_date, cutoff_reached) for AC (c).
+
+    ``target_business_date_jst`` rolls forward every calendar day (Friday's
+    target becomes Monday's once Monday itself is a business day), and
+    ``cutoff`` resets to "not yet reached" at the start of each new business
+    day. Gating a FRESH activation on ``cutoff`` is correct — it avoids
+    crying wolf before the day's run has had its chance to complete — but
+    applying that same gate to an ALREADY-active alert is not: on Monday
+    morning, before Monday's own 22:00 cutoff, both would flip to False even
+    though Friday's forecast (the thing that was actually missing) still
+    hasn't appeared, producing a false "Cleared: gap" every business
+    morning during a multi-day stall.
+
+    ``was_active`` (the alert's own state from the previous run) makes the
+    two cases distinguishable: once active, the alert stays active based on
+    staleness alone — target-date rollover and a fresh cutoff resetting must
+    never, by themselves, produce a clear transition — and only clears once
+    a forecast whose ``as_of_jst`` is no longer behind *today's* target
+    actually exists.
+    """
     target = target_business_date_jst(now_jst)
     cutoff = gap_cutoff_reached(now_jst)
     last_as_of = forecast.as_of_jst if forecast is not None else None
-    active = cutoff and (last_as_of is None or last_as_of < target)
+    stale = last_as_of is None or last_as_of < target
+    active = stale if was_active else (cutoff and stale)
     return active, target, cutoff
 
 
@@ -270,6 +300,7 @@ def evaluate_alerts(
     prev_state: dict[str, bool],
     spot_fetch_error: str | None = None,
     forecast_fetch_error: str | None = None,
+    config_error: str | None = None,
 ) -> EvaluationResult:
     """Pure decision function: inputs in, alerts + new state out.
 
@@ -280,10 +311,27 @@ def evaluate_alerts(
     A condition this run cannot evaluate (its inputs came from a failed
     fetch) is left untouched in the returned state — carried forward as-is
     from ``prev_state`` — rather than guessed at or force-cleared.
+
+    ``config_error`` reports a malformed repo variable (e.g. FX_ALERT_MOVE_BP
+    or FX_ALERT_LINES failing to parse) the same way a fetch failure is
+    reported — the caller falls back to safe defaults for the offending
+    setting so the rest of this run's checks still proceed, but the operator
+    is told their configured value is being ignored.
     """
     fired: list[Alert] = []
     cleared_keys: list[str] = []
     new_state: dict[str, bool] = dict(prev_state)
+
+    _apply(
+        _CONFIG_KEY,
+        config_error is not None,
+        "fx-price-alert configuration is invalid",
+        config_error or "",
+        prev_state=prev_state,
+        new_state=new_state,
+        fired=fired,
+        cleared_keys=cleared_keys,
+    )
 
     # --- spot/bar-dependent checks: move + line-cross -------------------
     _apply(
@@ -302,7 +350,7 @@ def evaluate_alerts(
             _apply(
                 _MOVE_KEY,
                 active,
-                f"USDJPY move >= {move_threshold_bp:.0f} pips vs forecast baseline",
+                f"USDJPY move >= {move_threshold_bp:.0f} bp vs forecast baseline",
                 detail,
                 prev_state=prev_state,
                 new_state=new_state,
@@ -340,7 +388,9 @@ def evaluate_alerts(
         cleared_keys=cleared_keys,
     )
     if forecast_fetch_error is None:
-        active, target, cutoff = evaluate_data_gap(now_jst, forecast)
+        active, target, cutoff = evaluate_data_gap(
+            now_jst, forecast, was_active=bool(prev_state.get(_GAP_KEY, False))
+        )
         last_as_of = forecast.as_of_jst.isoformat() if forecast is not None else "unknown"
         detail = (
             f"expected forecast business date {target.isoformat()} (JST); "
@@ -451,7 +501,23 @@ def fetch_yahoo_daily(
     with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - fixed https URL
         payload = json.loads(resp.read().decode("utf-8"))
 
-    result = payload["chart"]["result"][0]
+    chart = payload.get("chart") if isinstance(payload, dict) else None
+    if not isinstance(chart, dict):
+        raise ValueError("Yahoo Finance response missing 'chart' object")
+    error = chart.get("error")
+    if error:
+        raise ValueError(f"Yahoo Finance response carries an error payload: {error!r}")
+    results = chart.get("result")
+    # Yahoo can return HTTP 200 with {"chart": {"result": null, "error": {...}}}
+    # (already raised above via 'error') or {"chart": {"result": []}} — both
+    # observed in practice, neither an HTTP failure urlopen would surface.
+    if not results:
+        raise ValueError(
+            f"Yahoo Finance response has no chart result (result={results!r})"
+        )
+    result = results[0]
+    if not isinstance(result, dict):
+        raise ValueError(f"Yahoo Finance chart result[0] is not an object: {result!r}")
     meta = result.get("meta") or {}
     raw_spot = meta.get("regularMarketPrice")
     if raw_spot is None:
@@ -598,8 +664,30 @@ def main() -> int:
         print("[ERROR] GITHUB_REPOSITORY and GITHUB_TOKEN must both be set.", file=sys.stderr)
         return 1
 
-    move_threshold_bp = float(os.environ.get("FX_ALERT_MOVE_BP", str(DEFAULT_MOVE_BP)))
-    lines = parse_lines_env(os.environ.get("FX_ALERT_LINES"))
+    # Parsing FX_ALERT_MOVE_BP / FX_ALERT_LINES can raise ValueError on a
+    # malformed repo variable. That must not crash the run before it ever
+    # reaches the alert path below — fall back to safe defaults for the
+    # offending setting and surface the failure as a config-error alert
+    # (naming the variable) through the same evaluate_alerts flow every
+    # other failure mode uses, rather than letting the process die silently.
+    config_error: str | None = None
+    move_threshold_bp = DEFAULT_MOVE_BP
+    try:
+        raw_move_bp = os.environ.get("FX_ALERT_MOVE_BP", str(DEFAULT_MOVE_BP))
+        move_threshold_bp = float(raw_move_bp)
+    except ValueError as exc:
+        config_error = f"FX_ALERT_MOVE_BP={raw_move_bp!r}: {exc}"
+        print(f"[WARN] invalid FX_ALERT_MOVE_BP: {config_error}", file=sys.stderr)
+
+    lines = parse_lines_env(None)
+    try:
+        raw_lines = os.environ.get("FX_ALERT_LINES")
+        lines = parse_lines_env(raw_lines)
+    except ValueError as exc:
+        line_error = f"FX_ALERT_LINES={raw_lines!r}: {exc}"
+        print(f"[WARN] invalid FX_ALERT_LINES: {line_error}", file=sys.stderr)
+        config_error = f"{config_error}; {line_error}" if config_error else line_error
+
     data_dir = os.environ.get("FX_ALERT_DATA_DIR", DEFAULT_DATA_DIR).strip() or DEFAULT_DATA_DIR
     symbol = os.environ.get("FX_ALERT_SYMBOL", DEFAULT_SYMBOL).strip() or DEFAULT_SYMBOL
     label = os.environ.get("FX_ALERT_ISSUE_LABEL", DEFAULT_ISSUE_LABEL).strip() or DEFAULT_ISSUE_LABEL
@@ -638,6 +726,7 @@ def main() -> int:
         prev_state=prev_state,
         spot_fetch_error=spot_fetch_error,
         forecast_fetch_error=forecast_fetch_error,
+        config_error=config_error,
     )
 
     comment_body = render_state_comment(result.fired, result.cleared_keys, result.state, now_utc)

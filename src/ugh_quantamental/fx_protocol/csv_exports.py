@@ -429,8 +429,10 @@ def publish_csv_to_history_only(
     forecast_batch_id: str,
     outcome_path: str | None,
     evaluation_path: str | None,
+    forecast_path: str | None = None,
 ) -> dict[str, str | None]:
-    """Copy outcome/evaluation CSVs into ``history/`` only — never touches ``latest/``.
+    """Copy outcome/evaluation (and optionally forecast) CSVs into ``history/``
+    only — never touches ``latest/``.
 
     Used by the outcome catch-up path (``automation.py`` Step 4b) to backfill
     ``history/{date_str}/{forecast_batch_id}/outcome.csv`` /
@@ -439,18 +441,32 @@ def publish_csv_to_history_only(
     **and** ``latest/`` for the current-day path; recovering a historical
     batch through that function would overwrite ``latest/`` with stale data,
     leaving it pointing at a past batch instead of the current run's — this
-    function is the ``history/``-only half of that behaviour. It also never
-    writes or deletes ``forecast.csv``: the original batch's ``forecast.csv``
-    was already published to ``history/`` on its original run.
+    function is the ``history/``-only half of that behaviour.
+
+    *forecast_path* is optional and ``None`` by default: catch-up files
+    outcome/evaluation under the recovered window's **end** date, a directory
+    distinct from the one the batch's own forecast.csv was originally
+    published under (its own **start** date, on the day the forecast was
+    generated). Passing *forecast_path* republishes that same batch's
+    forecast rows (re-exported from the persisted DB records) into this
+    end-date directory too, so it is self-contained for downstream rebuilds
+    (``labeled_observations.collect_evaluated_forecast_rows`` only considers
+    a directory that has ``forecast.csv`` alongside ``evaluation.csv``) —
+    this matters most when the original start-date directory's own
+    forecast.csv was never published (e.g. that day's publish step itself
+    failed). ``collect_evaluated_forecast_rows`` dedupes by ``forecast_id``,
+    so forecast.csv legitimately existing in both directories does not
+    double-count.
 
     Layout written (only the entries whose path argument is not ``None``):
 
     - ``history/{date_str}/{forecast_batch_id}/outcome.csv``
     - ``history/{date_str}/{forecast_batch_id}/evaluation.csv``
+    - ``history/{date_str}/{forecast_batch_id}/forecast.csv`` (when *forecast_path* given)
 
     Returns a ``dict`` whose values are paths **relative to** *csv_output_dir*,
-    keyed ``history_outcome`` / ``history_evaluation`` (``None`` for an absent
-    optional file).
+    keyed ``history_outcome`` / ``history_evaluation`` / ``history_forecast``
+    (``None`` for an absent optional file).
     """
     base = os.path.abspath(csv_output_dir)
     history_dir = os.path.join(base, "history", date_str, forecast_batch_id)
@@ -459,6 +475,7 @@ def publish_csv_to_history_only(
     result: dict[str, str | None] = {
         "history_outcome": None,
         "history_evaluation": None,
+        "history_forecast": None,
     }
 
     if outcome_path is not None:
@@ -468,6 +485,10 @@ def publish_csv_to_history_only(
     if evaluation_path is not None:
         shutil.copy2(evaluation_path, os.path.join(history_dir, "evaluation.csv"))
         result["history_evaluation"] = f"history/{date_str}/{forecast_batch_id}/evaluation.csv"
+
+    if forecast_path is not None:
+        shutil.copy2(forecast_path, os.path.join(history_dir, "forecast.csv"))
+        result["history_forecast"] = f"history/{date_str}/{forecast_batch_id}/forecast.csv"
 
     return result
 

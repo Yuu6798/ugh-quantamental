@@ -59,8 +59,8 @@ This is a deliberate architectural boundary, not an oversight:
 ### 3.1 Move alert (AC a) — `FX_ALERT_MOVE_BP`, default `60`
 
 ```
-diff_pips = |live_spot - baseline_spot| * 100
-active    = diff_pips >= FX_ALERT_MOVE_BP
+move_bp = |live_spot - baseline_spot| / baseline_spot * 10_000
+active  = move_bp >= FX_ALERT_MOVE_BP
 ```
 
 - `live_spot`: the current `meta.regularMarketPrice` from the Yahoo Finance
@@ -72,9 +72,14 @@ active    = diff_pips >= FX_ALERT_MOVE_BP
   and reconstructing the baseline from a bar close would silently drift
   from what the engine actually used as input. See §4 for why this baseline
   is safe to read even across an idempotent retry.
-- Despite the env var's `_BP` suffix the unit is USDJPY pips (1/100 yen),
-  matching how the triggering 2026-07-30 incident was described
-  (`-321 pips`); `60` is a deliberately loose default, tuned for "notify
+- `FX_ALERT_MOVE_BP` is **true basis points** of the baseline spot
+  (`|diff| / baseline * 10_000`), matching the env var's own `_BP` suffix
+  and the rest of the system's bp conventions — not a fixed 1/100-yen
+  "pip" count (`|diff| * 100`), which does not scale with the pair's
+  magnitude. At the default threshold of `60` bp this is roughly 95 pips
+  at USDJPY ~159 — comparable in practice to how the triggering 2026-07-30
+  incident was described (`-321 pips`, itself well past this threshold
+  either way); `60` bp is a deliberately loose default, tuned for "notify
   before the position is 10 hours stale," not for scalping precision.
 - Direction-agnostic: a move up or down of equal magnitude fires equally.
 
@@ -109,7 +114,9 @@ target_date = today (JST)                        if today is Mon-Fri
             = most recent Mon-Fri on or before today   if today is Sat/Sun
 cutoff_reached = now.time() >= 22:00 JST          if today is Mon-Fri
                = True                             if today is Sat/Sun
-active = cutoff_reached and (last_forecast_as_of < target_date)
+stale  = (last_forecast_as_of is None) or (last_forecast_as_of < target_date)
+active = stale                     if the alert was already active last run
+       = cutoff_reached and stale  otherwise (a fresh activation)
 ```
 
 - **22:00 JST** cutoff = the daily protocol's final retry cron (11:00 UTC /
@@ -121,11 +128,29 @@ active = cutoff_reached and (last_forecast_as_of < target_date)
   through the weekend — an age threshold would not have tripped until
   Monday. Checking "does *today's* (or, on a weekend, *Friday's*) forecast
   exist" catches it as soon as Friday's 22:00 JST cutoff passes.
+- **Sticky once active** (self-review fix): `target_date` rolls forward every
+  calendar day (Friday's target becomes Monday's once Monday is itself a
+  business day) and `cutoff_reached` resets to `False` at the start of each
+  new business day. Gating a *fresh* activation on `cutoff_reached` is
+  correct — it avoids crying wolf before the day's run has had its chance to
+  complete — but re-applying that same gate to an *already-active* alert is
+  not: on a Monday morning, before Monday's own 22:00 cutoff, both would
+  flip `active` to `False` even though the actually-missing forecast
+  (Friday's) still hasn't appeared, producing a false `Cleared: gap` every
+  business morning during a multi-day stall. `evaluate_data_gap` therefore
+  takes the alert's own prior-run state (`was_active`, threaded through from
+  `evaluate_alerts`'s `prev_state`) and, once active, computes `active` from
+  `stale` alone — clearing only once a forecast whose `as_of_jst` is no
+  longer behind *today's* `target_date` genuinely exists.
 - Both sides of the cutoff are covered by
   `tests/ops/test_run_fx_price_alert.py::TestBusinessDayRules` (21:59:59 vs
-  22:00:00 vs 22:00:01 JST) and
+  22:00:00 vs 22:00:01 JST),
   `TestEvaluateDataGap::test_weekend_checks_friday_not_age_in_business_days`
-  pins the regression scenario directly.
+  pins the weekend-detection regression, and
+  `TestEvaluateDataGap::test_monday_morning_stays_active_no_false_clear` /
+  `test_true_clear_when_mondays_forecast_appears` /
+  `TestEvaluateAlertsSuppression::test_evaluate_alerts_end_to_end_monday_morning_no_false_clear`
+  pin the sticky-clear regression directly.
 
 ### 3.4 Fetch-failure alerts
 
@@ -135,6 +160,25 @@ skipped. Each source gets its own suppression key
 (`fetch_failure:spot`, `fetch_failure:forecast`) so a sustained outage does
 not spam the issue on every poll, but the first occurrence and every
 clear→re-fire transition are always visible.
+
+- **Yahoo payload shape validation** (self-review fix): the chart API can
+  return HTTP 200 with `{"chart": {"result": null, "error": {...}}}` (an
+  invalid/unrecognized symbol) or `{"chart": {"result": []}}`, neither of
+  which is a transport-level failure `main()`'s
+  `(urllib.error.URLError, ValueError, KeyError, TimeoutError, OSError)`
+  guard would catch on its own — subscripting `None` raises `TypeError`,
+  indexing an empty list raises `IndexError`. `fetch_yahoo_daily` validates
+  the response shape explicitly and raises `ValueError` for both, which the
+  guard already catches, so these surface as a normal
+  `fetch_failure:spot` alert instead of crashing the run.
+- **Config-error alert** `fetch_failure:config` (self-review fix): parsing
+  `FX_ALERT_MOVE_BP` / `FX_ALERT_LINES` used to happen before any guarded
+  region in `main()`, so a malformed repository variable raised `ValueError`
+  and crashed the run before it ever reached the alert path. Parsing now
+  happens inside a guarded region; on failure the offending setting falls
+  back to its default (so the rest of the run's checks still proceed) and
+  the failure is reported through the same `evaluate_alerts` flow, naming
+  the variable and its invalid value in the alert body.
 
 ---
 

@@ -124,30 +124,56 @@ class TestBusinessDayRules:
 
 
 class TestEvaluateMove:
+    """FIX 10: threshold_bp is TRUE basis points of the baseline spot
+    (|diff| / baseline * 10_000), matching FX_ALERT_MOVE_BP's name — not
+    1/100-yen "pips" (|diff| * 100, a fixed-point count independent of the
+    baseline's magnitude)."""
+
     def test_below_threshold_inactive(self) -> None:
+        # diff=0.30 @ baseline 150.30 -> ~19.96 bp < 60 bp.
         active, _ = fxa.evaluate_move(150.00, 150.30, threshold_bp=60.0)
         assert active is False
 
     def test_at_threshold_active(self) -> None:
-        active, _ = fxa.evaluate_move(150.60, 150.00, threshold_bp=60.0)
+        # diff=0.90 @ baseline 150.00 -> exactly 60.0 bp.
+        active, _ = fxa.evaluate_move(150.90, 150.00, threshold_bp=60.0)
         assert active is True
 
     def test_above_threshold_active(self) -> None:
+        # diff=3.21 @ baseline 150.00 -> 214.0 bp >= 60 bp.
         active, _ = fxa.evaluate_move(153.21, 150.00, threshold_bp=60.0)
         assert active is True
 
     def test_direction_agnostic(self) -> None:
+        # diff=-1.00 @ baseline 150.00 -> ~66.67 bp >= 60 bp regardless of sign.
         active, _ = fxa.evaluate_move(149.00, 150.00, threshold_bp=60.0)
         assert active is True
 
     def test_baseline_is_never_a_completed_ohlc_close(self) -> None:
         """The baseline argument is documented as forecast current_spot, not
         a rebuilt OHLC close — this test pins the formula's contract: it is
-        a plain live_spot-vs-baseline diff with no OHLC awareness at all."""
+        a plain live_spot-vs-baseline diff (in true bp) with no OHLC
+        awareness at all."""
         active, detail = fxa.evaluate_move(151.00, 150.00, threshold_bp=60.0)
         assert active is True
         assert "150.00" in detail
         assert "151.00" in detail
+
+    def test_bp_formula_is_relative_to_baseline_not_fixed_pip_count(self) -> None:
+        """A 0.90 move is >= threshold near baseline 150 but NOT near a much
+        larger baseline (e.g. 900) -- true bp scales with the baseline,
+        unlike a fixed 1/100-yen pip count which would treat both cases
+        identically."""
+        near_150, _ = fxa.evaluate_move(150.90, 150.00, threshold_bp=60.0)
+        assert near_150 is True
+        near_900, _ = fxa.evaluate_move(900.90, 900.00, threshold_bp=60.0)
+        assert near_900 is False
+
+    def test_zero_baseline_does_not_raise(self) -> None:
+        """Defensive: a zero baseline (never expected for USDJPY spot, but
+        guarded rather than left to raise ZeroDivisionError) is inactive."""
+        active, _ = fxa.evaluate_move(1.00, 0.0, threshold_bp=60.0)
+        assert active is False
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +252,97 @@ class TestEvaluateDataGap:
         forecast = _forecast(date(2026, 8, 28), 150.0)  # Friday's forecast exists
         active, _, _ = fxa.evaluate_data_gap(now, forecast)
         assert active is False
+
+    # -- FIX 8: sticky gap must not clear on target-date rollover alone ----
+
+    def test_monday_morning_stays_active_no_false_clear(self) -> None:
+        """Friday missing -> active all through the weekend -> Monday 09:00
+        JST (before Monday's own 22:00 cutoff, and before Monday's own run
+        has had a chance to complete) must STILL be active — target-date
+        rollover (Friday -> Monday) and cutoff resetting must never, by
+        themselves, produce a clear transition."""
+        forecast = _forecast(date(2026, 8, 27), 150.0)  # last good: Thursday
+
+        # Sunday: already active (established by the existing weekend test).
+        sunday = _jst(2026, 8, 30, 12, 0)
+        active_sun, _, _ = fxa.evaluate_data_gap(sunday, forecast, was_active=False)
+        assert active_sun is True
+
+        # Monday 09:00: was_active carries the alert's own prior-run state
+        # forward (True) -- must stay active, not clear.
+        monday_morning = _jst(2026, 8, 31, 9, 0)  # Monday
+        active_mon, target_mon, cutoff_mon = fxa.evaluate_data_gap(
+            monday_morning, forecast, was_active=True
+        )
+        assert target_mon == date(2026, 8, 31)  # rolled forward to Monday
+        assert cutoff_mon is False  # Monday's own 22:00 cutoff not yet reached
+        assert active_mon is True  # still active despite both of the above
+
+    def test_monday_morning_without_was_active_does_not_yet_fire(self) -> None:
+        """The was_active=False (fresh-detection) path is unchanged: before
+        Monday's own cutoff, a run that has never seen this alert active
+        correctly waits rather than firing immediately."""
+        forecast = _forecast(date(2026, 8, 27), 150.0)
+        monday_morning = _jst(2026, 8, 31, 9, 0)
+        active, _, cutoff = fxa.evaluate_data_gap(
+            monday_morning, forecast, was_active=False
+        )
+        assert cutoff is False
+        assert active is False
+
+    def test_true_clear_when_mondays_forecast_appears(self) -> None:
+        """The genuine clear: once a forecast whose as_of_jst is no longer
+        behind today's target actually exists, the sticky alert clears."""
+        forecast = _forecast(date(2026, 8, 31), 150.0)  # Monday's own forecast
+        monday = _jst(2026, 8, 31, 9, 0)
+        active, target, _ = fxa.evaluate_data_gap(monday, forecast, was_active=True)
+        assert target == date(2026, 8, 31)
+        assert active is False
+
+    def test_evaluate_alerts_end_to_end_monday_morning_no_false_clear(self) -> None:
+        """End-to-end through evaluate_alerts (which supplies was_active from
+        prev_state): Friday missing -> Sunday poll fires -> Monday 09:00 poll
+        must not report a clear."""
+        stale_forecast = _forecast(date(2026, 8, 27), 150.0)
+
+        sunday = fxa.evaluate_alerts(
+            bars=(),
+            live_spot=None,
+            forecast=stale_forecast,
+            lines=(),
+            move_threshold_bp=60.0,
+            now_jst=_jst(2026, 8, 30, 12, 0),
+            prev_state={},
+        )
+        assert [a.key for a in sunday.fired] == ["gap"]
+        assert sunday.state["gap"] is True
+
+        monday_morning = fxa.evaluate_alerts(
+            bars=(),
+            live_spot=None,
+            forecast=stale_forecast,  # still Thursday's -- Monday's run hasn't happened yet
+            lines=(),
+            move_threshold_bp=60.0,
+            now_jst=_jst(2026, 8, 31, 9, 0),
+            prev_state=sunday.state,
+        )
+        assert monday_morning.cleared_keys == ()
+        assert monday_morning.fired == ()
+        assert monday_morning.state["gap"] is True
+
+        # The true clear, once Monday's own forecast appears.
+        monday_forecast = _forecast(date(2026, 8, 31), 150.0)
+        monday_after_run = fxa.evaluate_alerts(
+            bars=(),
+            live_spot=None,
+            forecast=monday_forecast,
+            lines=(),
+            move_threshold_bp=60.0,
+            now_jst=_jst(2026, 8, 31, 9, 5),
+            prev_state=monday_morning.state,
+        )
+        assert monday_after_run.cleared_keys == ("gap",)
+        assert monday_after_run.state["gap"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -616,6 +733,103 @@ class TestReadForecastMeta:
 
 
 # ---------------------------------------------------------------------------
+# FIX 6: malformed env config must surface as an alert, not crash main()
+# ---------------------------------------------------------------------------
+
+
+class TestMainConfigErrorHandling:
+    """main()'s env parsing used to happen outside any guarded region, so a
+    malformed repo variable (e.g. FX_ALERT_LINES set to a non-numeric value)
+    raised ValueError and crashed the run before it ever reached the
+    fetch-failure alert path. It must now surface as a config-error alert
+    through that same path instead."""
+
+    def _stub_io(self, monkeypatch, *, created: dict) -> None:
+        # Pin main()'s internal datetime.now(timezone.utc) so the data-gap
+        # check does not depend on the real wall clock at test-run time.
+        fixed_now = datetime(2026, 8, 31, 0, 0, 0)  # Monday 00:00 UTC == 09:00 JST
+
+        class _FixedDatetime(fxa.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return fixed_now.replace(tzinfo=tz) if tz else fixed_now
+
+        monkeypatch.setattr(fxa, "datetime", _FixedDatetime)
+        monkeypatch.setattr(fxa, "fetch_yahoo_daily", lambda *a, **k: (150.0, ()))
+        monkeypatch.setattr(
+            fxa,
+            "read_forecast_meta",
+            lambda *a, **k: fxa.ForecastMeta(
+                as_of_jst=date(2026, 8, 31), current_spot=150.0
+            ),
+        )
+        monkeypatch.setattr(fxa, "find_open_alert_issue", lambda *a, **k: None)
+
+        def fake_create(repo, token, label, title, body):
+            created["title"] = title
+            created["body"] = body
+            return {"number": 1}
+
+        monkeypatch.setattr(fxa, "create_alert_issue", fake_create)
+        monkeypatch.setattr(
+            fxa,
+            "comment_on_issue",
+            lambda *a, **k: (_ for _ in ()).throw(
+                AssertionError("no existing issue in this test")
+            ),
+        )
+
+    def test_malformed_fx_alert_lines_does_not_crash_and_names_the_variable(
+        self, monkeypatch, capsys
+    ) -> None:
+        created: dict = {}
+        self._stub_io(monkeypatch, created=created)
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        monkeypatch.setenv("FX_ALERT_LINES", "not-a-number")
+        monkeypatch.delenv("FX_ALERT_MOVE_BP", raising=False)
+
+        exit_code = fxa.main()
+
+        assert exit_code == 0
+        assert created.get("body") is not None
+        assert "FX_ALERT_LINES" in created["body"]
+        assert "not-a-number" in created["body"]
+
+    def test_malformed_fx_alert_move_bp_does_not_crash_and_names_the_variable(
+        self, monkeypatch
+    ) -> None:
+        created: dict = {}
+        self._stub_io(monkeypatch, created=created)
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        monkeypatch.setenv("FX_ALERT_MOVE_BP", "sixty")
+        monkeypatch.delenv("FX_ALERT_LINES", raising=False)
+
+        exit_code = fxa.main()
+
+        assert exit_code == 0
+        assert created.get("body") is not None
+        assert "FX_ALERT_MOVE_BP" in created["body"]
+        assert "sixty" in created["body"]
+
+    def test_valid_config_produces_no_config_error_alert(self, monkeypatch) -> None:
+        """Control case: a well-formed config alone writes nothing (no
+        fired/cleared alerts at all in this stub scenario)."""
+        created: dict = {}
+        self._stub_io(monkeypatch, created=created)
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("GITHUB_TOKEN", "tok")
+        monkeypatch.setenv("FX_ALERT_MOVE_BP", "60")
+        monkeypatch.setenv("FX_ALERT_LINES", "161.50")
+
+        exit_code = fxa.main()
+
+        assert exit_code == 0
+        assert created == {}
+
+
+# ---------------------------------------------------------------------------
 # fetch_yahoo_daily parsing (network call itself is not exercised in tests)
 # ---------------------------------------------------------------------------
 
@@ -685,6 +899,60 @@ class TestFetchYahooDailyParsing:
                 return _json.dumps(payload).encode("utf-8")
 
         monkeypatch.setattr(fxa.urllib.request, "urlopen", lambda *a, **k: _FakeResp())
+        with pytest.raises(ValueError):
+            fxa.fetch_yahoo_daily()
+
+    # -- FIX 5: HTTP-200-with-error-payload shapes must raise ValueError,
+    # never an uncaught TypeError/IndexError that would escape main()'s
+    # (urllib.error.URLError, ValueError, KeyError, TimeoutError, OSError)
+    # guard and crash the run instead of surfacing a fetch-failure alert. --
+
+    def _fake_resp(self, payload: dict) -> object:
+        import json as _json
+
+        class _FakeResp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return _json.dumps(payload).encode("utf-8")
+
+        return _FakeResp()
+
+    def test_null_result_raises_value_error(self, monkeypatch) -> None:
+        """{"chart": {"result": null, "error": {...}}} -- Yahoo's documented
+        shape for an invalid/unrecognized symbol. Subscripting None would
+        raise TypeError, not ValueError, if left unguarded."""
+        payload = {
+            "chart": {
+                "result": None,
+                "error": {"code": "Not Found", "description": "No data found"},
+            }
+        }
+        monkeypatch.setattr(
+            fxa.urllib.request, "urlopen", lambda *a, **k: self._fake_resp(payload)
+        )
+        with pytest.raises(ValueError):
+            fxa.fetch_yahoo_daily()
+
+    def test_empty_result_list_raises_value_error(self, monkeypatch) -> None:
+        """{"chart": {"result": []}} -- indexing [0] on this would raise
+        IndexError, not ValueError, if left unguarded."""
+        payload = {"chart": {"result": []}}
+        monkeypatch.setattr(
+            fxa.urllib.request, "urlopen", lambda *a, **k: self._fake_resp(payload)
+        )
+        with pytest.raises(ValueError):
+            fxa.fetch_yahoo_daily()
+
+    def test_missing_chart_key_raises_value_error(self, monkeypatch) -> None:
+        payload = {"not_chart": {}}
+        monkeypatch.setattr(
+            fxa.urllib.request, "urlopen", lambda *a, **k: self._fake_resp(payload)
+        )
         with pytest.raises(ValueError):
             fxa.fetch_yahoo_daily()
 

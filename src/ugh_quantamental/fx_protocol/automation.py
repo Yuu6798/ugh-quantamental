@@ -400,17 +400,36 @@ def run_fx_daily_protocol_once(
                     and cu_existing_evals is not None
                     and len(cu_existing_evals) == EXPECTED_DAILY_BATCH_SIZE
                 )
+                # History is filed by the window's END date (the day the
+                # window closed), never its start date. The start-date
+                # directory is already owned by that window's own
+                # originating batch — which uses it, on ITS OWN day, to file
+                # the *previous* window's evaluation under the exact batch id
+                # (make_forecast_batch_id keyed by window START) recomputed
+                # here as cu_batch_id. Publishing catch-up recoveries there
+                # would silently overwrite that already-archived
+                # outcome.csv / evaluation.csv. See
+                # docs/specs/fx_daily_automation_v1.md § Outcome catch-up.
+                cu_date_str = window.window_end_jst.strftime("%Y%m%d")
                 cu_history_complete = False
                 if config.write_csv_exports:
                     cu_history_dir = os.path.join(
                         config.csv_output_dir,
                         "history",
-                        window.window_start_jst.strftime("%Y%m%d"),
+                        cu_date_str,
                         cu_batch_id,
                     )
-                    cu_history_complete = os.path.isfile(
-                        os.path.join(cu_history_dir, "outcome.csv")
-                    ) and os.path.isfile(os.path.join(cu_history_dir, "evaluation.csv"))
+                    # forecast.csv is required too: collect_evaluated_forecast_rows
+                    # (labeled_observations.py) only reads a directory that has
+                    # forecast.csv alongside evaluation.csv, so a dir missing it
+                    # would make a recovered window's evaluations invisible to
+                    # rebuilds/analytics even though the DB and outcome/evaluation
+                    # CSVs are already correct.
+                    cu_history_complete = (
+                        os.path.isfile(os.path.join(cu_history_dir, "outcome.csv"))
+                        and os.path.isfile(os.path.join(cu_history_dir, "evaluation.csv"))
+                        and os.path.isfile(os.path.join(cu_history_dir, "forecast.csv"))
+                    )
 
                 if cu_existing_complete and (
                     not config.write_csv_exports or cu_history_complete
@@ -449,6 +468,7 @@ def run_fx_daily_protocol_once(
                 if config.write_csv_exports:
                     from ugh_quantamental.fx_protocol.csv_exports import (
                         export_daily_evaluation_csv,
+                        export_daily_forecast_csv,
                         export_daily_outcome_csv,
                         publish_csv_to_history_only,
                     )
@@ -465,14 +485,30 @@ def run_fx_daily_protocol_once(
                         config.pair.value,
                         config.csv_output_dir,
                     )
+                    # Re-export the batch's own forecast rows from the
+                    # persisted DB records too, so the end-date directory is
+                    # self-contained (forecast + outcome + evaluation) — see
+                    # publish_csv_to_history_only's forecast_path docstring.
+                    # This batch's forecast.csv may already exist under its
+                    # own start-date directory (written the day the forecast
+                    # was generated); collect_evaluated_forecast_rows dedupes
+                    # by forecast_id, so the same rows appearing in both
+                    # directories is safe.
+                    cu_forecast_csv_path = export_daily_forecast_csv(
+                        cu_batch.forecasts,
+                        window.window_end_jst,
+                        config.pair.value,
+                        config.csv_output_dir,
+                    )
                     # History-only: never touches latest/, which must keep
                     # pointing at the current day's batch.
                     publish_csv_to_history_only(
                         config.csv_output_dir,
-                        window.window_start_jst.strftime("%Y%m%d"),
+                        cu_date_str,
                         cu_batch_id,
                         cu_outcome_csv_path,
                         cu_evaluation_csv_path,
+                        forecast_path=cu_forecast_csv_path,
                     )
 
                 catchup_results.append(

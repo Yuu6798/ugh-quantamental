@@ -27,6 +27,7 @@ from ugh_quantamental.fx_protocol.annotation_coverage import count_by_annotation
 from ugh_quantamental.fx_protocol.metrics_utils import (
     collect_floats,
     count_bool_rows,
+    non_flat_rows,
     safe_mean,
     safe_median,
     safe_rate,
@@ -113,25 +114,12 @@ def _select_canonical_ugh_metrics(
 # ---------------------------------------------------------------------------
 
 
-def _non_flat_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Return rows whose ``forecast_direction`` is not ``flat``.
-
-    Used to build the FLAT-excluded direction metrics (FX-GOV-FLAT-AWARE):
-    a FLAT forecast is always a binary miss against an ``up``/``down``
-    realization, which drags down the plain direction rate without
-    reflecting a genuine directional call. ``baseline_random_walk`` is
-    always FLAT, so its excl_flat aggregate is empty by construction
-    (no division by zero, no fake 0%).
-    """
-    return [r for r in rows if r.get("forecast_direction", "").strip().lower() != "flat"]
-
-
 def _compute_monthly_metrics_for_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
     n = len(rows)
     dir_hits = count_bool_rows(rows, "direction_hit")
-    non_flat_rows = _non_flat_rows(rows)
-    dir_hits_excl_flat = count_bool_rows(non_flat_rows, "direction_hit")
-    n_excl_flat = len(non_flat_rows)
+    excl_flat_rows = non_flat_rows(rows)
+    dir_hits_excl_flat = count_bool_rows(excl_flat_rows, "direction_hit")
+    n_excl_flat = len(excl_flat_rows)
     range_evaluable = [r for r in rows if r.get("range_hit", "") != ""]
     range_hits = count_bool_rows(range_evaluable, "range_hit")
     state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]

@@ -261,6 +261,56 @@ class TestCatchupWindowCandidates:
         assert candidates[0] == snap.completed_windows[0]
         assert candidates[-1] == snap.completed_windows[-2]
 
+    def test_misaligned_as_of_jst_rejects_windows_rather_than_misreport_distance(
+        self,
+    ) -> None:
+        """FIX 7: FxProtocolMarketSnapshot.as_of_jst carries no business-day/
+        08:00 alignment validator (unlike FxCompletedWindow's own endpoints),
+        so a caller can hand catchup_window_candidates a snapshot whose
+        as_of_jst is off the canonical grid (e.g. mid-afternoon rather than
+        08:00 JST). prev_as_of_jst only ever looks at the *date* part, so the
+        very first step from such an as_of_jst jumps clean past the newest
+        window's end without ever landing on it exactly. The old code
+        returned whatever lag the walk happened to overshoot to; the fixed
+        guard must reject the window instead."""
+        from ugh_quantamental.fx_protocol.request_builders import catchup_window_candidates
+
+        snap = _snapshot_with_n_windows(20)
+        # Same calendar date as the newest window's end, but not on the 08:00
+        # JST grid at all. prev_as_of_jst ignores time-of-day, so the very
+        # first step lands one full business day further back (Friday),
+        # skipping clean past the newest window's (Monday) end.
+        misaligned_as_of = snap.as_of_jst.replace(hour=14, minute=0, second=0)
+        snap_misaligned = snap.model_copy(update={"as_of_jst": misaligned_as_of})
+        newest = snap.completed_windows[-1]
+
+        candidates = catchup_window_candidates(snap_misaligned, max_business_days=100)
+
+        # The newest window's end is unreachable by any exact prev_as_of_jst
+        # step from this as_of_jst — it must be rejected, not (as the old,
+        # unguarded code did) reported as a spurious distance-1 candidate
+        # merely because the walk happened to overshoot past it after one
+        # step. Every older, genuinely-aligned window is still found normally.
+        assert newest not in candidates
+        assert len(candidates) == len(snap.completed_windows) - 1
+
+    def test_business_day_lag_returns_none_for_misaligned_end(self) -> None:
+        """Direct unit coverage of the one-line guard on _business_day_lag."""
+        from ugh_quantamental.fx_protocol.request_builders import _business_day_lag
+
+        as_of = datetime(2026, 1, 5, 8, 0, 0, tzinfo=_JST)  # Monday
+        # Saturday 08:00 JST is never reachable via prev_as_of_jst steps from
+        # a Monday as_of (Monday -> Friday, skipping the weekend entirely).
+        misaligned_end = datetime(2026, 1, 3, 8, 0, 0, tzinfo=_JST)
+        assert _business_day_lag(misaligned_end, as_of, max_lag=10) is None
+
+    def test_business_day_lag_returns_lag_for_aligned_end(self) -> None:
+        from ugh_quantamental.fx_protocol.request_builders import _business_day_lag
+
+        as_of = datetime(2026, 1, 5, 8, 0, 0, tzinfo=_JST)  # Monday
+        aligned_end = datetime(2026, 1, 2, 8, 0, 0, tzinfo=_JST)  # Friday, distance 1
+        assert _business_day_lag(aligned_end, as_of, max_lag=10) == 1
+
 
 class TestBuildOutcomeRequestForWindow:
     def test_matches_window_fields(self) -> None:
@@ -338,7 +388,7 @@ class TestPublishCsvToHistoryOnly:
             assert result["history_outcome"] is None
             assert result["history_evaluation"] is None
 
-    def test_does_not_write_forecast_csv(self) -> None:
+    def test_does_not_write_forecast_csv_when_omitted(self) -> None:
         from ugh_quantamental.fx_protocol.csv_exports import publish_csv_to_history_only
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -347,6 +397,28 @@ class TestPublishCsvToHistoryOnly:
                 tmpdir, "history", "20260310", "fb_hist_test", "forecast.csv"
             )
             assert not os.path.exists(forecast_path)
+
+    def test_writes_forecast_csv_when_given(self) -> None:
+        """FIX 1 amendment: an optional forecast_path republishes that batch's
+        forecast rows alongside outcome/evaluation, so the recovered window's
+        end-date directory is self-contained for
+        labeled_observations.collect_evaluated_forecast_rows."""
+        from ugh_quantamental.fx_protocol.csv_exports import publish_csv_to_history_only
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            forecast_src = os.path.join(tmpdir, "src_forecast.csv")
+            with open(forecast_src, "w", encoding="utf-8") as fh:
+                fh.write("forecast_id\nbaz\n")
+
+            result = publish_csv_to_history_only(
+                tmpdir, "20260310", "fb_hist_test", None, None, forecast_path=forecast_src
+            )
+
+            forecast_path = os.path.join(
+                tmpdir, "history", "20260310", "fb_hist_test", "forecast.csv"
+            )
+            assert os.path.isfile(forecast_path)
+            assert result["history_forecast"] == "history/20260310/fb_hist_test/forecast.csv"
 
 
 # ---------------------------------------------------------------------------
@@ -449,8 +521,13 @@ class TestOutcomeCatchupEndToEnd:
                 assert cu.outcome_csv_path is not None
                 assert cu.evaluation_csv_path is not None
 
-                # History-only export landed in the ORIGINAL batch's history dir.
-                date_str = cu.window_start_jst.strftime("%Y%m%d")
+                # History-only export landed under the recovered window's END
+                # date — never its start date, which is the SAME directory
+                # the originating batch already owns for its own forecast.csv
+                # (and, if that start day was itself a normal eval day, the
+                # previous window's outcome/evaluation) and must not collide
+                # with.
+                date_str = cu.window_end_jst.strftime("%Y%m%d")
                 hist_eval = os.path.join(
                     tmpdir, "history", date_str, d1_forecast_batch_id, "evaluation.csv"
                 )
@@ -680,7 +757,7 @@ class TestOutcomeCatchupEndToEnd:
                 history_dir = os.path.join(
                     tmpdir,
                     "history",
-                    cu.window_start_jst.strftime("%Y%m%d"),
+                    cu.window_end_jst.strftime("%Y%m%d"),
                     cu.forecast_batch_id,
                 )
                 eval_path = os.path.join(history_dir, "evaluation.csv")
@@ -727,5 +804,102 @@ class TestOutcomeCatchupEndToEnd:
                 session.commit()
                 assert r3.forecast_created is True
                 assert r3.outcome_recorded is False
+        finally:
+            session.close()
+
+    def test_catchup_does_not_overwrite_normal_days_own_history_dir(self) -> None:
+        """FIX 1: catch-up must publish under the recovered window's END date,
+        never its START date. The start-date directory is already owned by
+        that window's own originating batch — which used it, on ITS OWN day,
+        to file the *previous* window's evaluation under the exact batch id
+        catch-up recomputes as cu_batch_id for this window. Publishing there
+        would silently overwrite that already-archived outcome.csv /
+        evaluation.csv.
+        """
+        session = self._make_session()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                cfg = FxDailyAutomationConfig(
+                    run_outcome_evaluation=True,
+                    run_forecast_generation=True,
+                    write_csv_exports=True,
+                    csv_output_dir=tmpdir,
+                    # Bound to distance 1 so Day4's catch-up only considers
+                    # window bd21->bd22 (this test's target). At the default
+                    # bound, bd20->bd21 (Day1's window, distance 2, already
+                    # evaluated normally by Day2's Step 4) would ALSO surface
+                    # as a candidate — a separate, pre-existing history-key
+                    # mismatch between Step 4's own publish location and
+                    # catch-up's completeness check that is out of scope for
+                    # this fix; isolate this test from it.
+                    outcome_catchup_days=1,
+                )
+                # Day1 (n=20): forecast for window bd20->bd21.
+                self._run(session, 20, cfg)
+                session.commit()
+
+                # Day2 (n=21, "Day S"): normal run, no gap. Evaluates window
+                # bd20->bd21 (Day1's window) and publishes it under
+                # history/{S}/{batch predicting bd21->bd22}/ — the SAME batch
+                # id catch-up will later compute as cu_batch_id for window
+                # bd21->bd22 (make_forecast_batch_id is keyed by a window's
+                # START, and bd21 is both "Day2's own as_of" and "window
+                # bd21->bd22's start").
+                snap2, r2 = self._run(session, 21, cfg)
+                session.commit()
+                assert r2.outcome_recorded is True
+                day2_batch_id = r2.forecast_batch_id
+                date_s = snap2.as_of_jst.strftime("%Y%m%d")
+
+                original_outcome_path = os.path.join(
+                    tmpdir, "history", date_s, day2_batch_id, "outcome.csv"
+                )
+                original_evaluation_path = os.path.join(
+                    tmpdir, "history", date_s, day2_batch_id, "evaluation.csv"
+                )
+                assert os.path.isfile(original_outcome_path)
+                assert os.path.isfile(original_evaluation_path)
+                with open(original_outcome_path, encoding="utf-8") as fh:
+                    original_outcome_content = fh.read()
+                with open(original_evaluation_path, encoding="utf-8") as fh:
+                    original_evaluation_content = fh.read()
+
+                # Day3: missing entirely (gap).
+
+                # Day4 (n=23): recovers window bd21->bd22 -- predicted by
+                # day2_batch_id, the SAME batch id keying Day2's own history
+                # dir above.
+                from ugh_quantamental.fx_protocol.calendar import next_as_of_jst
+
+                _, r4 = self._run(session, 23, cfg)
+                session.commit()
+                assert len(r4.catchup_windows) == 1
+                cu = r4.catchup_windows[0]
+                assert cu.forecast_batch_id == day2_batch_id
+                assert cu.window_start_jst == snap2.as_of_jst
+                assert cu.window_end_jst == next_as_of_jst(snap2.as_of_jst)
+
+                # Day2's own history dir (evaluation of window bd20->bd21)
+                # is byte-for-byte untouched by the later recovery.
+                with open(original_outcome_path, encoding="utf-8") as fh:
+                    assert fh.read() == original_outcome_content
+                with open(original_evaluation_path, encoding="utf-8") as fh:
+                    assert fh.read() == original_evaluation_content
+
+                # The recovered window (bd21->bd22) landed under ITS OWN end
+                # date -- a directory distinct from Day2's own (date_s).
+                recovered_date_s = cu.window_end_jst.strftime("%Y%m%d")
+                assert recovered_date_s != date_s
+                recovered_outcome_path = os.path.join(
+                    tmpdir, "history", recovered_date_s, day2_batch_id, "outcome.csv"
+                )
+                recovered_evaluation_path = os.path.join(
+                    tmpdir, "history", recovered_date_s, day2_batch_id, "evaluation.csv"
+                )
+                assert os.path.isfile(recovered_outcome_path)
+                assert os.path.isfile(recovered_evaluation_path)
+                # Recovered content differs from Day2's own (a different window).
+                with open(recovered_evaluation_path, encoding="utf-8") as fh:
+                    assert fh.read() != original_evaluation_content
         finally:
             session.close()

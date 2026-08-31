@@ -21,7 +21,11 @@ from statistics import median
 from typing import Any
 
 from ugh_quantamental.fx_protocol.annotation_coverage import count_by_annotation_status
-from ugh_quantamental.fx_protocol.metrics_utils import collect_floats, count_bool_rows
+from ugh_quantamental.fx_protocol.metrics_utils import (
+    collect_floats,
+    count_bool_rows,
+    non_flat_rows,
+)
 from ugh_quantamental.fx_protocol.report_window import (
     is_in_window,
     resolve_business_day_window,
@@ -102,24 +106,13 @@ def _safe_median(values: list[float]) -> str:
     return str(round(median(values), 2))
 
 
-def _non_flat_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
-    """Return rows whose ``forecast_direction`` is not ``flat``.
-
-    Used to build the FLAT-excluded direction metrics (FX-GOV-FLAT-AWARE):
-    a FLAT forecast is always a binary miss against an ``up``/``down``
-    realization, which drags down the plain direction rate without
-    reflecting a genuine directional call.
-    """
-    return [r for r in rows if r.get("forecast_direction", "").strip().lower() != "flat"]
-
-
 def _compute_metrics_for_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
     """Compute standard metrics from a list of labeled observation rows."""
     n = len(rows)
     dir_hits = count_bool_rows(rows, "direction_hit")
-    non_flat_rows = _non_flat_rows(rows)
-    dir_hits_excl_flat = count_bool_rows(non_flat_rows, "direction_hit")
-    n_excl_flat = len(non_flat_rows)
+    excl_flat_rows = non_flat_rows(rows)
+    dir_hits_excl_flat = count_bool_rows(excl_flat_rows, "direction_hit")
+    n_excl_flat = len(excl_flat_rows)
     range_evaluable = [r for r in rows if r.get("range_hit", "") != ""]
     range_hits = count_bool_rows(range_evaluable, "range_hit")
     state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]

@@ -296,6 +296,12 @@ def _business_day_lag(window_end_jst: datetime, as_of_jst: datetime, *, max_lag:
             return None
         cursor = prev_as_of_jst(cursor)
         lag += 1
+    if cursor != window_end_jst:
+        # The walk overshot window_end_jst without ever landing exactly on it
+        # (a misaligned / non-business-day timestamp) — reject rather than
+        # report a lag for a window that isn't actually reachable via
+        # prev_as_of_jst steps from as_of_jst.
+        return None
     return lag
 
 
