@@ -243,13 +243,23 @@ def find_snapshot_path(fxdata_dir: str, day: date) -> str | None:
     )
     if not batch_dirs:
         return None
-    # Exactly one batch per date under the immutable history/ layout; if more
-    # than one is ever present, the newest (lexicographically last, batch ids
-    # are content-addressed but directory mtime order is not guaranteed) is
-    # ambiguous — take the first sorted entry deterministically and report it
-    # in the returned path so a genuine multi-batch date is still traceable.
-    path = os.path.join(date_dir, batch_dirs[0], "input_snapshot.json")
-    return path if os.path.isfile(path) else None
+    # A date can hold more than one batch directory: outcome catch-up
+    # republishes a recovered PRIOR batch (whose dir has no
+    # input_snapshot.json) alongside the day's own batch. Search every batch
+    # dir for the snapshot instead of taking batch_dirs[0], preferring the
+    # batch whose id embeds this date (the day's own forecast batch).
+    candidates = [
+        os.path.join(date_dir, entry, "input_snapshot.json")
+        for entry in batch_dirs
+        if os.path.isfile(os.path.join(date_dir, entry, "input_snapshot.json"))
+    ]
+    if not candidates:
+        return None
+    date_token = os.path.basename(date_dir)
+    for path in candidates:
+        if date_token in os.path.basename(os.path.dirname(path)):
+            return path
+    return candidates[0]
 
 
 def load_market_snapshot(path: str) -> Any:
