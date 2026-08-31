@@ -33,7 +33,11 @@ jobs:
       - name: Validate focused changes
         run: |
           ruff check src/ugh_quantamental/fx_protocol/automation.py scripts/run_fx_price_alert.py tests/fx_protocol/test_outcome_catchup.py tests/ops/test_run_fx_price_alert.py
-          pytest -q tests/fx_protocol/test_outcome_catchup.py tests/ops/test_run_fx_price_alert.py
+          pytest -q \
+            tests/fx_protocol/test_outcome_catchup.py::TestOutcomeCatchupEndToEnd::test_failed_catchup_flush_isolated_from_outer_transaction \
+            tests/fx_protocol/test_outcome_catchup.py::TestOutcomeCatchupEndToEnd::test_rerun_repairs_missing_history_after_db_recovery \
+            tests/ops/test_run_fx_price_alert.py::TestGitHubIssueStateIO::test_initial_issue_body_restores_state_before_any_comments \
+            tests/ops/test_run_fx_price_alert.py::TestGitHubIssueStateIO::test_comment_fetch_follows_pagination_and_newest_marker_wins
           git diff --check
       - name: Commit final tree
         run: |
