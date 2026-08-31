@@ -373,6 +373,7 @@ def build_ugh_request_from_snapshot(
     snapshot: FxProtocolMarketSnapshot,
     *,
     snapshot_ref: str,
+    stats: dict[str, float] | None = None,
 ) -> "FullWorkflowRequest":
     """Build a deterministic ``FullWorkflowRequest`` from a market snapshot.
 
@@ -388,6 +389,21 @@ def build_ugh_request_from_snapshot(
     snapshot_ref:
         Opaque reference identifier used for projection_id, snapshot_id,
         omega_id, and question_id.
+    stats:
+        Optional precomputed intermediate statistics dict, in the shape
+        returned by :func:`compute_snapshot_statistics`. When ``None``
+        (the default), statistics are recomputed from *snapshot* exactly as
+        before this parameter existed — every existing caller is
+        unaffected and output is bit-identical. When provided, *stats* is
+        used as-is in place of a fresh ``compute_snapshot_statistics(snapshot)``
+        call, and every downstream consumer (question features, signal
+        features, alignment inputs, state-event features, and the SSV/Omega
+        scaffolding below) is rebuilt from it. This is the injection point
+        for counterfactual / ablation replay callers that want to override
+        one or more raw statistics (e.g. ``spot_vs_sma20``) while keeping
+        everything else derived consistently from the override. *snapshot*
+        is still used directly for ``as_of_jst``, ``pair``, and other fields
+        that are not statistics-derived.
 
     Returns
     -------
@@ -422,7 +438,8 @@ def build_ugh_request_from_snapshot(
     )
 
     # --- Intermediate statistics ---
-    stats = compute_snapshot_statistics(snapshot)
+    if stats is None:
+        stats = compute_snapshot_statistics(snapshot)
 
     # --- Derive UGH feature blocks ---
     q_dict = derive_question_features(stats)
