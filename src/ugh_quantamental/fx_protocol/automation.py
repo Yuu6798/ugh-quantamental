@@ -391,24 +391,58 @@ def run_fx_daily_protocol_once(
                     config.schema_version,
                 )
                 cu_existing_outcome = _CuFxOER.load_fx_outcome_record(session, cu_outcome_id)
+                cu_existing_evals = None
                 if cu_existing_outcome is not None:
                     cu_existing_evals = _CuFxOER.load_fx_evaluation_batch(session, cu_outcome_id)
-                    if (
-                        cu_existing_evals is not None
-                        and len(cu_existing_evals) == EXPECTED_DAILY_BATCH_SIZE
-                    ):
-                        # Already recovered by a prior run — idempotent no-op,
-                        # not re-reported.
-                        continue
 
-                cu_request = build_outcome_request_for_window(
-                    window,
-                    pair=config.pair,
-                    market_data_provenance=snapshot.market_data_provenance,
-                    schema_version=config.schema_version,
-                    protocol_version=config.protocol_version,
+                cu_existing_complete = (
+                    cu_existing_outcome is not None
+                    and cu_existing_evals is not None
+                    and len(cu_existing_evals) == EXPECTED_DAILY_BATCH_SIZE
                 )
-                cu_result = run_daily_outcome_evaluation_workflow(session, cu_request)
+                cu_history_complete = False
+                if config.write_csv_exports:
+                    cu_history_dir = os.path.join(
+                        config.csv_output_dir,
+                        "history",
+                        window.window_start_jst.strftime("%Y%m%d"),
+                        cu_batch_id,
+                    )
+                    cu_history_complete = os.path.isfile(
+                        os.path.join(cu_history_dir, "outcome.csv")
+                    ) and os.path.isfile(os.path.join(cu_history_dir, "evaluation.csv"))
+
+                if cu_existing_complete and (
+                    not config.write_csv_exports or cu_history_complete
+                ):
+                    # Fully recovered and already published — idempotent no-op.
+                    continue
+
+                if cu_existing_complete:
+                    # Database recovery succeeded on an earlier run but history
+                    # publication did not. Reuse persisted records and retry only
+                    # the missing file publication; never duplicate evaluations.
+                    assert cu_existing_outcome is not None
+                    assert cu_existing_evals is not None
+                    cu_outcome = cu_existing_outcome
+                    cu_evaluations = cu_existing_evals
+                else:
+                    cu_request = build_outcome_request_for_window(
+                        window,
+                        pair=config.pair,
+                        market_data_provenance=snapshot.market_data_provenance,
+                        schema_version=config.schema_version,
+                        protocol_version=config.protocol_version,
+                    )
+                    # Repository workflows flush internally. A failed flush puts
+                    # SQLAlchemy's current transaction into a failed state, so each
+                    # catch-up candidate gets its own savepoint. Rolling back that
+                    # savepoint leaves today's forecast and the outer transaction
+                    # usable for later candidates and Step 5 exports.
+                    with session.begin_nested():
+                        cu_result = run_daily_outcome_evaluation_workflow(session, cu_request)
+                    cu_outcome = cu_result.outcome
+                    cu_evaluations = cu_result.evaluations
 
                 cu_outcome_csv_path: str | None = None
                 cu_evaluation_csv_path: str | None = None
@@ -420,13 +454,13 @@ def run_fx_daily_protocol_once(
                     )
 
                     cu_outcome_csv_path = export_daily_outcome_csv(
-                        cu_result.outcome,
+                        cu_outcome,
                         window.window_end_jst,
                         config.pair.value,
                         config.csv_output_dir,
                     )
                     cu_evaluation_csv_path = export_daily_evaluation_csv(
-                        cu_result.evaluations,
+                        cu_evaluations,
                         window.window_end_jst,
                         config.pair.value,
                         config.csv_output_dir,
@@ -446,8 +480,8 @@ def run_fx_daily_protocol_once(
                         window_start_jst=window.window_start_jst,
                         window_end_jst=window.window_end_jst,
                         forecast_batch_id=cu_batch_id,
-                        outcome_id=cu_result.outcome.outcome_id,
-                        evaluation_count=len(cu_result.evaluations),
+                        outcome_id=cu_outcome.outcome_id,
+                        evaluation_count=len(cu_evaluations),
                         outcome_csv_path=cu_outcome_csv_path,
                         evaluation_csv_path=cu_evaluation_csv_path,
                     )

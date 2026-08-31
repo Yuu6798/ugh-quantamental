@@ -612,6 +612,99 @@ class TestOutcomeCatchupEndToEnd:
         finally:
             session.close()
 
+    def test_failed_catchup_flush_isolated_from_outer_transaction(self) -> None:
+        """A flush failure inside catch-up must not poison today's outer transaction."""
+        session = self._make_session()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                cfg = FxDailyAutomationConfig(
+                    run_outcome_evaluation=True,
+                    run_forecast_generation=True,
+                    write_csv_exports=True,
+                    csv_output_dir=tmpdir,
+                )
+                self._run(session, 20, cfg)
+                session.commit()
+
+                from sqlalchemy import event
+                from ugh_quantamental.fx_protocol import outcomes as outcomes_module
+
+                real_workflow = outcomes_module.run_daily_outcome_evaluation_workflow
+
+                def fail_during_flush(active_session, request):
+                    @event.listens_for(active_session, "before_flush", once=True)
+                    def _raise_once(*_args, **_kwargs):
+                        raise RuntimeError("synthetic catch-up flush failure")
+
+                    return real_workflow(active_session, request)
+
+                with patch.object(
+                    outcomes_module,
+                    "run_daily_outcome_evaluation_workflow",
+                    side_effect=fail_during_flush,
+                ):
+                    _, r3 = self._run(session, 22, cfg)
+
+                assert r3.forecast_created is True
+                assert r3.catchup_windows == ()
+                session.commit()
+
+                from ugh_quantamental.persistence.repositories import FxForecastRepository
+
+                current = FxForecastRepository.load_fx_forecast_batch(
+                    session, r3.forecast_batch_id
+                )
+                assert current is not None
+                assert len(current.forecasts) == 7
+        finally:
+            session.close()
+
+    def test_rerun_repairs_missing_history_after_db_recovery(self) -> None:
+        """Persisted DB evaluations must not suppress retry of missing history CSVs."""
+        session = self._make_session()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                cfg = FxDailyAutomationConfig(
+                    run_outcome_evaluation=True,
+                    run_forecast_generation=True,
+                    write_csv_exports=True,
+                    csv_output_dir=tmpdir,
+                )
+                self._run(session, 20, cfg)
+                session.commit()
+                _, first = self._run(session, 22, cfg)
+                session.commit()
+                assert len(first.catchup_windows) == 1
+                cu = first.catchup_windows[0]
+
+                history_dir = os.path.join(
+                    tmpdir,
+                    "history",
+                    cu.window_start_jst.strftime("%Y%m%d"),
+                    cu.forecast_batch_id,
+                )
+                eval_path = os.path.join(history_dir, "evaluation.csv")
+                assert os.path.isfile(eval_path)
+                os.remove(eval_path)
+
+                _, retry = self._run(session, 22, cfg)
+                session.commit()
+                assert len(retry.catchup_windows) == 1
+                assert retry.catchup_windows[0].outcome_id == cu.outcome_id
+                assert os.path.isfile(eval_path)
+
+                from ugh_quantamental.persistence.repositories import (
+                    FxOutcomeEvaluationRepository,
+                )
+
+                evals = FxOutcomeEvaluationRepository.load_fx_evaluation_batch(
+                    session, cu.outcome_id
+                )
+                assert evals is not None
+                assert len(evals) == 7
+        finally:
+            session.close()
+
     def test_missing_forecast_batch_skipped_not_raised(self) -> None:
         """A catch-up candidate whose forecast batch was never created is skipped,
         not raised, and today's own forecast/outcome proceed normally."""

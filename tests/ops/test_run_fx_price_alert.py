@@ -535,6 +535,41 @@ class TestRenderStateComment:
 
 
 # ---------------------------------------------------------------------------
+# GitHub Issue state I/O
+# ---------------------------------------------------------------------------
+
+
+class TestGitHubIssueStateIO:
+    def test_initial_issue_body_restores_state_before_any_comments(self, monkeypatch) -> None:
+        initial = fxa.encode_state_marker({"move": True, "gap": False})
+        monkeypatch.setattr(fxa, "fetch_issue_comment_bodies", lambda *_args, **_kwargs: [])
+        bodies = fxa.fetch_issue_state_bodies(
+            "owner/repo", "token", {"number": 7, "body": "created\n" + initial}
+        )
+        assert fxa.parse_alert_state(bodies) == {"move": True, "gap": False}
+
+    def test_comment_fetch_follows_pagination_and_newest_marker_wins(self, monkeypatch) -> None:
+        calls: list[str] = []
+        older = fxa.encode_state_marker({"move": False})
+        newer = fxa.encode_state_marker({"move": True, "gap": True})
+        page1 = [{"body": older}] + [{"body": "noise"} for _ in range(99)]
+        page2 = [{"body": newer}]
+
+        def fake_request(method, url, token, body=None, timeout=30):
+            calls.append(url)
+            return page1 if "page=1" in url else page2
+
+        monkeypatch.setattr(fxa, "_github_request", fake_request)
+        bodies = fxa.fetch_issue_comment_bodies("owner/repo", "token", 9)
+        assert len(bodies) == 101
+        assert calls == [
+            f"{fxa.GITHUB_API}/repos/owner/repo/issues/9/comments?per_page=100&page=1",
+            f"{fxa.GITHUB_API}/repos/owner/repo/issues/9/comments?per_page=100&page=2",
+        ]
+        assert fxa.parse_alert_state(bodies) == {"move": True, "gap": True}
+
+
+# ---------------------------------------------------------------------------
 # read_forecast_meta (local filesystem I/O — no network)
 # ---------------------------------------------------------------------------
 

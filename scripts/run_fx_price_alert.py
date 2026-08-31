@@ -546,9 +546,32 @@ def find_open_alert_issue(repo: str, token: str, label: str) -> dict | None:
 
 
 def fetch_issue_comment_bodies(repo: str, token: str, issue_number: int) -> list[str]:
-    url = f"{GITHUB_API}/repos/{repo}/issues/{issue_number}/comments?per_page=100"
-    comments = _github_request("GET", url, token) or []
-    return [c.get("body", "") for c in comments]  # type: ignore[union-attr]
+    """Fetch every issue-comment body oldest-first, following REST pagination."""
+    bodies: list[str] = []
+    page = 1
+    while True:
+        url = (
+            f"{GITHUB_API}/repos/{repo}/issues/{issue_number}/comments"
+            f"?per_page=100&page={page}"
+        )
+        comments = _github_request("GET", url, token) or []
+        bodies.extend(c.get("body", "") for c in comments)  # type: ignore[union-attr]
+        if len(comments) < 100:  # type: ignore[arg-type]
+            break
+        page += 1
+    return bodies
+
+
+def fetch_issue_state_bodies(repo: str, token: str, issue: dict) -> list[str]:
+    """Return state-bearing Issue text in chronological source order.
+
+    The initial state marker is written into the Issue body when the tracking
+    issue is first created. Comments are appended afterwards, so parsing body
+    first and then all paginated comments makes the newest valid marker win.
+    """
+    bodies = [str(issue.get("body") or "")]
+    bodies.extend(fetch_issue_comment_bodies(repo, token, int(issue["number"])))
+    return bodies
 
 
 def create_alert_issue(repo: str, token: str, label: str, title: str, body: str) -> dict:
@@ -602,8 +625,8 @@ def main() -> int:
         print(f"[WARN] forecast metadata fetch failed: {forecast_fetch_error}", file=sys.stderr)
 
     issue = find_open_alert_issue(repo, token, label)
-    prev_comments = fetch_issue_comment_bodies(repo, token, issue["number"]) if issue else []
-    prev_state = parse_alert_state(prev_comments)
+    prev_state_bodies = fetch_issue_state_bodies(repo, token, issue) if issue else []
+    prev_state = parse_alert_state(prev_state_bodies)
 
     result = evaluate_alerts(
         bars=bars,
