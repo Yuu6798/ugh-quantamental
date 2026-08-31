@@ -664,6 +664,40 @@ class TestCollectAllEvaluationsFromHistory:
             assert result[0].evaluation_id == ev.evaluation_id
             assert result[0].direction_hit == ev.direction_hit
 
+    def test_dedupes_evaluations_republished_by_catchup(self) -> None:
+        """Outcome catch-up can republish an already-archived evaluation batch
+        under a second history directory (the recovered forecast batch's dir).
+        The cumulative scan must count each evaluation_id exactly once, or the
+        scoreboard double-counts recent observations (PR #125 review)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            from ugh_quantamental.fx_protocol.csv_exports import (
+                EVALUATION_FIELDNAMES,
+                evaluation_records_to_rows,
+                write_csv_rows,
+            )
+
+            as_of = datetime(2026, 3, 13, 8, 0, 0, tzinfo=_JST)
+            window_end = datetime(2026, 3, 16, 8, 0, 0, tzinfo=_JST)
+            fc = _ugh_forecast(as_of, window_end)
+            oc = _make_outcome(as_of, window_end)
+            ev = _make_evaluation(fc, oc)
+            rows = evaluation_records_to_rows((ev,))
+
+            # Same evaluation batch archived twice: once under the end day's
+            # normal batch dir, once under the recovered forecast batch dir.
+            for batch_dir in ("fb_normal_batch", "fb_recovered_batch"):
+                hist_dir = os.path.join(tmpdir, "history", "20260316", batch_dir)
+                os.makedirs(hist_dir)
+                write_csv_rows(
+                    os.path.join(hist_dir, "evaluation.csv"),
+                    rows,
+                    EVALUATION_FIELDNAMES,
+                )
+
+            result = collect_all_evaluations_from_history(tmpdir)
+            assert len(result) == 1
+            assert result[0].evaluation_id == ev.evaluation_id
+
 
 # ---------------------------------------------------------------------------
 # Full automation integration — observability artifacts

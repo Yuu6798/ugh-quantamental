@@ -564,6 +564,14 @@ def collect_evaluated_forecast_rows(history_dir: str) -> list[dict[str, str]]:
 
     # Pass 2: iterate forecasts, merge with evaluation + outcome indexes.
     rows: list[dict[str, str]] = []
+    # A forecast_id's forecast.csv row can legitimately appear under more than
+    # one directory: its own start-date dir (written the day the forecast was
+    # generated) and, for a window recovered via outcome catch-up, the
+    # recovered window's end-date dir too (republished there so that dir is
+    # self-contained for this collector — see
+    # csv_exports.publish_csv_to_history_only's forecast_path docstring).
+    # Each forecast_id must still contribute exactly one row.
+    seen_forecast_ids: set[str] = set()
     _OUTCOME_CARRY = (
         "realized_open",
         "realized_high",
@@ -584,9 +592,12 @@ def collect_evaluated_forecast_rows(history_dir: str) -> list[dict[str, str]]:
                 fid = fc.get("forecast_id", "")
                 if not fid:
                     continue
+                if fid in seen_forecast_ids:
+                    continue
                 ev = global_evals.get(fid)
                 if not ev:
                     continue
+                seen_forecast_ids.add(fid)
                 merged = dict(fc)
                 merged.update(ev)
                 oc = global_outcomes.get(fid)

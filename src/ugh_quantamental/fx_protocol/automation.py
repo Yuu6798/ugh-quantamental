@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from ugh_quantamental.fx_protocol.automation_models import (
+    CatchupWindowResult,
     FxDailyAutomationConfig,
     FxDailyAutomationResult,
 )
@@ -24,11 +25,13 @@ from ugh_quantamental.fx_protocol.calendar import (
     prev_as_of_jst,
 )
 from ugh_quantamental.fx_protocol.data_sources import FxMarketDataProvider
-from ugh_quantamental.fx_protocol.ids import make_forecast_batch_id
+from ugh_quantamental.fx_protocol.ids import make_forecast_batch_id, make_outcome_id
 from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
 from ugh_quantamental.fx_protocol.request_builders import (
     build_daily_forecast_request,
     build_daily_outcome_request,
+    build_outcome_request_for_window,
+    catchup_window_candidates,
     previous_window_matches,
 )
 
@@ -341,6 +344,194 @@ def run_fx_daily_protocol_once(
         # Both workflows are idempotent; any completion here counts as "recorded".
         outcome_recorded = True
 
+    # --- Step 4b: outcome catch-up (bounded backward recovery) ---
+    # Recovers closed forecast windows that were never evaluated because some
+    # prior day's run did not execute at all (business-day guard skip,
+    # scheduler delay, etc.) — see docs/specs/fx_daily_automation_v1.md §
+    # Outcome catch-up. Only windows strictly older than the one handled in
+    # Step 4 above (distance 0) are considered, bounded to
+    # config.outcome_catchup_days protocol business days back. The singular
+    # outcome_id / outcome_recorded / evaluation_count / *_csv_path fields
+    # above are untouched by this step and keep describing Step 4's window
+    # only — catch-up results are reported exclusively via catchup_windows.
+    #
+    # One window's failure (or a missing/incomplete forecast batch) is
+    # defensively skipped and logged, never raised — same posture as
+    # _prior_batch_ready above — so it cannot abort another window's recovery
+    # or today's forecast.
+    catchup_results: list[CatchupWindowResult] = []
+    if config.run_outcome_evaluation and config.outcome_catchup_days > 0:
+        from ugh_quantamental.persistence.repositories import (
+            FxForecastRepository as _CuFxFR,
+            FxOutcomeEvaluationRepository as _CuFxOER,
+        )
+
+        for window in catchup_window_candidates(
+            snapshot, max_business_days=config.outcome_catchup_days
+        ):
+            try:
+                cu_batch_id = make_forecast_batch_id(
+                    config.pair, window.window_start_jst, config.protocol_version
+                )
+                cu_batch = _CuFxFR.load_fx_forecast_batch(session, cu_batch_id)
+                if cu_batch is None or len(cu_batch.forecasts) != EXPECTED_DAILY_BATCH_SIZE:
+                    logger.info(
+                        "Outcome catch-up: skipping window %s -> %s "
+                        "(forecast batch %s missing or incomplete).",
+                        window.window_start_jst.isoformat(),
+                        window.window_end_jst.isoformat(),
+                        cu_batch_id,
+                    )
+                    continue
+
+                cu_outcome_id = make_outcome_id(
+                    config.pair,
+                    window.window_start_jst,
+                    window.window_end_jst,
+                    config.schema_version,
+                )
+                cu_existing_outcome = _CuFxOER.load_fx_outcome_record(session, cu_outcome_id)
+                cu_existing_evals = None
+                if cu_existing_outcome is not None:
+                    cu_existing_evals = _CuFxOER.load_fx_evaluation_batch(session, cu_outcome_id)
+
+                cu_existing_complete = (
+                    cu_existing_outcome is not None
+                    and cu_existing_evals is not None
+                    and len(cu_existing_evals) == EXPECTED_DAILY_BATCH_SIZE
+                )
+                # History is filed by the window's END date (the day the
+                # window closed), never its start date. The start-date
+                # directory is already owned by that window's own
+                # originating batch — which uses it, on ITS OWN day, to file
+                # the *previous* window's evaluation under the exact batch id
+                # (make_forecast_batch_id keyed by window START) recomputed
+                # here as cu_batch_id. Publishing catch-up recoveries there
+                # would silently overwrite that already-archived
+                # outcome.csv / evaluation.csv. See
+                # docs/specs/fx_daily_automation_v1.md § Outcome catch-up.
+                cu_date_str = window.window_end_jst.strftime("%Y%m%d")
+                cu_history_complete = False
+                if config.write_csv_exports:
+                    cu_history_dir = os.path.join(
+                        config.csv_output_dir,
+                        "history",
+                        cu_date_str,
+                        cu_batch_id,
+                    )
+                    # forecast.csv is required too: collect_evaluated_forecast_rows
+                    # (labeled_observations.py) only reads a directory that has
+                    # forecast.csv alongside evaluation.csv, so a dir missing it
+                    # would make a recovered window's evaluations invisible to
+                    # rebuilds/analytics even though the DB and outcome/evaluation
+                    # CSVs are already correct.
+                    cu_history_complete = (
+                        os.path.isfile(os.path.join(cu_history_dir, "outcome.csv"))
+                        and os.path.isfile(os.path.join(cu_history_dir, "evaluation.csv"))
+                        and os.path.isfile(os.path.join(cu_history_dir, "forecast.csv"))
+                    )
+
+                if cu_existing_complete and (
+                    not config.write_csv_exports or cu_history_complete
+                ):
+                    # Fully recovered and already published — idempotent no-op.
+                    continue
+
+                if cu_existing_complete:
+                    # Database recovery succeeded on an earlier run but history
+                    # publication did not. Reuse persisted records and retry only
+                    # the missing file publication; never duplicate evaluations.
+                    assert cu_existing_outcome is not None
+                    assert cu_existing_evals is not None
+                    cu_outcome = cu_existing_outcome
+                    cu_evaluations = cu_existing_evals
+                else:
+                    cu_request = build_outcome_request_for_window(
+                        window,
+                        pair=config.pair,
+                        market_data_provenance=snapshot.market_data_provenance,
+                        schema_version=config.schema_version,
+                        protocol_version=config.protocol_version,
+                    )
+                    # Repository workflows flush internally. A failed flush puts
+                    # SQLAlchemy's current transaction into a failed state, so each
+                    # catch-up candidate gets its own savepoint. Rolling back that
+                    # savepoint leaves today's forecast and the outer transaction
+                    # usable for later candidates and Step 5 exports.
+                    with session.begin_nested():
+                        cu_result = run_daily_outcome_evaluation_workflow(session, cu_request)
+                    cu_outcome = cu_result.outcome
+                    cu_evaluations = cu_result.evaluations
+
+                cu_outcome_csv_path: str | None = None
+                cu_evaluation_csv_path: str | None = None
+                if config.write_csv_exports:
+                    from ugh_quantamental.fx_protocol.csv_exports import (
+                        export_daily_evaluation_csv,
+                        export_daily_forecast_csv,
+                        export_daily_outcome_csv,
+                        publish_csv_to_history_only,
+                    )
+
+                    cu_outcome_csv_path = export_daily_outcome_csv(
+                        cu_outcome,
+                        window.window_end_jst,
+                        config.pair.value,
+                        config.csv_output_dir,
+                    )
+                    cu_evaluation_csv_path = export_daily_evaluation_csv(
+                        cu_evaluations,
+                        window.window_end_jst,
+                        config.pair.value,
+                        config.csv_output_dir,
+                    )
+                    # Re-export the batch's own forecast rows from the
+                    # persisted DB records too, so the end-date directory is
+                    # self-contained (forecast + outcome + evaluation) — see
+                    # publish_csv_to_history_only's forecast_path docstring.
+                    # This batch's forecast.csv may already exist under its
+                    # own start-date directory (written the day the forecast
+                    # was generated); collect_evaluated_forecast_rows dedupes
+                    # by forecast_id, so the same rows appearing in both
+                    # directories is safe.
+                    cu_forecast_csv_path = export_daily_forecast_csv(
+                        cu_batch.forecasts,
+                        window.window_end_jst,
+                        config.pair.value,
+                        config.csv_output_dir,
+                    )
+                    # History-only: never touches latest/, which must keep
+                    # pointing at the current day's batch.
+                    publish_csv_to_history_only(
+                        config.csv_output_dir,
+                        cu_date_str,
+                        cu_batch_id,
+                        cu_outcome_csv_path,
+                        cu_evaluation_csv_path,
+                        forecast_path=cu_forecast_csv_path,
+                    )
+
+                catchup_results.append(
+                    CatchupWindowResult(
+                        window_start_jst=window.window_start_jst,
+                        window_end_jst=window.window_end_jst,
+                        forecast_batch_id=cu_batch_id,
+                        outcome_id=cu_outcome.outcome_id,
+                        evaluation_count=len(cu_evaluations),
+                        outcome_csv_path=cu_outcome_csv_path,
+                        evaluation_csv_path=cu_evaluation_csv_path,
+                    )
+                )
+            except Exception:
+                logger.warning(
+                    "Outcome catch-up: window %s -> %s failed; skipping "
+                    "(other catch-up windows and today's forecast are unaffected).",
+                    window.window_start_jst.isoformat(),
+                    window.window_end_jst.isoformat(),
+                    exc_info=True,
+                )
+                continue
+
     # --- Step 5: CSV exports ---
     forecast_csv_path: str | None = None
     outcome_csv_path: str | None = None
@@ -622,4 +813,5 @@ def run_fx_daily_protocol_once(
         scoreboard_path=scoreboard_path,
         provider_health_path=provider_health_path,
         annotation_analytics=annotation_analytics if annotation_analytics else None,
+        catchup_windows=tuple(catchup_results),
     )

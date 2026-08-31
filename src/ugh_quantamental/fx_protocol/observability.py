@@ -541,6 +541,10 @@ def collect_all_evaluations_from_history(
         return ()
 
     records: list["EvaluationRecord"] = []
+    # Outcome catch-up can republish an already-archived evaluation batch under
+    # a second directory (the recovered forecast batch's dir); dedupe by
+    # evaluation_id so the cumulative scoreboard counts each observation once.
+    seen_evaluation_ids: set[str] = set()
 
     for date_dir in sorted(os.listdir(history_dir)):
         date_path = os.path.join(history_dir, date_dir)
@@ -553,6 +557,11 @@ def collect_all_evaluations_from_history(
             with open(eval_csv, newline="", encoding="utf-8") as fh:
                 reader = csv.DictReader(fh)
                 for row in reader:
+                    evaluation_id = row.get("evaluation_id", "")
+                    if evaluation_id and evaluation_id in seen_evaluation_ids:
+                        continue
+                    if evaluation_id:
+                        seen_evaluation_ids.add(evaluation_id)
                     records.append(_parse_evaluation_row(row))
 
     return tuple(records)

@@ -335,6 +335,79 @@ class TestEdgeCases:
 # ---------------------------------------------------------------------------
 
 
+class TestStatsAwareInjection:
+    """``build_ugh_request_from_snapshot`` accepts an optional precomputed
+    ``stats`` dict (FX-ESTAR-LAG). No-argument callers must be unaffected.
+    """
+
+    def test_no_override_matches_explicit_recomputed_stats(self) -> None:
+        """Omitting ``stats`` must be bit-identical to passing the freshly
+        recomputed stats dict explicitly — proving the default path still
+        recomputes exactly as before this parameter existed.
+        """
+        snap = _snapshot(25, current_spot=152.0, step=0.15)
+        recomputed = compute_snapshot_statistics(snap)
+        req_default = build_ugh_request_from_snapshot(snap, snapshot_ref="stats-default")
+        req_explicit = build_ugh_request_from_snapshot(
+            snap, snapshot_ref="stats-default", stats=recomputed
+        )
+        assert req_default == req_explicit
+
+    def test_existing_callers_unaffected_by_new_parameter(self) -> None:
+        """Existing two-argument call sites keep producing the same output
+        as before the ``stats`` parameter was added.
+        """
+        snap = _snapshot(25, current_spot=152.0, step=0.15)
+        req1 = build_ugh_request_from_snapshot(snap, snapshot_ref="unaffected")
+        req2 = build_ugh_request_from_snapshot(snap, snapshot_ref="unaffected")
+        assert req1 == req2
+
+    def test_stats_override_changes_fundamental_score(self) -> None:
+        """Overriding ``spot_vs_sma20`` must change ``fundamental_score`` to
+        match the override, diverging from the un-overridden output.
+        """
+        snap = _snapshot(25, current_spot=152.0, step=0.15)
+        base_stats = compute_snapshot_statistics(snap)
+        req_base = build_ugh_request_from_snapshot(snap, snapshot_ref="ovr", stats=base_stats)
+
+        overridden = dict(base_stats)
+        overridden["spot_vs_sma20"] = 0.0
+        req_override = build_ugh_request_from_snapshot(
+            snap, snapshot_ref="ovr", stats=overridden
+        )
+
+        assert req_override.projection.signal_features.fundamental_score == 0.0
+        assert (
+            req_override.projection.signal_features.fundamental_score
+            != req_base.projection.signal_features.fundamental_score
+        )
+
+    def test_stats_override_reaches_second_momentum_consumer(self) -> None:
+        """``momentum_5d`` has two consumers: ``technical_score``
+        (``derive_signal_features``) and ``question_direction`` / ``q_strength``
+        (``derive_question_features``). An override must reach both — proving
+        the whole statistics->request path is rebuilt from the override, not
+        just the first consumer encountered.
+        """
+        snap = _snapshot(25, current_spot=152.0, step=0.15)
+        base_stats = compute_snapshot_statistics(snap)
+
+        overridden = dict(base_stats)
+        overridden["momentum_5d"] = -0.05  # strongly negative, well past threshold
+        req_override = build_ugh_request_from_snapshot(
+            snap, snapshot_ref="momentum-ovr", stats=overridden
+        )
+
+        assert req_override.projection.signal_features.technical_score == pytest.approx(-1.0)
+        from ugh_quantamental.engine.projection_models import QuestionDirectionSign
+
+        assert (
+            req_override.projection.question_features.question_direction
+            == QuestionDirectionSign.negative
+        )
+        assert req_override.projection.question_features.q_strength == pytest.approx(1.0)
+
+
 class TestFireProbabilityV2:
     """v2 redefined ``fire_probability`` from a multiplicative collapse-to-zero
     formula to an additive evidence model centered at 0.5 (spec §5.3).

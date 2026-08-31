@@ -237,6 +237,9 @@ def test_monthly_strategy_metrics_fieldnames_unchanged() -> None:
         "median_abs_close_error_bp",
         "mean_abs_magnitude_error_bp",
         "median_abs_magnitude_error_bp",
+        "direction_hit_excl_flat_count",
+        "direction_obs_excl_flat",
+        "direction_hit_excl_flat_rate",
     )
 
 

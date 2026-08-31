@@ -70,9 +70,26 @@ def safe_median(values: list[float], *, ndigits: int | None = 2) -> float | None
     return med if ndigits is None else round(med, ndigits)
 
 
+def non_flat_rows(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Return rows whose ``forecast_direction`` is not ``flat``.
+
+    Used to build the FLAT-excluded direction metrics (FX-GOV-FLAT-AWARE):
+    a FLAT forecast is always a binary miss against an ``up``/``down``
+    realization, which drags down the plain direction rate without
+    reflecting a genuine directional call. A strategy that is always FLAT
+    (e.g. ``baseline_random_walk``) has an empty excl_flat aggregate by
+    construction — no division by zero, no fake 0%.
+
+    Shared by the weekly and monthly report builders (previously duplicated
+    verbatim in each).
+    """
+    return [r for r in rows if r.get("forecast_direction", "").strip().lower() != "flat"]
+
+
 __all__ = [
     "collect_floats",
     "count_bool_rows",
+    "non_flat_rows",
     "safe_mean",
     "safe_median",
     "safe_rate",

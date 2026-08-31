@@ -27,6 +27,7 @@ from ugh_quantamental.fx_protocol.annotation_coverage import count_by_annotation
 from ugh_quantamental.fx_protocol.metrics_utils import (
     collect_floats,
     count_bool_rows,
+    non_flat_rows,
     safe_mean,
     safe_median,
     safe_rate,
@@ -116,6 +117,9 @@ def _select_canonical_ugh_metrics(
 def _compute_monthly_metrics_for_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
     n = len(rows)
     dir_hits = count_bool_rows(rows, "direction_hit")
+    excl_flat_rows = non_flat_rows(rows)
+    dir_hits_excl_flat = count_bool_rows(excl_flat_rows, "direction_hit")
+    n_excl_flat = len(excl_flat_rows)
     range_evaluable = [r for r in rows if r.get("range_hit", "") != ""]
     range_hits = count_bool_rows(range_evaluable, "range_hit")
     state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]
@@ -147,6 +151,13 @@ def _compute_monthly_metrics_for_rows(rows: list[dict[str, str]]) -> dict[str, A
         "median_abs_close_error_bp": safe_median(close_errors),
         "mean_abs_magnitude_error_bp": safe_mean(mag_errors),
         "median_abs_magnitude_error_bp": safe_median(mag_errors),
+        # FLAT-excluded direction metrics (FX-GOV-FLAT-AWARE). Count is
+        # unconditional (0 when the strategy has no non-FLAT observations,
+        # e.g. baseline_random_walk); rate is None on zero denominator via
+        # safe_rate — never a fake 0%.
+        "direction_hit_excl_flat_count": dir_hits_excl_flat,
+        "direction_obs_excl_flat": n_excl_flat,
+        "direction_hit_excl_flat_rate": safe_rate(dir_hits_excl_flat, n_excl_flat),
     }
 
 
@@ -194,8 +205,58 @@ def compute_monthly_strategy_metrics(
 # ---------------------------------------------------------------------------
 
 
+def _as_of_date(row: dict[str, str]) -> str:
+    """Extract the ``YYYY-MM-DD`` date portion from a row's ``as_of_jst``."""
+    as_of = row.get("as_of_jst", "")
+    return as_of[:10] if len(as_of) >= 10 else ""
+
+
+def _canonical_non_flat_dates(
+    observations: list[dict[str, str]],
+    canonical_kind: str,
+) -> set[str]:
+    """Dates on which the canonical UGH variant made a non-FLAT forecast.
+
+    This is the date cohort the excl_flat baseline delta is re-based on
+    (FX-GOV-FLAT-AWARE): the comparison must hold both sides to the same
+    date set, or a baseline's performance on days UGH sat out (FLAT) would
+    leak into the delta.
+    """
+    dates: set[str] = set()
+    for row in observations:
+        if row.get("strategy_kind", "") != canonical_kind:
+            continue
+        if row.get("forecast_direction", "").strip().lower() == "flat":
+            continue
+        date_str = _as_of_date(row)
+        if date_str:
+            dates.add(date_str)
+    return dates
+
+
+def _direction_hit_rate_on_dates(
+    observations: list[dict[str, str]],
+    strategy_kind: str,
+    dates: set[str],
+) -> float | None:
+    """``strategy_kind``'s direction_hit rate restricted to ``dates``.
+
+    Unlike the per-strategy excl_flat aggregate, this does NOT filter by the
+    strategy's own forecast_direction — the cohort is fixed by the canonical
+    UGH variant, so e.g. baseline_random_walk (always FLAT) still
+    contributes its (poor) direction_hit rate on those dates rather than
+    being excluded.
+    """
+    if not dates:
+        return None
+    rows = [r for r in observations if r.get("strategy_kind", "") == strategy_kind]
+    rows = [r for r in rows if _as_of_date(r) in dates]
+    return safe_rate(count_bool_rows(rows, "direction_hit"), len(rows))
+
+
 def compute_monthly_baseline_comparisons(
     strategy_metrics: list[dict[str, Any]],
+    observations: list[dict[str, str]] | None = None,
 ) -> list[dict[str, Any]]:
     """Compute monthly UGH vs baseline deltas.
 
@@ -204,8 +265,23 @@ def compute_monthly_baseline_comparisons(
     - mean_abs_close_error_bp_delta_vs_ugh (baseline - UGH, positive = UGH better)
     - mean_abs_magnitude_error_bp_delta_vs_ugh
     - state_proxy_hit_rate_delta_vs_ugh (if computable)
+    - direction_accuracy_delta_vs_ugh_excl_flat (FX-GOV-FLAT-AWARE): same
+      formula, but both UGH and the baseline are restricted to the date
+      cohort where the canonical UGH variant was non-FLAT. Requires
+      ``observations`` (raw labeled-observation rows with ``as_of_jst`` /
+      ``forecast_direction``); ``None`` when unavailable or the cohort is
+      empty — never a same-strategy-independent excl_flat subtraction,
+      which would let UGH's FLAT-day baseline performance leak into the
+      delta.
     """
     ugh = _select_canonical_ugh_metrics(strategy_metrics)
+
+    cohort_dates: set[str] = set()
+    ugh_excl_flat_rate: float | None = None
+    canonical_kind = ugh.get("strategy_kind") if ugh is not None else None
+    if ugh is not None and observations and canonical_kind:
+        cohort_dates = _canonical_non_flat_dates(observations, canonical_kind)
+        ugh_excl_flat_rate = ugh.get("direction_hit_excl_flat_rate")
 
     result: list[dict[str, Any]] = []
     for m in strategy_metrics:
@@ -217,6 +293,7 @@ def compute_monthly_baseline_comparisons(
         close_delta: float | None = None
         mag_delta: float | None = None
         state_delta: float | None = None
+        dir_delta_excl_flat: float | None = None
 
         if ugh is not None:
             if m["direction_hit_rate"] is not None and ugh["direction_hit_rate"] is not None:
@@ -242,6 +319,14 @@ def compute_monthly_baseline_comparisons(
                 state_delta = round(
                     m["state_proxy_hit_rate"] - ugh["state_proxy_hit_rate"], 4
                 )
+            if cohort_dates and ugh_excl_flat_rate is not None and observations:
+                baseline_rate_on_cohort = _direction_hit_rate_on_dates(
+                    observations, sk, cohort_dates
+                )
+                if baseline_rate_on_cohort is not None:
+                    dir_delta_excl_flat = round(
+                        baseline_rate_on_cohort - ugh_excl_flat_rate, 4
+                    )
 
         result.append({
             "baseline_strategy_kind": sk,
@@ -249,6 +334,7 @@ def compute_monthly_baseline_comparisons(
             "mean_abs_close_error_bp_delta_vs_ugh": close_delta,
             "mean_abs_magnitude_error_bp_delta_vs_ugh": mag_delta,
             "state_proxy_hit_rate_delta_vs_ugh": state_delta,
+            "direction_accuracy_delta_vs_ugh_excl_flat": dir_delta_excl_flat,
         })
 
     return result
@@ -579,7 +665,9 @@ def compute_review_flags(
     Flag conditions (thresholds defined as module-level constants):
     1. insufficient_data: UGH forecast_count < THRESHOLD_MINIMUM_OBSERVATIONS
     2. close_error_vs_random_walk: UGH mean close error exceeds random walk by threshold
-    3. direction_deficit_vs_technical: UGH direction accuracy is much worse than simple technical
+    3. direction_deficit_vs_technical: UGH direction accuracy (excl_flat, same
+       non-FLAT date cohort — FX-GOV-FLAT-AWARE) is much worse than simple
+       technical (excl_flat, same cohort)
     4. state_hit_but_magnitude_bad: state_proxy_hit_rate is high but magnitude error is also high
     5. low_annotation_coverage: confirmed annotation coverage below threshold
     6. provider_lag_issue: too many lagged snapshots
@@ -633,15 +721,22 @@ def compute_review_flags(
         ),
         None,
     )
-    if tech is not None and tech["direction_accuracy_delta_vs_ugh"] is not None:
-        delta = tech["direction_accuracy_delta_vs_ugh"]
-        # delta = baseline - UGH; if positive, baseline is better
-        if delta > THRESHOLD_DIRECTION_DEFICIT_VS_TECHNICAL_PCT:
+    if tech is not None:
+        delta = tech.get("direction_accuracy_delta_vs_ugh_excl_flat")
+        # delta = baseline - UGH (both excl_flat, same non-FLAT date cohort
+        # anchored to the canonical UGH variant — FX-GOV-FLAT-AWARE); if
+        # positive, baseline is better. FLAT-inclusive rates are not used
+        # here: FLAT forecasts are always a binary miss and previously
+        # dragged UGH's blended direction rate down, causing this flag to
+        # fire even in months where UGH's actual directional calls beat
+        # simple_technical (e.g. 2026-07: 45.8% incl_flat vs 68.1% excl_flat).
+        if delta is not None and delta > THRESHOLD_DIRECTION_DEFICIT_VS_TECHNICAL_PCT:
             flags.append({
                 "flag": "inspect_direction_logic",
                 "reason": (
-                    f"UGH direction accuracy is {delta * 100:.1f} pct points below "
-                    f"baseline_simple_technical (threshold: "
+                    f"UGH direction accuracy (excl_flat) is {delta * 100:.1f} pct points "
+                    f"below baseline_simple_technical (excl_flat, same non-FLAT date "
+                    f"cohort; threshold: "
                     f"{THRESHOLD_DIRECTION_DEFICIT_VS_TECHNICAL_PCT * 100:.0f}%). "
                     f"Direction logic may need review."
                 ),
@@ -902,8 +997,9 @@ def run_monthly_review(
     # Strategy metrics
     strategy_metrics = compute_monthly_strategy_metrics(observations)
 
-    # Baseline comparisons
-    baseline_comparisons = compute_monthly_baseline_comparisons(strategy_metrics)
+    # Baseline comparisons (observations enable the same-cohort excl_flat
+    # delta used by the inspect_direction_logic flag — FX-GOV-FLAT-AWARE)
+    baseline_comparisons = compute_monthly_baseline_comparisons(strategy_metrics, observations)
 
     # State metrics
     state_metrics = compute_monthly_state_metrics(observations)

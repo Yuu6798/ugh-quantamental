@@ -10,3 +10,4 @@ build/
 .semantic-ci/*
 !.semantic-ci/target.yaml
 data/
+.claude/worktrees/

@@ -72,6 +72,16 @@ Per-strategy aggregate metrics from weekly observations:
 | `state_correctness_hit_count` / `state_correctness_hit_rate` | State **correctness** rate (forecast state == realized-OHLC state) |
 | `mean_close_error_bp` / `median_close_error_bp` | Close error statistics |
 | `mean_magnitude_error_bp` | Magnitude error mean |
+| `direction_hit_excl_flat_count` | Direction hits among non-`flat`-forecast observations only (FX-GOV-FLAT-AWARE) |
+| `direction_obs_excl_flat` | Denominator for the above — count of non-`flat`-forecast observations |
+| `direction_hit_excl_flat_rate` | `direction_hit_excl_flat_count / direction_obs_excl_flat`; `""` (empty) when the denominator is 0 — never a fake 0%. A strategy that is always `flat` (e.g. `baseline_random_walk`) always has an empty rate here |
+
+A `forecast_direction == "flat"` observation is always a binary miss against
+an `up`/`down` realization, which drags the plain `direction_hit_rate` down
+without reflecting a genuine directional call. The excl_flat fields isolate
+direction accuracy on the observations where the strategy actually
+committed to a direction. Appended at the end of the field list; existing
+column names/order are unchanged.
 
 ### Slice Metrics
 

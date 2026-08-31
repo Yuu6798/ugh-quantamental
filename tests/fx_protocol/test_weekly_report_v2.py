@@ -55,13 +55,14 @@ def _make_observation(
     intervention_risk: str = "low",
     event_tags: str = "fomc",
     annotation_status: str = "confirmed",
+    forecast_direction: str = "up",
 ) -> dict[str, str]:
     return {
         "as_of_jst": as_of_jst,
         "forecast_batch_id": forecast_batch_id,
         "outcome_id": "outcome_001",
         "strategy_kind": strategy_kind,
-        "forecast_direction": "up",
+        "forecast_direction": forecast_direction,
         "expected_close_change_bp": "20.0",
         "realized_direction": "up",
         "realized_close_change_bp": "18.0",
@@ -226,6 +227,9 @@ def test_weekly_scoreboard_fieldnames_unchanged() -> None:
         "mean_close_error_bp",
         "median_close_error_bp",
         "mean_magnitude_error_bp",
+        "direction_hit_excl_flat_count",
+        "direction_obs_excl_flat",
+        "direction_hit_excl_flat_rate",
     )
     assert WEEKLY_SLICE_METRICS_FIELDNAMES == (
         "slice_dimension",
@@ -243,6 +247,9 @@ def test_weekly_scoreboard_fieldnames_unchanged() -> None:
         "mean_close_error_bp",
         "median_close_error_bp",
         "mean_magnitude_error_bp",
+        "direction_hit_excl_flat_count",
+        "direction_obs_excl_flat",
+        "direction_hit_excl_flat_rate",
     )
 
 
@@ -279,6 +286,52 @@ class TestStrategyMetrics:
             expected = expected_counts[row["strategy_kind"]]
             assert row["range_hit_count"] == expected
             assert row["range_hit_rate"] == str(round(expected / 5, 4))
+
+    def test_direction_hit_excl_flat_ignores_flat_forecasts(self) -> None:
+        """FLAT-forecast rows are excluded from the excl_flat denominator
+        (FX-GOV-FLAT-AWARE) but still count toward the plain (incl_flat)
+        direction rate."""
+        obs = [
+            _make_observation(
+                strategy_kind="ugh", direction_hit="True", forecast_direction="up"
+            ),
+            _make_observation(
+                strategy_kind="ugh", direction_hit="False", forecast_direction="down"
+            ),
+            # FLAT forecast is a binary miss even though the market barely moved.
+            _make_observation(
+                strategy_kind="ugh", direction_hit="False", forecast_direction="flat"
+            ),
+        ]
+        metrics = build_strategy_metrics(obs)
+        ugh = next(m for m in metrics if m["strategy_kind"] == "ugh")
+        assert ugh["observation_count"] == 3
+        assert ugh["direction_hit_count"] == 1
+        assert ugh["direction_hit_rate"] == str(round(1 / 3, 4))
+        assert ugh["direction_obs_excl_flat"] == 2
+        assert ugh["direction_hit_excl_flat_count"] == 1
+        assert ugh["direction_hit_excl_flat_rate"] == str(round(1 / 2, 4))
+
+    def test_direction_hit_excl_flat_empty_when_always_flat(self) -> None:
+        """A strategy that is always FLAT (e.g. baseline_random_walk) must
+        get an empty excl_flat rate — no division by zero, no fake 0%."""
+        obs = [
+            _make_observation(
+                strategy_kind="baseline_random_walk",
+                direction_hit="False",
+                forecast_direction="flat",
+            ),
+            _make_observation(
+                strategy_kind="baseline_random_walk",
+                direction_hit="False",
+                forecast_direction="flat",
+            ),
+        ]
+        metrics = build_strategy_metrics(obs)
+        rw = next(m for m in metrics if m["strategy_kind"] == "baseline_random_walk")
+        assert rw["direction_obs_excl_flat"] == 0
+        assert rw["direction_hit_excl_flat_count"] == 0
+        assert rw["direction_hit_excl_flat_rate"] == ""
 
 
 # ---------------------------------------------------------------------------

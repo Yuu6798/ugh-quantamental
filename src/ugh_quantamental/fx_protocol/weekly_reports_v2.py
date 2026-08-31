@@ -21,7 +21,11 @@ from statistics import median
 from typing import Any
 
 from ugh_quantamental.fx_protocol.annotation_coverage import count_by_annotation_status
-from ugh_quantamental.fx_protocol.metrics_utils import collect_floats, count_bool_rows
+from ugh_quantamental.fx_protocol.metrics_utils import (
+    collect_floats,
+    count_bool_rows,
+    non_flat_rows,
+)
 from ugh_quantamental.fx_protocol.report_window import (
     is_in_window,
     resolve_business_day_window,
@@ -49,6 +53,12 @@ WEEKLY_STRATEGY_METRICS_FIELDNAMES: tuple[str, ...] = (
     "mean_close_error_bp",
     "median_close_error_bp",
     "mean_magnitude_error_bp",
+    # FLAT-excluded direction metrics (FX-GOV-FLAT-AWARE). Appended at the end
+    # so existing column order/names are preserved; forecast_direction=="flat"
+    # observations are excluded from the denominator.
+    "direction_hit_excl_flat_count",
+    "direction_obs_excl_flat",
+    "direction_hit_excl_flat_rate",
 )
 
 WEEKLY_SLICE_METRICS_FIELDNAMES: tuple[str, ...] = (
@@ -67,6 +77,10 @@ WEEKLY_SLICE_METRICS_FIELDNAMES: tuple[str, ...] = (
     "mean_close_error_bp",
     "median_close_error_bp",
     "mean_magnitude_error_bp",
+    # FLAT-excluded direction metrics (FX-GOV-FLAT-AWARE); see above.
+    "direction_hit_excl_flat_count",
+    "direction_obs_excl_flat",
+    "direction_hit_excl_flat_rate",
 )
 
 # ---------------------------------------------------------------------------
@@ -96,6 +110,9 @@ def _compute_metrics_for_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
     """Compute standard metrics from a list of labeled observation rows."""
     n = len(rows)
     dir_hits = count_bool_rows(rows, "direction_hit")
+    excl_flat_rows = non_flat_rows(rows)
+    dir_hits_excl_flat = count_bool_rows(excl_flat_rows, "direction_hit")
+    n_excl_flat = len(excl_flat_rows)
     range_evaluable = [r for r in rows if r.get("range_hit", "") != ""]
     range_hits = count_bool_rows(range_evaluable, "range_hit")
     state_evaluable = [r for r in rows if r.get("state_proxy_hit", "") != ""]
@@ -124,6 +141,13 @@ def _compute_metrics_for_rows(rows: list[dict[str, str]]) -> dict[str, Any]:
         "mean_close_error_bp": _safe_mean(close_errors),
         "median_close_error_bp": _safe_median(close_errors),
         "mean_magnitude_error_bp": _safe_mean(mag_errors),
+        # FLAT-excluded direction metrics (FX-GOV-FLAT-AWARE). Mirrors the
+        # direction_hit_count/rate pattern: count is unconditional (0 when no
+        # non-FLAT observations exist), rate is "" on zero denominator — never
+        # a fake 0%.
+        "direction_hit_excl_flat_count": dir_hits_excl_flat,
+        "direction_obs_excl_flat": n_excl_flat,
+        "direction_hit_excl_flat_rate": _safe_rate(dir_hits_excl_flat, n_excl_flat),
     }
 
 

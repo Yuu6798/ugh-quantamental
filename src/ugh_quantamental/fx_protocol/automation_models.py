@@ -29,6 +29,29 @@ class FxDailyAutomationConfig(BaseModel):
     input_snapshot_ref: str = Field(default="auto", min_length=1)
     write_csv_exports: bool = True
     csv_output_dir: str = Field(default="./data/csv", min_length=1)
+    outcome_catchup_days: int = Field(default=5, ge=0)
+
+
+class CatchupWindowResult(BaseModel):
+    """One closed forecast window recovered by the bounded outcome catch-up pass.
+
+    Reported only for windows whose evaluation was newly registered during
+    *this* catch-up pass. A window already fully evaluated by a prior run is
+    skipped silently (idempotent no-op) and does not reappear here; a window
+    whose forecast batch is missing or incomplete is also skipped (logged,
+    never raised) and never reported. See ``automation.py`` Step 4b and
+    ``docs/specs/fx_daily_automation_v1.md`` § Outcome catch-up.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    window_start_jst: datetime
+    window_end_jst: datetime
+    forecast_batch_id: str
+    outcome_id: str
+    evaluation_count: int
+    outcome_csv_path: str | None = None
+    evaluation_csv_path: str | None = None
 
 
 class FxDailyAutomationResult(BaseModel):
@@ -53,3 +76,9 @@ class FxDailyAutomationResult(BaseModel):
     scoreboard_path: str | None = None
     provider_health_path: str | None = None
     annotation_analytics: dict[str, str | None] | None = None
+    # Outcome catch-up: windows recovered from *before* the immediately-preceding
+    # window (which the singular outcome_id / outcome_csv_path / evaluation_csv_path /
+    # evaluation_count fields above continue to describe exclusively, unchanged).
+    # A tuple (never a plain list) so the frozen result cannot be mutated by
+    # append/remove/reorder after construction.
+    catchup_windows: tuple[CatchupWindowResult, ...] = ()

@@ -63,6 +63,11 @@ MONTHLY_STRATEGY_METRICS_FIELDNAMES: tuple[str, ...] = (
     "median_abs_close_error_bp",
     "mean_abs_magnitude_error_bp",
     "median_abs_magnitude_error_bp",
+    # FLAT-excluded direction metrics (FX-GOV-FLAT-AWARE). Appended at the
+    # end so existing column order/names are preserved.
+    "direction_hit_excl_flat_count",
+    "direction_obs_excl_flat",
+    "direction_hit_excl_flat_rate",
 )
 
 MONTHLY_REVIEW_FLAGS_FIELDNAMES: tuple[str, ...] = (
@@ -162,16 +167,17 @@ def build_monthly_review_md(review: dict[str, Any]) -> str:
     lines.append("")
     if strats:
         lines.append(
-            "| Strategy | N | Dir Hit | Dir Rate | Range Rate "
+            "| Strategy | N | Dir Hit | Dir Rate | Dir Rate (excl_flat) | Range Rate "
             "| State Persist | State Correct | Mean Err | Med Err | Mean Mag | Med Mag |"
         )
-        lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
         for s in strats:
             lines.append(
                 f"| {s.get('strategy_kind', '')} "
                 f"| {s.get('forecast_count', 0)} "
                 f"| {s.get('direction_hit_count', 0)} "
                 f"| {_fmt_pct(s.get('direction_hit_rate'))} "
+                f"| {_fmt_pct(s.get('direction_hit_excl_flat_rate'))} "
                 f"| {_fmt_pct(s.get('range_hit_rate'))} "
                 f"| {_fmt_pct(s.get('state_proxy_hit_rate'))} "
                 f"| {_fmt_pct(s.get('state_correctness_hit_rate'))} "
@@ -191,13 +197,15 @@ def build_monthly_review_md(review: dict[str, Any]) -> str:
         lines.append("## Baseline Comparisons (delta vs UGH)")
         lines.append("")
         lines.append(
-            "| Baseline | Dir Acc Delta | Close Err Delta | Mag Err Delta | State Delta |"
+            "| Baseline | Dir Acc Delta | Dir Acc Delta (excl_flat) | Close Err Delta "
+            "| Mag Err Delta | State Delta |"
         )
-        lines.append("|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|")
         for c in comps:
             lines.append(
                 f"| {c.get('baseline_strategy_kind', '')} "
                 f"| {_fmt_delta(c.get('direction_accuracy_delta_vs_ugh'))} "
+                f"| {_fmt_delta(c.get('direction_accuracy_delta_vs_ugh_excl_flat'))} "
                 f"| {_fmt_delta(c.get('mean_abs_close_error_bp_delta_vs_ugh'), ' bp')} "
                 f"| {_fmt_delta(c.get('mean_abs_magnitude_error_bp_delta_vs_ugh'), ' bp')} "
                 f"| {_fmt_delta(c.get('state_proxy_hit_rate_delta_vs_ugh'))} |"
