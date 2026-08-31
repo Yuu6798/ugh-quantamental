@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -466,9 +467,33 @@ def run_fx_daily_protocol_once(
             _run_status = "idempotent_skip"
 
         # 7a. input_snapshot.json
-        snap_data = build_input_snapshot(snapshot, obs_now)
+        # Preserve the exact market snapshot used when the forecast batch was created.
+        # Market data is fetched before the idempotency check, so rebuilding this
+        # artifact on a retry would replace the forecast-time spot with the retry spot.
         snap_path = os.path.join(obs_base, f"{date_str_obs}_input_snapshot.json")
-        input_snapshot_path = write_json_artifact(snap_path, snap_data)
+        history_snap_path = os.path.join(
+            os.path.abspath(config.csv_output_dir),
+            "history",
+            date_str_obs,
+            forecast_batch_id,
+            "input_snapshot.json",
+        )
+        if not forecast_created:
+            if os.path.isfile(history_snap_path):
+                os.makedirs(obs_base, exist_ok=True)
+                shutil.copy2(history_snap_path, snap_path)
+                input_snapshot_path = os.path.abspath(snap_path)
+            else:
+                # A retry cannot reconstruct the forecast-time market snapshot.
+                # This occurs when the original supported run used
+                # write_csv_exports=False, so no immutable history artifact exists.
+                # Mark it unavailable rather than fabricating provenance from the
+                # retry-time fetch.
+                input_snapshot_path = None
+                _run_status = "idempotent_skip_snapshot_unavailable"
+        else:
+            snap_data = build_input_snapshot(snapshot, obs_now)
+            input_snapshot_path = write_json_artifact(snap_path, snap_data)
 
         # 7b. run_summary.json
         summary_data = build_run_summary(

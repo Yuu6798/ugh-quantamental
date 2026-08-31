@@ -64,7 +64,25 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    — prints per-day forecast vs realized per strategy, the UGH alpha
    state/conviction trajectory, annotation labels, failure reasons, and the
    previous-Friday carry-over row. Read-only.
-3. **Market context** — invoke the `fx-market-context` skill. The protocol
+3. **Ops health is two-layered** — `provider_health.csv` / the artifact's
+   Provider Health section only see runs that *executed the protocol script*.
+   Check the `fx-daily-protocol.yml` Actions run conclusions covering the
+   whole `<start>`–`<end>` interval as well (`actions_list` — the workflow
+   schedules three runs per weekday, so ~15 newest entries cover only about
+   one current week; for an explicitly requested past week, paginate until
+   the target dates are covered): a red conclusion needs its **failed step
+   inspected (`get_job_logs` with `failed_only`) before assigning a cause** —
+   data being present does not prove a post-protocol failure, because an
+   earlier retry can have committed the data while the final 11:00 UTC retry
+   still fails hard on a fetch error (`FX_LAST_RETRY=1`). The 2026-08 Gmail-535
+   case (every inspected run from 8/17 onward was red at the mail step while data flowed; the confirmed 8/17–8/21 weekly report
+   said 安定稼働, pre-8/17 Actions runs were not inspected, and the user's daily emails silently stopped) was one cause
+   among several possible; missing runs or runs landing on the wrong
+   JST day mean scheduler delay (the 2026-08-28 gap: crons fired ~11h late,
+   landed on Saturday JST, and the business-day guard refused them — no Friday
+   forecast, no Thursday evaluation, no weekly artifact). A missing Saturday
+   artifact is a symptom: find which run failed to produce it and report why.
+4. **Market context** — invoke the `fx-market-context` skill. The protocol
    records no reason for anything it sees (`event_tags` is auto-derived and
    near-empty), so a policy event and a technical pattern look identical in the
    OHLC. The 2026-07-30 week showed why: 8/3 looks like a textbook selling
@@ -96,7 +114,20 @@ as the existing reports (keep headings verbatim so the series stays greppable):
 
 Interpretation rules learned over the series — apply, don't re-derive:
 
-- Direction hit is binary; a FLAT forecast on a small-move day scores as miss.
+- **Direction scoring remains binary.** `direction_hit` follows exact forecast-direction
+  equality with the realized direction in `src/ugh_quantamental/fx_protocol/outcomes.py`. A
+  `FLAT` forecast on any nonzero realized close move is therefore a direction miss, even when
+  the move is small. Do not reinterpret the legacy direction rate as epsilon-aware; any
+  tolerance-based metric must be separately named and reported.
+- **Before committing, verify every aggregate or chronology claim in prose
+  against the day table it summarizes.** This series' recurring failure mode
+  (PR #124: five review rounds) is prose contradicted by its own tables:
+  a "9/9" that was 12/12, an "all up days missed" beside a β up-HIT row, an
+  e_star turn dated 8 business days late. Three mechanical checks: (a) recount
+  any N/M by multiplying the table out; (b) an `up`/`down` forecast implies
+  the same e_star sign — never narrate a sign transition later than the first
+  such forecast in the table; (c) count business-day spans on a calendar, don't
+  estimate them.
   Quote median close error and range hit alongside direction rate whenever
   FLAT days distort it (e.g. 7/13 week: 25% direction but best-in-series
   median error).
@@ -115,20 +146,23 @@ Interpretation rules learned over the series — apply, don't re-derive:
 
 The user runs a Rakuten FX repeat-order grid, live since **2026-07-27**:
 buy USDJPY 161.500–163.500, 25 pips grid / 25 pips take-profit, 10,000
-units per order (9 levels, no stop configured — the agreed manual exit
-line is a clear break of 160.50, the July low).
+units per order (9 levels, no stop configured).
+
+**Policy tracking is closed** (2026-08-30, user decision): the exit
+question, the 160.50 line, and any reset definition are the user's own
+call — do not track them, escalate them, or carry a 方針判断 item in
+次週への持ち越し. The section reports the week's facts only.
 
 While this grid is active, add a `## リピート注文モニタ` section to the
 weekly report (after 運用ヘルス) answering, from the week's OHLC:
 
-- Weekly low / close vs the grid floor 161.50 and the exit line 160.50 —
-  state plainly whether the band held, was dipped into and recovered, or
-  was broken (a close below 160.50 is the escalation: lead the chat
-  summary with it, don't bury it).
-- Days whose range overlapped the band vs days spent entirely above it
-  (price above 163.50 = grid idle, not at risk).
+- Weekly low / high / close vs the band 161.50–163.50 — held below,
+  dipped into, or spent above (above 163.50 = grid idle, not at risk).
+- Days whose range overlapped the band, and estimated fills/take-profits.
 - Any shock day (−0.9 円級, the 7/2 / 7/13 pattern) that would have
   filled multiple levels at once.
+- Unrealized P/L at the week's close and the margin-ratio estimate,
+  stated with the usual assumptions.
 
 Estimated fill counts from daily OHLC are order-of-magnitude only — say
 so rather than implying precision. If the user reports changed or closed

@@ -140,6 +140,11 @@ jobs:
 
       - name: Notify by email on new commit
         if: steps.commit.outputs.pushed == 'true'
+        # Best-effort: a notification failure must not mark the whole run red —
+        # since ~8/17 a Gmail 535 BadCredentials here turned every run failure,
+        # masking the real 8/28 scheduler-delay incident. The protocol steps
+        # above are the run's actual health signal.
+        continue-on-error: true
         uses: dawidd6/action-send-mail@v3
         with:
           server_address: ${{ secrets.MAIL_SERVER }}

@@ -87,7 +87,7 @@ Machine-readable summary of one automation run.
 | manifest_path | string or null | Path to manifest.json |
 | snapshot_lag_business_days | int | Provider data lag in business days |
 | used_fallback_adjustment | bool | Whether 1-day fallback was used |
-| run_status | string | "ok" or "idempotent_skip" |
+| run_status | string | "ok", "idempotent_skip", or "idempotent_skip_snapshot_unavailable" (existing batch has no immutable forecast-time input snapshot; retry fails closed without synthesizing provenance) |
 | generated_at_utc | string (ISO 8601) | Artifact generation timestamp |
 
 ### 3.3 daily_report.md
@@ -154,7 +154,7 @@ Append-only log of provider health per run.
 | newest_completed_window_end_jst | string (ISO 8601) | Newest window end |
 | snapshot_lag_business_days | int | Data lag in business days |
 | used_fallback_adjustment | bool | Whether fallback was applied |
-| run_status | string | "ok" or "idempotent_skip" |
+| run_status | string | "ok", "idempotent_skip", or "idempotent_skip_snapshot_unavailable" (existing batch has no immutable forecast-time input snapshot; retry fails closed without synthesizing provenance) |
 | notes | string | Optional notes |
 
 ---
