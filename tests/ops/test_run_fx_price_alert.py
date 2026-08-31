@@ -557,7 +557,7 @@ class TestGitHubIssueStateIO:
 
         def fake_request(method, url, token, body=None, timeout=30):
             calls.append(url)
-            return page1 if "page=1" in url else page2
+            return page1 if url.endswith("page=1") else page2
 
         monkeypatch.setattr(fxa, "_github_request", fake_request)
         bodies = fxa.fetch_issue_comment_bodies("owner/repo", "token", 9)
