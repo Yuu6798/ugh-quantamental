@@ -1,0 +1,6 @@
+field,total_observations,ai_populated_count,ai_populated_rate,auto_populated_count,auto_populated_rate,manual_populated_count,manual_populated_rate,fallback_populated_count,fallback_populated_rate,effective_populated_count,effective_populated_rate,missing_count,missing_rate
+regime_label,49,49,1.0,0,0.0,0,0.0,0,0.0,49,1.0,0,0.0
+event_tags,49,0,0.0,0,0.0,0,0.0,0,0.0,0,0.0,49,1.0
+volatility_label,49,49,1.0,0,0.0,0,0.0,0,0.0,49,1.0,0,0.0
+intervention_risk,49,49,1.0,0,0.0,0,0.0,0,0.0,49,1.0,0,0.0
+failure_reason,49,27,0.551,0,0.0,0,0.0,0,0.0,27,0.551,22,0.449
