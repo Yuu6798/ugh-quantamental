@@ -187,8 +187,8 @@ def target_business_date_jst(now_jst: datetime) -> date:
 def gap_cutoff_reached(now_jst: datetime) -> bool:
     """True once the day's data-gap cutoff has passed.
 
-    On a business day the cutoff is exactly 22:00 JST (final cron 11:00 UTC
-    + 2h grace). On a weekend the relevant (Friday's) cutoff has, by
+    On a business day the cutoff is exactly 22:00 JST (final cron 11:23 UTC /
+    20:23 JST + ~1.5h grace; see the spec for why the constant stays at 22:00). On a weekend the relevant (Friday's) cutoff has, by
     definition, already passed.
     """
     if not is_business_day_jst(now_jst.date()):

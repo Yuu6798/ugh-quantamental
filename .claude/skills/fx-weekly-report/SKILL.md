@@ -73,7 +73,7 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    the target dates are covered): a red conclusion needs its **failed step
    inspected (`get_job_logs` with `failed_only`) before assigning a cause** —
    data being present does not prove a post-protocol failure, because an
-   earlier retry can have committed the data while the final 11:00 UTC retry
+   earlier retry can have committed the data while the final 11:23 UTC retry
    still fails hard on a fetch error (`FX_LAST_RETRY=1`). The 2026-08 Gmail-535
    case (every inspected run from 8/17 onward was red at the mail step while data flowed; the confirmed 8/17–8/21 weekly report
    said 安定稼働, pre-8/17 Actions runs were not inspected, and the user's daily emails silently stopped) was one cause
