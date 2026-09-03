@@ -14,10 +14,13 @@ name: FX Price Alert
 # correctness issue, only a cadence one.
 on:
   schedule:
+    # Minute 37 (not :00): top-of-the-hour schedules are queued behind
+    # platform-wide load and were delayed or dropped on 2026-08-28/31 and
+    # 09-01; the monitor for that gap must not share the failure mode.
     # Every 2h, UTC Mon-Fri (approximates JST weekdays).
-    - cron: '0 */2 * * 1-5'
+    - cron: '37 */2 * * 1-5'
     # Every 6h, UTC Sat-Sun (approximates JST weekend).
-    - cron: '0 */6 * * 0,6'
+    - cron: '37 */6 * * 0,6'
   workflow_dispatch:
 
 permissions:

@@ -27,7 +27,8 @@ FX_CSV_OUTPUT_DIR    : directory for CSV exports (default: ./data/csv)
 FX_OUTCOME_CATCHUP_DAYS : max protocol business days of closed-but-unevaluated
                        forecast windows to recover per run, oldest first
                        (default: 5; "0" disables catch-up entirely).
-FX_LAST_RETRY        : set to "1" on the final retry (16:00 JST) or manual dispatch.
+FX_LAST_RETRY        : set to "1" on the final scheduled retry or manual dispatch
+                       (the workflow file owns the actual cron times).
                        When set, data-fetch errors fail hard (exit 1) instead of
                        skipping gracefully, so the data gap is visible in CI.
 """
@@ -209,11 +210,11 @@ def main() -> None:
             session.rollback()
             is_last_retry = _env("FX_LAST_RETRY") == "1"
             if is_last_retry:
-                # Final retry (16:00 JST) or manual dispatch — fail hard so
+                # Final scheduled retry or manual dispatch — fail hard so
                 # CI goes red and the data gap is visible.
                 _fail(f"Data fetch failed on final retry: {exc}")
                 return
-            # Earlier retry (08:00 / 12:00 JST) — skip gracefully so CI
+            # Earlier scheduled attempt — skip gracefully so CI
             # stays green; the next scheduled run will retry.
             print(f"[WARN] Data fetch failed (skipping): {exc}")
             print("[INFO] Retries remaining today — next run will retry automatically.")

@@ -343,8 +343,8 @@ This protocol is implemented as the final stage of the **FX Analysis Pipeline**,
 
 | Action | Schedule | Purpose |
 |---|---|---|
-| `fx-daily-protocol.yml` | Mon-Fri 08:00/12:00/16:00 JST | Data collection: fetch → forecast → outcome → evaluation → CSV |
-| `fx-analysis-pipeline.yml` | Weekly: Mon 10:00 JST / Monthly: 1st 10:00 JST | Analysis: weekly aggregation → monthly review → governance outputs |
+| `fx-daily-protocol.yml` | Mon-Fri 14:23/16:23/20:23 JST | Data collection: fetch → forecast → outcome → evaluation → CSV |
+| `fx-analysis-pipeline.yml` | Weekly: Mon 10:00 JST / Monthly: 1st 10:30 JST | Analysis: weekly aggregation → monthly review → governance outputs |
 
 ### Monthly pipeline flow
 

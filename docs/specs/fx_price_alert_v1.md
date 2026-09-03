@@ -11,7 +11,7 @@ the prediction stack
 ## 1. Motivation
 
 The daily forecast protocol only looks at the market once per business day
-(three retry attempts ending 20:00 JST). Two incidents exposed the gap:
+(three retry attempts ending 20:23 JST). Two incidents exposed the gap:
 
 - **2026-07-30**: a −321 pip USDJPY move went undetected for ~10 hours,
   because nothing watches the market between forecast runs.
@@ -120,7 +120,10 @@ active = stale                     if the alert was already active last run
 ```
 
 - **22:00 JST** cutoff = the daily protocol's final retry cron (11:23 UTC /
-  20:23 JST) plus a 2-hour grace window.
+  20:23 JST) plus a ~1.5-hour grace window. The constant predates the move
+  of the crons from :00 to :23 (when the grace was a full 2 hours) and is
+  kept at 22:00 on purpose: the run itself takes about a minute, and the
+  alert is sticky once active, so a shorter grace only advances detection.
 - This is intentionally **schedule-aware, not age-based**. An "older than 1
   business day" rule would have masked the 2026-08-28 incident exactly the
   way it actually played out: a Friday run failure leaves the last good
