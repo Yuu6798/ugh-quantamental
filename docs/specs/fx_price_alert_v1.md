@@ -119,8 +119,8 @@ active = stale                     if the alert was already active last run
        = cutoff_reached and stale  otherwise (a fresh activation)
 ```
 
-- **22:00 JST** cutoff = the daily protocol's final retry cron (11:00 UTC /
-  20:00 JST) plus a 2-hour grace window.
+- **22:00 JST** cutoff = the daily protocol's final retry cron (11:23 UTC /
+  20:23 JST) plus a 2-hour grace window.
 - This is intentionally **schedule-aware, not age-based**. An "older than 1
   business day" rule would have masked the 2026-08-28 incident exactly the
   way it actually played out: a Friday run failure leaves the last good
