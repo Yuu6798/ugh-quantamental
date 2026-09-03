@@ -1,6 +1,6 @@
 # STATUS - ugh-quantamental
 
-最終更新: 2026-08-31
+最終更新: 2026-09-03
 
 このファイルは日次の project snapshot として、現在フェーズ、次の発行順序、直近 merged を保持する。安定方針は `CLAUDE.md` / `AGENTS.md` に置き、canonical な milestone 表は `PLANS.md`、フェーズ計画は `docs/engine_review_2026_05_planning.md` / `docs/specs/` を参照する。
 
@@ -8,7 +8,7 @@
 
 ## Phase
 
-Milestones 1-18 完了、engine default **v2.6** (FX-RANGE-DECOUPLE #122)。2026-08 月次レビューの briefs 4 本 (GOV-FLAT-AWARE / OUTCOME-CATCHUP / ESTAR-LAG / PRICE-ALERT) を **PR #125 で全実装・main 反映済み** (2026-08-31 merge、Claude 完結実装: Sonnet 並列 agent 4 本 + self-review 1 回 + Codex 2 rounds)。ESTAR-LAG の実データ ablation で **SMA20 飽和仮説は棄却** (spot_vs_sma20 差し替えは 6 セル全てで転換 0 営業日シフト)、**momentum_5d が一貫した律速** (−2〜−10 営業日)。raw e_star 符号転換は emitted 方向より早い (epsilon dead-zone の方法論差、順序は同一)。governance は excl-flat 判定へ移行済 (9/1 月次で初運用)、outcome catch-up は 8/27 stranded batch を初回実行で回収見込み、price alert は GitHub Issue 通知で稼働開始。次: 9/1 月次 governance 初運用確認 → 9 月中旬レンジ幅較正 brief → momentum_5d × variant 重み相互作用の追調査。フォローアップ候補: 正常評価済み window の lag-1 catch-up 再該当による冗長 history 書込 (データ破損は dedupe で防止済)。
+Milestones 1-18 完了、engine default **v2.6** (FX-RANGE-DECOUPLE #122)。2026-08 月次レビューの briefs 4 本 (GOV-FLAT-AWARE / OUTCOME-CATCHUP / ESTAR-LAG / PRICE-ALERT) を **PR #125 で全実装・main 反映済み** (2026-08-31 merge、Claude 完結実装: Sonnet 並列 agent 4 本 + self-review 1 回 + Codex 2 rounds)。ESTAR-LAG の実データ ablation で **SMA20 飽和仮説は棄却** (spot_vs_sma20 差し替えは 6 セル全てで転換 0 営業日シフト)、**momentum_5d が一貫した律速** (−2〜−10 営業日)。raw e_star 符号転換は emitted 方向より早い (epsilon dead-zone の方法論差、順序は同一)。governance は excl-flat 判定へ移行済 (9/1 月次で初運用)、outcome catch-up は 8/27 stranded batch を初回実行で回収見込み、price alert は GitHub Issue 通知で稼働開始。次: 9/1 月次 governance 初運用確認 → 9 月中旬レンジ幅較正 brief → momentum_5d × variant 重み相互作用の追調査。フォローアップ候補: 正常評価済み window の lag-1 catch-up 再該当による冗長 history 書込 (データ破損は dedupe で防止済)。運用: scheduler 遅延 3 営業日連続を受け daily/price-alert cron を :23/:37 へ移動 (#127、9/3 merge) — 定刻 fire の効果は 9/3 から観測。
 
 ## 次の発行順序
 
@@ -25,8 +25,8 @@ active queue - 未着手または進行中の Phase / Brief / Milestone のみ�
 
 最新 5 件のみ inline。超過分は `archive/STATUS_MERGED_LOG.md` 末尾へ移す。
 
+- **PR #127 / daily-protocol cron の :23 移動** (2026-09-03) - ops-only。GitHub Actions の毎時 0 分 schedule が 8/28 (欠測) / 8/31 / 9/1 (手動 dispatch で救済) と 3 営業日連続で遅延・欠落したため、daily cron 3 本を :23 へ、監視側 price-alert cron を :37 へ移動。`FX_LAST_RETRY` の cron 文字列一致も同期 (見落とすと最終 retry の fail-hard が静かに外れる)。self-review で spec の猶予算術誤り (20:23+2h≠22:00) を訂正し、旧時刻の記述 6 箇所を同期、daily script のコメントは時刻非依存化。Codex 2 rounds (round 1 = 2 件、いずれも self-review で先回り済み / round 2 = 指摘なし)。境界宣言 (round 11 以降は critical bug / 実コード破壊 / 将来汚染のみ) を PR に掲示、発動前に収束。
 - **PR #125 / 2026-08 briefs 4 本の一括実装** (2026-08-31) - GOV-FLAT-AWARE (excl-flat 列 + 同一 cohort delta 判定移行) / OUTCOME-CATCHUP (有界遡及 FX_OUTCOME_CATCHUP_DAYS=5、savepoint 隔離、window-END dir 発行、publication repair) / ESTAR-LAG (`scripts/analyze_estar_lag.py` + `docs/analysis/estar_lag_2026_08.md` — **SMA20 仮説棄却、momentum_5d が律速**) / PRICE-ALERT (`run_fx_price_alert.py` + workflow、stdlib-only、真 bp 単位、22:00 JST gap 監視、Issue 通知)。Claude 完結実装 (Sonnet worktree agent 4 並列 → cherry-pick 統合 → self-review 1 回で 10+ 件修正)。Codex 2 rounds 全採用 (evaluation_id / forecast_id dedupe、snapshot lookup 全 dir 探索 ほか)。ユーザー側 auto-fix runner と並走し衝突ゼロで統合。
 - **PR #124 / 2026-08 月次レビュー + briefs 4 本 + 運用修正** (2026-08-31) - docs/skills/CI。8 月週報 3 本 + `engine_review_2026_08_findings.md` + Task Brief 4 本 (ESTAR-LAG / GOV-FLAT-AWARE / OUTCOME-CATCHUP / PRICE-ALERT) + mail step `continue-on-error` + skill 更新 (2 層 ops check、prose↔table 自己整合ルール)。Codex レビュー 16+ rounds / 41+ threads 全 resolve・全件採用 — 主要訂正: e_star 転換年表 (up 予測 ⟺ e_star 正で引き直し、β 6 営業日 / α・γ 14 営業日、variant 間 8 営業日分散)、レンジ較正トレードオフの定量化 (縮小余地 9pips 未満)、briefs の実装可能性硬化 (実在 API 名、CSV history export、typed config 経路、ablation の参照値/抽出規則/派生入力再構築、result contract)。5 round 到達で自己整合チェックを skill に encode。
 - **PR #123 / fx-market-context skill + v2.6 初運用週の事後検証** (2026-08-09) - docs/skills-only。`fx-market-context` skill 新設 (WebSearch で相場コンテキストをリサーチ、週報の必須ステップ化) + `fx-weekly-report` skill 更新 + 8/3–8/7 週報 + findings §10 追補。v2.6 初運用週は Range 4/4 (100%、リプレイ予測と整合)。レビュー ~13 round / 23 threads 全 resolve — 主要訂正: 介入の向き (円買いは USDJPY 押し下げ、底の説明にならない)、state→方向の因果否定 (方向は e_star 経路のみ、state は projection の部分的下流だが fire evidence の主項は prior 自己強化 + event features)、exhaustion ラベルは転換の ground truth でない、intervention_risk は move-size のみで裏付けに使えない、半幅使用率は終値軸で中央値 36%。却下 1 件 (窓の非重複をデータで提示)。
 - **PR #122 / 2026-07 月次レビュー** (2026-08-02) - FX-RANGE-DECOUPLE (v2.6)。`expected_range` を実現ボラ基準へ置換 (`trailing_mean_range_price` × `range_width_scale=1.25`、中心 = spot、recenter 撤去)、実装コードでの実データリプレイで包含率 45.5% → 95% / 中変動帯 0% → 86%。テール (≥100bp) は対象外と spec 明記。ENGINE-P3B の variant 固有レンジを意図的に反転。magnitude は代替 5 案が改善せず据え置き (findings §5.6 で訂正記録)。Codex P1 2件 / P2 3件、採用 4 / 却下 1 (根拠提示)。CI の ruff 未ピン留めで main が既に red だった件もピン留めで解消。
-- **2026-06 engine review program 実装** (2026-06-28) - 5 briefs を全実装・マージ (#116-#120)。FX-ANNOT-LIVE (#116, OHLC fallback + leakage 除去 + daily 配線, Codex P2 8件) / FX-STATE-HYSTERESIS (#117, v2.4) / FX-MAG-EXPANSION (#118, v2.5) / FX-STATEPROXY-REDEF (#119, state_correctness_hit 新設) / FX-GOV-REGIME-FLAGS (#120, レジーム層別 collapse フラグ, Codex P2 4件)。engine default v2.5。
