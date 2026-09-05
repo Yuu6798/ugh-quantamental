@@ -60,9 +60,13 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    `FX_CSV_OUTPUT_DIR=<scratchpad>/fxdata/csv FX_REPORT_DATE=<next Monday> FX_WEEK_DAYS=5 python scripts/run_fx_weekly_report.py`
    (report date = next Monday makes the window land on `<start>`–`<end>`).
    **Sanity-check the artifact's `Obs` column before using any number from
-   it**: per strategy it must equal the number of evaluated windows whose
-   forecast `as_of` falls in `<start>`–`<end>` (4 in a normal week — Friday is
-   pending). Outcome catch-up (2026-08-31 onward) republishes a window's
+   it**: per strategy it must equal the number of *distinct* evaluated
+   windows whose forecast `as_of` falls in `<start>`–`<end>` — 4 when the
+   report is written on the weekend (Friday pending), 5 when an older week is
+   regenerated after its Friday was evaluated, fewer when a run was missed.
+   Derive the expectation from the evaluations actually present (distinct
+   `evaluation_id`s per strategy in `history/*/*/evaluation.csv` for those
+   `as_of` dates), never from a fixed number. Outcome catch-up (2026-08-31 onward) republishes a window's
    forecast/outcome/evaluation under the window's END-date directory, so the
    same forecast_id can sit in two directories; the 2026-09-05 run found the
    writer of `labeled_observations.csv` counting those twice (7 obs instead
