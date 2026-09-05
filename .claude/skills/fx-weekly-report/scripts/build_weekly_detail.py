@@ -41,12 +41,19 @@ STRATEGIES = [
 
 
 def _load_forecasts(base: str, dates: list[str]) -> dict[tuple[str, str], dict]:
+    # Key by the forecast's own as_of date, not the directory date: outcome
+    # catch-up republishes a recovered window's forecast.csv under the
+    # window's END-date directory, and keying by directory would present the
+    # 8/27 batch as an "8/28 forecast" (observed 2026-09-05).
     fc: dict[tuple[str, str], dict] = {}
+    wanted = set(dates)
     for d in dates:
         for f in glob.glob(f"{base}/history/{d}/*/forecast.csv"):
             with open(f, newline="") as fh:
                 for r in csv.DictReader(fh):
-                    fc[(d, r["strategy_kind"])] = r
+                    as_of = r.get("as_of_jst", "")[:10].replace("-", "") or d
+                    if as_of in wanted:
+                        fc.setdefault((as_of, r["strategy_kind"]), r)
     return fc
 
 
