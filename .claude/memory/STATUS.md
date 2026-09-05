@@ -18,7 +18,7 @@ active queue - 未着手または進行中の Phase / Brief / Milestone のみ�
 2. **lag-1 catch-up 再該当の書き側修正 (brief 候補)** - 正常評価済み window を候補判定で除外し、冗長な END-dir 再発行を止める。読み側 dedupe (#125 / #128) で破損は防止済だが、#128 の二重計上はこれが原因。
 3. **レンジ幅較正の brief 化 — 9 月中旬** - robust statistic + 中心の置き方 + 終値軸目標。7/30 が 20 窓から抜けた後 (8/31〜) の幅を 2 週分観測してから。基準点: 8/10 上 6pips miss / 8/19 下 9pips hit。
 4. **momentum_5d × variant 重み相互作用の追調査** - ESTAR-LAG ablation の帰結 (SMA20 棄却、momentum_5d が律速 −2〜−10 営業日)。9/2 ショック後は発行方向が 1–2 営業日で転換 (8 月 6 / 14) — 「転換速度はショックの型に依存」を補助仮説に、raw e_star を `analyze_estar_lag.py` で確定してから比較。engine 改変はこの調査を見てから。
-5. **regime=choppy の判定保留を継続** - 標本ゼロ 9 週目。intervention_risk 非 low 日は 28 obs 中 26 miss / 2 hit (方向のみ弱い。レンジは 8 月の非 low 日 8/8 全的中)。label は move-size 由来、「大変動日に弱い」と読む。
+5. **regime=choppy の判定保留を継続** - 標本ゼロ 10 週目。intervention_risk 非 low 日は 36 obs 中 33 miss / 3 hit (方向のみ弱い。レンジは 8 月の非 low 日 8/8 全的中、9/2–9/3 の high-vol 2 日は 0/2)。label は move-size 由来、「大変動日に弱い」と読む。
 6. **governance spec `Status: Draft` バナーの実態確認** - 実装完備なのにバナーが `Draft`。確認し必要なら更新。
 7. **売買 / execution レイヤーの planning doc 起草** - conviction は e_star 符号整合時のみ信頼可 (2026-08 findings §1) — sizing 入力設計はこの条件付けを織り込む。
 8. **follow-up (低優先)** - #116 `_resolve_annotation_source` 純関数化 / #119 stC scoreboard rollup / 最終 retry が JST 日付をまたいだ場合の business-day ガード赤 (9/4、実害なし) / PRICE-ALERT の sticky 挙動 (連続急落が 1 通知に畳まれる)。グリッド方針 (B7) は **2026-08-30 ユーザー判断で終了 — 追跡・エスカレーション対象外** (週報モニタは事実報告のみ継続)。
