@@ -75,10 +75,16 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    — prints per-day forecast vs realized per strategy, the UGH alpha
    state/conviction trajectory, annotation labels, failure reasons, and the
    previous-Friday carry-over row. Read-only. It keys forecasts by their own
-   `as_of_jst`, not by directory date, for the same END-dir reason as above —
-   a carry-over row that shows forecasts but no outcome after a Friday with no
-   run is the previous Thursday's batch republished by catch-up, not a Friday
-   forecast.
+   `as_of_jst`, not by directory date, and reads outcomes/evaluations from
+   history batches too, for the same END-dir reason as above. When the
+   previous Friday has no forecast of its own (a missed Friday run) it prints
+   the Thursday batch recovered by catch-up, labelled
+   `(carry-over, recovered by catch-up)`. Catch-up publishes forecast, outcome
+   and evaluation together, so a row carrying that label with
+   `(outcome pending)` is **not** a normal layout — it means the END-dir
+   publication is incomplete or the helper is broken. Investigate (the
+   `history/<END date>/<batch>/` triple must exist) and report it under
+   運用ヘルス; never narrate it as a pending Thursday.
 3. **Ops health is two-layered** — `provider_health.csv` / the artifact's
    Provider Health section only see runs that *executed the protocol script*.
    Check the `fx-daily-protocol.yml` Actions run conclusions covering the
