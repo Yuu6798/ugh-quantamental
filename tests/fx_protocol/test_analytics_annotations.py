@@ -371,6 +371,27 @@ class TestLabeledObservations:
         assert rows[0]["regime_label"] == ""
         assert rows[0]["annotation_status"] == ""
 
+    def test_republished_forecast_counts_once(self, tmp_path: str) -> None:
+        """A forecast re-published under a second history dir must yield one row.
+
+        Outcome catch-up republishes a recovered window's forecast.csv (same
+        forecast_ids) into the window's end-date directory next to the
+        evaluation it recovered, and a normally evaluated window can be
+        republished the same way one day later.  Without a forecast_id guard
+        every such window is counted twice in labeled_observations.csv and in
+        every weekly / monthly aggregate built from it.
+        """
+        tmpdir = str(tmp_path)
+        _setup_history(tmpdir, date_str="20260313", batch_id="batch-001")
+        # Same batch id, same forecast_ids, republished under the end date.
+        _setup_history(tmpdir, date_str="20260316", batch_id="batch-001")
+        path = build_labeled_observations(tmpdir, _NOW)
+        assert path is not None
+        with open(path, newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        assert len(rows) == 2  # ugh + baseline, not 4
+        assert sorted(r["strategy_kind"] for r in rows) == ["baseline_random_walk", "ugh"]
+
     def test_joins_confirmed_annotations(self, tmp_path: str) -> None:
         tmpdir = str(tmp_path)
         _setup_history(tmpdir)

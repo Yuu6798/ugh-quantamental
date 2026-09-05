@@ -338,6 +338,15 @@ def _collect_labeled_observation_rows(
     # Pass 2: iterate over forecasts and join with global indexes.
     rows: list[dict[str, str]] = []
 
+    # A forecast_id's forecast.csv row can appear under more than one
+    # directory: its own start-date dir and, for a window recovered (or
+    # re-published) by outcome catch-up, the window's end-date dir too.
+    # Each forecast_id must contribute exactly one observation, otherwise the
+    # weekly and monthly aggregates double-count every republished window
+    # (observed 2026-09-05: 8/21-9/2 windows counted twice).  Mirrors the
+    # guard in ``collect_evaluated_forecast_rows``.
+    seen_forecast_ids: set[str] = set()
+
     for date_dir in sorted(os.listdir(history_dir)):
         date_path = os.path.join(history_dir, date_dir)
         if not os.path.isdir(date_path):
@@ -354,12 +363,16 @@ def _collect_labeled_observation_rows(
             for fc in forecasts:
                 as_of_jst = fc.get("as_of_jst", "")
                 forecast_id = fc.get("forecast_id", "")
+                if forecast_id and forecast_id in seen_forecast_ids:
+                    continue
                 ev = global_eval_by_forecast.get(forecast_id, {})
 
                 # Skip forecasts without a matched evaluation to avoid
                 # counting unevaluated rows as misses in weekly metrics.
                 if not ev:
                     continue
+                if forecast_id:
+                    seen_forecast_ids.add(forecast_id)
 
                 outcome_row = global_outcome_by_forecast.get(forecast_id)
 
