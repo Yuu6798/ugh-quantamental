@@ -110,12 +110,25 @@ def main() -> None:
     oc = _load_outcomes(base)
     ev = _load_evaluations(base)
 
-    # Print the requested dates plus any recovered as_of discovered in the
-    # scanned directories; everything before Monday is a carry-over.
+    # Carry-over contract: the previous Friday only.  An out-of-range
+    # recovered date (a Thursday batch republished under the Friday END-date
+    # dir) is surfaced only when the Friday's own forecast is absent — i.e.
+    # the Friday run was missed and the recovery is the overdue carry-over.
+    # In a normal week the Friday dir also holds Thursday's routine lag-1
+    # republication, which was already reported last week and must not
+    # print again.
     monday_str = monday.strftime("%Y%m%d")
-    print_dates = sorted(set(dates) | {d for (d, _s) in fc})
+    prev_friday_str = dates[0]
+    has_prev_friday = any(d == prev_friday_str for (d, _s) in fc)
+    recovered = set() if has_prev_friday else {d for (d, _s) in fc if d < monday_str}
+    print_dates = sorted(set(dates) | recovered)
     for d in print_dates:
-        tag = " (carry-over)" if d < monday_str else ""
+        if d in recovered:
+            tag = " (carry-over, recovered by catch-up)"
+        elif d < monday_str:
+            tag = " (carry-over)"
+        else:
+            tag = ""
         o = oc.get(d)
         header = f"--- {d}{tag} ---"
         if o:
