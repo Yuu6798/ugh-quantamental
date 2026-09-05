@@ -41,32 +41,49 @@ STRATEGIES = [
 
 
 def _load_forecasts(base: str, dates: list[str]) -> dict[tuple[str, str], dict]:
+    # Key by the forecast's own as_of date, not the directory date: outcome
+    # catch-up republishes a recovered window's forecast.csv under the
+    # window's END-date directory, and keying by directory would present the
+    # 8/27 batch as an "8/28 forecast" (observed 2026-09-05).
+    # Every forecast found in the scanned directories is kept under its own
+    # as_of date, even one outside ``dates``: a Thursday batch recovered under
+    # a Friday END-date directory (the 8/27 case) is exactly the overdue
+    # carry-over the report must surface, not something to drop.
     fc: dict[tuple[str, str], dict] = {}
     for d in dates:
         for f in glob.glob(f"{base}/history/{d}/*/forecast.csv"):
             with open(f, newline="") as fh:
                 for r in csv.DictReader(fh):
-                    fc[(d, r["strategy_kind"])] = r
+                    as_of = r.get("as_of_jst", "")[:10].replace("-", "") or d
+                    fc.setdefault((as_of, r["strategy_kind"]), r)
     return fc
 
 
 def _load_outcomes(base: str) -> dict[str, dict]:
+    # Flat exports first, then history batches: outcome catch-up publishes a
+    # recovered window to history only, so its outcome exists nowhere else.
     oc: dict[str, dict] = {}
-    for f in glob.glob(f"{base}/outcomes/*_outcome.csv"):
+    files = glob.glob(f"{base}/outcomes/*_outcome.csv") + sorted(
+        glob.glob(f"{base}/history/*/*/outcome.csv")
+    )
+    for f in files:
         with open(f, newline="") as fh:
             for r in csv.DictReader(fh):
-                oc[r["window_start_jst"][:10].replace("-", "")] = r
+                oc.setdefault(r["window_start_jst"][:10].replace("-", ""), r)
     return oc
 
 
 def _load_evaluations(base: str) -> dict[tuple[str, str], dict]:
     ev: dict[tuple[str, str], dict] = {}
-    for f in glob.glob(f"{base}/evaluations/*_evaluation.csv"):
+    files = glob.glob(f"{base}/evaluations/*_evaluation.csv") + sorted(
+        glob.glob(f"{base}/history/*/*/evaluation.csv")
+    )
+    for f in files:
         with open(f, newline="") as fh:
             for r in csv.DictReader(fh):
                 m = re.search(r"fc_[A-Z]+_(\d{8})T", r["forecast_id"])
                 if m:
-                    ev[(m.group(1), r["strategy_kind"])] = r
+                    ev.setdefault((m.group(1), r["strategy_kind"]), r)
     return ev
 
 
@@ -93,8 +110,25 @@ def main() -> None:
     oc = _load_outcomes(base)
     ev = _load_evaluations(base)
 
-    for d in dates:
-        tag = " (carry-over)" if d == dates[0] else ""
+    # Carry-over contract: the previous Friday only.  An out-of-range
+    # recovered date (a Thursday batch republished under the Friday END-date
+    # dir) is surfaced only when the Friday's own forecast is absent — i.e.
+    # the Friday run was missed and the recovery is the overdue carry-over.
+    # In a normal week the Friday dir also holds Thursday's routine lag-1
+    # republication, which was already reported last week and must not
+    # print again.
+    monday_str = monday.strftime("%Y%m%d")
+    prev_friday_str = dates[0]
+    has_prev_friday = any(d == prev_friday_str for (d, _s) in fc)
+    recovered = set() if has_prev_friday else {d for (d, _s) in fc if d < monday_str}
+    print_dates = sorted(set(dates) | recovered)
+    for d in print_dates:
+        if d in recovered:
+            tag = " (carry-over, recovered by catch-up)"
+        elif d < monday_str:
+            tag = " (carry-over)"
+        else:
+            tag = ""
         o = oc.get(d)
         header = f"--- {d}{tag} ---"
         if o:
@@ -118,7 +152,7 @@ def main() -> None:
         print()
 
     print("=== UGH alpha state/conviction ===")
-    for d in dates:
+    for d in print_dates:
         f = fc.get((d, "ugh_v2_alpha"))
         if f:
             rng = (f"range {float(f['expected_range_low']):.2f}-"
@@ -131,7 +165,7 @@ def main() -> None:
         print()
         with open(labeled, newline="") as fh:
             rows = [r for r in csv.DictReader(fh)
-                    if r["as_of_jst"][:10].replace("-", "") in dates]
+                    if r["as_of_jst"][:10].replace("-", "") in print_dates]
         seen: set[str] = set()
         for r in rows:
             day = r["as_of_jst"][:10]
