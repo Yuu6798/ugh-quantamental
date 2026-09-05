@@ -45,35 +45,45 @@ def _load_forecasts(base: str, dates: list[str]) -> dict[tuple[str, str], dict]:
     # catch-up republishes a recovered window's forecast.csv under the
     # window's END-date directory, and keying by directory would present the
     # 8/27 batch as an "8/28 forecast" (observed 2026-09-05).
+    # Every forecast found in the scanned directories is kept under its own
+    # as_of date, even one outside ``dates``: a Thursday batch recovered under
+    # a Friday END-date directory (the 8/27 case) is exactly the overdue
+    # carry-over the report must surface, not something to drop.
     fc: dict[tuple[str, str], dict] = {}
-    wanted = set(dates)
     for d in dates:
         for f in glob.glob(f"{base}/history/{d}/*/forecast.csv"):
             with open(f, newline="") as fh:
                 for r in csv.DictReader(fh):
                     as_of = r.get("as_of_jst", "")[:10].replace("-", "") or d
-                    if as_of in wanted:
-                        fc.setdefault((as_of, r["strategy_kind"]), r)
+                    fc.setdefault((as_of, r["strategy_kind"]), r)
     return fc
 
 
 def _load_outcomes(base: str) -> dict[str, dict]:
+    # Flat exports first, then history batches: outcome catch-up publishes a
+    # recovered window to history only, so its outcome exists nowhere else.
     oc: dict[str, dict] = {}
-    for f in glob.glob(f"{base}/outcomes/*_outcome.csv"):
+    files = glob.glob(f"{base}/outcomes/*_outcome.csv") + sorted(
+        glob.glob(f"{base}/history/*/*/outcome.csv")
+    )
+    for f in files:
         with open(f, newline="") as fh:
             for r in csv.DictReader(fh):
-                oc[r["window_start_jst"][:10].replace("-", "")] = r
+                oc.setdefault(r["window_start_jst"][:10].replace("-", ""), r)
     return oc
 
 
 def _load_evaluations(base: str) -> dict[tuple[str, str], dict]:
     ev: dict[tuple[str, str], dict] = {}
-    for f in glob.glob(f"{base}/evaluations/*_evaluation.csv"):
+    files = glob.glob(f"{base}/evaluations/*_evaluation.csv") + sorted(
+        glob.glob(f"{base}/history/*/*/evaluation.csv")
+    )
+    for f in files:
         with open(f, newline="") as fh:
             for r in csv.DictReader(fh):
                 m = re.search(r"fc_[A-Z]+_(\d{8})T", r["forecast_id"])
                 if m:
-                    ev[(m.group(1), r["strategy_kind"])] = r
+                    ev.setdefault((m.group(1), r["strategy_kind"]), r)
     return ev
 
 
@@ -100,8 +110,12 @@ def main() -> None:
     oc = _load_outcomes(base)
     ev = _load_evaluations(base)
 
-    for d in dates:
-        tag = " (carry-over)" if d == dates[0] else ""
+    # Print the requested dates plus any recovered as_of discovered in the
+    # scanned directories; everything before Monday is a carry-over.
+    monday_str = monday.strftime("%Y%m%d")
+    print_dates = sorted(set(dates) | {d for (d, _s) in fc})
+    for d in print_dates:
+        tag = " (carry-over)" if d < monday_str else ""
         o = oc.get(d)
         header = f"--- {d}{tag} ---"
         if o:
@@ -125,7 +139,7 @@ def main() -> None:
         print()
 
     print("=== UGH alpha state/conviction ===")
-    for d in dates:
+    for d in print_dates:
         f = fc.get((d, "ugh_v2_alpha"))
         if f:
             rng = (f"range {float(f['expected_range_low']):.2f}-"
@@ -138,7 +152,7 @@ def main() -> None:
         print()
         with open(labeled, newline="") as fh:
             rows = [r for r in csv.DictReader(fh)
-                    if r["as_of_jst"][:10].replace("-", "") in dates]
+                    if r["as_of_jst"][:10].replace("-", "") in print_dates]
         seen: set[str] = set()
         for r in rows:
             day = r["as_of_jst"][:10]
