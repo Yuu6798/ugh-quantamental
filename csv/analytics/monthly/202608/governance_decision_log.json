@@ -2,30 +2,31 @@
   "review_month": "202608",
   "overall_judgment": "logic_audit",
   "key_flags": [
+    "inspect_magnitude_mapping",
     "regime_direction_collapse",
     "volatility_direction_collapse"
   ],
   "baseline_comparison_summary": [
     {
       "baseline": "baseline_random_walk",
-      "direction_delta": -0.3913,
-      "direction_delta_excl_flat": -0.5,
-      "close_error_delta": -3.89,
-      "magnitude_error_delta": 5.96
+      "direction_delta": -0.3158,
+      "direction_delta_excl_flat": -0.4,
+      "close_error_delta": -5.53,
+      "magnitude_error_delta": 7.23
     },
     {
       "baseline": "baseline_prev_day_direction",
-      "direction_delta": 0.0435,
-      "direction_delta_excl_flat": -0.0556,
-      "close_error_delta": 13.95,
-      "magnitude_error_delta": 7.02
+      "direction_delta": 0.0526,
+      "direction_delta_excl_flat": -0.0667,
+      "close_error_delta": 15.9,
+      "magnitude_error_delta": 7.3
     },
     {
       "baseline": "baseline_simple_technical",
-      "direction_delta": -0.0435,
-      "direction_delta_excl_flat": -0.1111,
-      "close_error_delta": 25.18,
-      "magnitude_error_delta": 13.82
+      "direction_delta": 0.0,
+      "direction_delta_excl_flat": -0.0667,
+      "close_error_delta": 21.31,
+      "magnitude_error_delta": 9.33
     }
   ],
   "weekly_trends": [
@@ -87,7 +88,7 @@
     {
       "week_start": "20260818",
       "week_end": "20260824",
-      "observation_count": 49,
+      "observation_count": 35,
       "ugh_direction_hit_rate": "",
       "ugh_mean_close_error_bp": "",
       "provider_success_count": 5,
@@ -109,7 +110,7 @@
     {
       "week_start": "20260825",
       "week_end": "20260831",
-      "observation_count": 42,
+      "observation_count": 28,
       "ugh_direction_hit_rate": "",
       "ugh_mean_close_error_bp": "",
       "provider_success_count": 4,
@@ -119,9 +120,10 @@
     }
   ],
   "logic_audit_candidates": [
+    "magnitude/close-error mapping",
     "regime-stratified direction logic",
     "volatility-stratified direction logic"
   ],
   "provider_annotation_concerns": [],
-  "final_recommendation": "Review direction logic per regime — a confirmed regime slice collapsed despite an acceptable blended metric. Review direction logic per volatility regime — a confirmed volatility slice collapsed despite an acceptable blended metric."
+  "final_recommendation": "Review magnitude/close-error mapping in UGH engine. Review direction logic per regime — a confirmed regime slice collapsed despite an acceptable blended metric. Review direction logic per volatility regime — a confirmed volatility slice collapsed despite an acceptable blended metric."
 }

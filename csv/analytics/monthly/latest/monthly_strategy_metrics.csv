@@ -1,9 +1,9 @@
 strategy_kind,forecast_count,direction_hit_count,direction_hit_rate,range_hit_count,range_hit_rate,state_proxy_hit_count,state_proxy_hit_rate,state_correctness_hit_count,state_correctness_hit_rate,mean_abs_close_error_bp,median_abs_close_error_bp,mean_abs_magnitude_error_bp,median_abs_magnitude_error_bp,direction_hit_excl_flat_count,direction_obs_excl_flat,direction_hit_excl_flat_rate
 ugh,0,0,,0,,0,,0,,,,,,0,0,
-ugh_v2_alpha,23,9,0.3913,22,0.9565,17,0.8095,9,0.3913,25.69,11.96,15.84,5.33,9,18,0.5
-ugh_v2_beta,23,9,0.3913,22,0.9565,17,0.8095,11,0.4783,25.4,11.96,16.56,6.94,9,18,0.5
-ugh_v2_gamma,23,9,0.3913,22,0.9565,17,0.8095,9,0.3913,25.37,11.81,16.02,5.33,9,18,0.5
-ugh_v2_delta,23,7,0.3043,22,0.9565,17,0.8095,11,0.4783,25.9,11.96,16.08,6.14,7,17,0.4118
-baseline_random_walk,23,0,0.0,0,,0,,0,,21.8,10.05,21.8,10.05,0,0,
-baseline_prev_day_direction,23,10,0.4348,0,,0,,0,,39.64,16.99,22.86,6.93,10,23,0.4348
-baseline_simple_technical,23,8,0.3478,0,,0,,0,,50.87,49.87,29.66,32.92,8,23,0.3478
+ugh_v2_alpha,19,6,0.3158,18,0.9474,15,0.8333,7,0.3684,30.86,13.8,18.1,6.75,6,15,0.4
+ugh_v2_beta,19,6,0.3158,18,0.9474,15,0.8333,9,0.4737,30.48,14.8,18.75,6.94,6,15,0.4
+ugh_v2_gamma,19,6,0.3158,18,0.9474,15,0.8333,7,0.3684,30.46,13.8,18.42,5.84,6,15,0.4
+ugh_v2_delta,19,4,0.2105,18,0.9474,15,0.8333,9,0.4737,31.09,13.8,18.31,6.43,4,14,0.2857
+baseline_random_walk,19,0,0.0,0,,0,,0,,25.33,11.96,25.33,11.96,0,0,
+baseline_prev_day_direction,19,7,0.3684,0,,0,,0,,46.76,36.26,25.4,7.54,7,19,0.3684
+baseline_simple_technical,19,6,0.3158,0,,0,,0,,52.17,49.87,27.43,29.29,6,19,0.3158

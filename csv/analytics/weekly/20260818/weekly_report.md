@@ -1,6 +1,6 @@
 # FX Weekly Report v2 — 20260811 to 20260817
 
-Generated: 2026-09-01T06:30:34Z
+Generated: 2026-09-06T06:06:25Z
 Report date (JST): 2026-08-18T08:00:00+09:00
 Business days: 5
 Total observations: 35

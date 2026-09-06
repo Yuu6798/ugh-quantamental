@@ -5,6 +5,7 @@
 
 ## Review Flags
 
+- `inspect_magnitude_mapping`
 - `regime_direction_collapse`
 - `volatility_direction_collapse`
 
@@ -12,9 +13,9 @@
 
 | Baseline | Dir Delta | Close Err Delta | Mag Err Delta |
 |---|---|---|---|
-| baseline_random_walk | -0.39 | -3.89 bp | +5.96 bp |
-| baseline_prev_day_direction | +0.04 | +13.95 bp | +7.02 bp |
-| baseline_simple_technical | -0.04 | +25.18 bp | +13.82 bp |
+| baseline_random_walk | -0.32 | -5.53 bp | +7.23 bp |
+| baseline_prev_day_direction | +0.05 | +15.90 bp | +7.30 bp |
+| baseline_simple_technical | 0.00 | +21.31 bp | +9.33 bp |
 
 ## Weekly Trends
 
@@ -25,12 +26,13 @@
 | 20260810-20260814 | 28 | - |  | 5 | 0 | 0 | 100.0% |
 | 20260811-20260817 | 35 | - |  | 5 | 0 | 0 | 100.0% |
 | 20260817-20260821 | 28 | - |  | 5 | 0 | 0 | 100.0% |
-| 20260818-20260824 | 49 | - |  | 5 | 0 | 0 | 100.0% |
+| 20260818-20260824 | 35 | - |  | 5 | 0 | 0 | 100.0% |
 | 20260824-20260828 | 21 | - |  | 4 | 0 | 3 | 100.0% |
-| 20260825-20260831 | 42 | - |  | 4 | 0 | 4 | 100.0% |
+| 20260825-20260831 | 28 | - |  | 4 | 0 | 4 | 100.0% |
 
 ## Logic Audit Candidates
 
+- magnitude/close-error mapping
 - regime-stratified direction logic
 - volatility-stratified direction logic
 
@@ -38,8 +40,9 @@
 
 | ID | Category | Rationale | Status |
 |---|---|---|---|
-| CC-001 | logic_audit | UGH direction rate collapsed below 40% in confirmed regime slice(s): trending... | proposed |
-| CC-002 | logic_audit | UGH direction rate collapsed below 40% in confirmed volatility slice(s): norm... | proposed |
+| CC-001 | logic_audit | UGH mean abs close error is 5.5 bp worse than baseline_random_walk (threshold... | proposed |
+| CC-002 | logic_audit | UGH direction rate collapsed below 40% in confirmed regime slice(s): trending... | proposed |
+| CC-003 | logic_audit | UGH direction rate collapsed below 40% in confirmed volatility slice(s): norm... | proposed |
 
 ## Version Decision
 
@@ -49,7 +52,7 @@
 
 ## Final Recommendation
 
-> Review direction logic per regime — a confirmed regime slice collapsed despite an acceptable blended metric. Review direction logic per volatility regime — a confirmed volatility slice collapsed despite an acceptable blended metric.
+> Review magnitude/close-error mapping in UGH engine. Review direction logic per regime — a confirmed regime slice collapsed despite an acceptable blended metric. Review direction logic per volatility regime — a confirmed volatility slice collapsed despite an acceptable blended metric.
 
 ---
 
