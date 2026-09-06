@@ -1,6 +1,6 @@
 # STATUS - ugh-quantamental
 
-最終更新: 2026-09-05
+最終更新: 2026-09-06
 
 このファイルは日次の project snapshot として、現在フェーズ、次の発行順序、直近 merged を保持する。安定方針は `CLAUDE.md` / `AGENTS.md` に置き、canonical な milestone 表は `PLANS.md`、フェーズ計画は `docs/engine_review_2026_05_planning.md` / `docs/specs/` を参照する。
 
@@ -8,20 +8,19 @@
 
 ## Phase
 
-Milestones 1-18 完了、engine default **v2.6** (FX-RANGE-DECOUPLE #122)。2026-08 月次レビューの briefs 4 本 (GOV-FLAT-AWARE / OUTCOME-CATCHUP / ESTAR-LAG / PRICE-ALERT) を **PR #125 で全実装・main 反映済み** (2026-08-31 merge、Claude 完結実装: Sonnet 並列 agent 4 本 + self-review 1 回 + Codex 2 rounds)。ESTAR-LAG の実データ ablation で **SMA20 飽和仮説は棄却** (spot_vs_sma20 差し替えは 6 セル全てで転換 0 営業日シフト)、**momentum_5d が一貫した律速** (−2〜−10 営業日)。raw e_star 符号転換は emitted 方向より早い (epsilon dead-zone の方法論差、順序は同一)。governance は excl-flat 判定へ移行済 (9/1 月次で初運用)、outcome catch-up は 8/27 stranded batch を初回実行で回収見込み、price alert は GitHub Issue 通知で稼働開始。次: 9/1 月次 governance 初運用確認 → 9 月中旬レンジ幅較正 brief → momentum_5d × variant 重み相互作用の追調査。フォローアップ候補: 正常評価済み window の lag-1 catch-up 再該当による冗長 history 書込 (データ破損は dedupe で防止済)。運用: scheduler 遅延 3 営業日連続を受け daily/price-alert cron を :23/:37 へ移動 (#127、9/3 merge) — GitHub 側の広域遅延 (全 cron 4〜5h) が続き効果は未判定。9/5 週報 (#128) で catch-up 再発行の二重計上を検出・修正、202608 governance は要再生成。
+Milestones 1-18 完了、engine default **v2.6** (FX-RANGE-DECOUPLE #122)。2026-08 月次レビューの briefs 4 本 (GOV-FLAT-AWARE / OUTCOME-CATCHUP / ESTAR-LAG / PRICE-ALERT) を **PR #125 で全実装・main 反映済み** (2026-08-31 merge、Claude 完結実装: Sonnet 並列 agent 4 本 + self-review 1 回 + Codex 2 rounds)。ESTAR-LAG の実データ ablation で **SMA20 飽和仮説は棄却** (spot_vs_sma20 差し替えは 6 セル全てで転換 0 営業日シフト)、**momentum_5d が一貫した律速** (−2〜−10 営業日)。raw e_star 符号転換は emitted 方向より早い (epsilon dead-zone の方法論差、順序は同一)。governance は excl-flat 判定へ移行済 (9/1 月次で初運用)、outcome catch-up は 8/27 stranded batch を初回実行で回収見込み、price alert は GitHub Issue 通知で稼働開始。次: 9/1 月次 governance 初運用確認 → 9 月中旬レンジ幅較正 brief → momentum_5d × variant 重み相互作用の追調査。フォローアップ候補: 正常評価済み window の lag-1 catch-up 再該当による冗長 history 書込 (データ破損は dedupe で防止済)。運用: scheduler 遅延 3 営業日連続を受け daily/price-alert cron を :23/:37 へ移動 (#127、9/3 merge) — GitHub 側の広域遅延 (全 cron 4〜5h) が続き効果は未判定。9/5 週報 (#128) で catch-up 再発行の二重計上を検出・修正、202608 governance は 9/6 に再生成済み (ユーザー承認、monthly dispatch report_date=20260901): excl-flat の符号割れは維持 (prev_day_direction +0.053 / −0.067)、`inspect_direction_logic` 非発火のまま、**`inspect_magnitude_mapping` が新規発火** (再生成前は二重計上が UGH の誤差を過小に見せていた)。
 
 ## 次の発行順序
 
 active queue - 未着手または進行中の Phase / Brief / Milestone のみを置く。終了した項目は wrap-up step 4 で `## 直近 merged` に移す。
 
-1. **[要ユーザー判断] 202608 月次 governance の再生成** - PR #128 の二重計上修正後、`fx-analysis-pipeline.yml` を monthly mode で dispatch して decision log / flags / excl-flat delta を作り直す (fx-daily-data の analytics を書き換える outward 操作)。再生成前の数値は引用しない。
-2. **lag-1 catch-up 再該当の書き側修正 (brief 候補)** - 正常評価済み window を候補判定で除外し、冗長な END-dir 再発行を止める。読み側 dedupe (#125 / #128) で破損は防止済だが、#128 の二重計上はこれが原因。
-3. **レンジ幅較正の brief 化 — 9 月中旬** - robust statistic + 中心の置き方 + 終値軸目標。7/30 が 20 窓から抜けた後 (8/31〜) の幅を 2 週分観測してから。基準点: 8/10 上 6pips miss / 8/19 下 9pips hit。
-4. **momentum_5d × variant 重み相互作用の追調査** - ESTAR-LAG ablation の帰結 (SMA20 棄却、momentum_5d が律速 −2〜−10 営業日)。9/2 ショック後は発行方向が 1–2 営業日で転換 (8 月 6 / 14) — 「転換速度はショックの型に依存」を補助仮説に、raw e_star を `analyze_estar_lag.py` で確定してから比較。engine 改変はこの調査を見てから。
-5. **regime=choppy の判定保留を継続** - 標本ゼロ 10 週目。intervention_risk 非 low 日は 36 obs 中 33 miss / 3 hit (方向のみ弱い。レンジは 8 月の非 low 日 8/8 全的中、9/2–9/3 の high-vol 2 日は 0/2)。label は move-size 由来、「大変動日に弱い」と読む。
-6. **governance spec `Status: Draft` バナーの実態確認** - 実装完備なのにバナーが `Draft`。確認し必要なら更新。
-7. **売買 / execution レイヤーの planning doc 起草** - conviction は e_star 符号整合時のみ信頼可 (2026-08 findings §1) — sizing 入力設計はこの条件付けを織り込む。
-8. **follow-up (低優先)** - #116 `_resolve_annotation_source` 純関数化 / #119 stC scoreboard rollup / 最終 retry が JST 日付をまたいだ場合の business-day ガード赤 (9/4、実害なし) / PRICE-ALERT の sticky 挙動 (連続急落が 1 通知に畳まれる)。グリッド方針 (B7) は **2026-08-30 ユーザー判断で終了 — 追跡・エスカレーション対象外** (週報モニタは事実報告のみ継続)。
+1. **lag-1 catch-up 再該当の書き側修正 (brief 候補)** - 正常評価済み window を候補判定で除外し、冗長な END-dir 再発行を止める。読み側 dedupe (#125 / #128) で破損は防止済だが、#128 の二重計上はこれが原因。
+2. **レンジ幅較正の brief 化 — 9 月中旬** - robust statistic + 中心の置き方 + 終値軸目標。7/30 が 20 窓から抜けた後 (8/31〜) の幅を 2 週分観測してから。基準点: 8/10 上 6pips miss / 8/19 下 9pips hit。
+3. **momentum_5d × variant 重み相互作用の追調査** - ESTAR-LAG ablation の帰結 (SMA20 棄却、momentum_5d が律速 −2〜−10 営業日)。9/2 ショック後は発行方向が 1–2 営業日で転換 (8 月 6 / 14) — 「転換速度はショックの型に依存」を補助仮説に、raw e_star を `analyze_estar_lag.py` で確定してから比較。engine 改変はこの調査を見てから。 **再生成後の 202608 governance で `inspect_magnitude_mapping` が新規発火** (UGH 平均絶対誤差が random_walk より 5.5bp 悪化、閾値 5.0 — 二重計上されていた 8/21–8/27 の静かな up 連勝 (誤差 2–7bp) が UGH を過大評価していた)。7 月に「代替 5 案が改善せず据え置き」とした magnitude 論点を、訂正済みデータで 9 月月次に再開する。
+4. **regime=choppy の判定保留を継続** - 標本ゼロ 10 週目。intervention_risk 非 low 日は 36 obs 中 33 miss / 3 hit (方向のみ弱い。レンジは 8 月の非 low 日 8/8 全的中、9/2–9/3 の high-vol 2 日は 0/2)。label は move-size 由来、「大変動日に弱い」と読む。
+5. **governance spec `Status: Draft` バナーの実態確認** - 実装完備なのにバナーが `Draft`。確認し必要なら更新。
+6. **売買 / execution レイヤーの planning doc 起草** - conviction は e_star 符号整合時のみ信頼可 (2026-08 findings §1) — sizing 入力設計はこの条件付けを織り込む。
+7. **follow-up (低優先)** - #116 `_resolve_annotation_source` 純関数化 / #119 stC scoreboard rollup / 最終 retry が JST 日付をまたいだ場合の business-day ガード赤 (9/4、実害なし) / PRICE-ALERT の sticky 挙動 (連続急落が 1 通知に畳まれる)。グリッド方針 (B7) は **2026-08-30 ユーザー判断で終了 — 追跡・エスカレーション対象外** (週報モニタは事実報告のみ継続)。
 
 ## 直近 merged
 
