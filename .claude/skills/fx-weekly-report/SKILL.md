@@ -72,28 +72,45 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    | # | Failure point | Run | Log signature |
    |---|---|---|---|
    | a | **Any** failure before the weekly block, which needs an `automation_result` the run never produced: the business-day guard (a delayed retry crossed 15:00 UTC into JST Saturday), but equally a config/validation error, a final-retry data-fetch failure, a stale-snapshot rejection, a migration error | **red** | whichever `_fail` message applies — `is not a protocol business day`, `Data fetch failed on final retry`, or the generic `Protocol run failed` wrapper. Read the message; do not assume the guard |
-   | b | The `_has_fresh_observations` gate skipped the weekly block, because nothing produced a `labeled_observations_path` | green | **no** `--- Weekly report (Friday auto-trigger) ---` header. The skip prints nothing, so the missing header is the only reliable tell — see below for which warning, if any, accompanies it |
+   | b | The Friday auto-trigger's `if` was false. It has **four** clauses — `write_csv_exports`, the returned `as_of_jst` is a Friday, `FX_LAST_RETRY=1`, fresh observations — and any one of them skips the block | green | **no** `--- Weekly report (Friday auto-trigger) ---` header. The skip prints nothing, so the missing header is the only tell common to all four — see below for finding which clause |
    | c | The weekly block ran and threw; also a non-fatal `except` | green | `[WARN] Weekly report generation failed` |
    | d | Generation succeeded but the data-branch push step failed | **red** (the step has no `continue-on-error`) | the push step's own failure |
 
-   **Case (b) has four sub-paths and only three of them log anything**, so do
-   not conclude from a clean log that the gate was not the cause. The gate
-   tests one thing — whether `labeled_observations_path` came back truthy —
-   and every one of these leaves it falsy:
+   **Case (b): establish which clause was false before blaming the data.**
+   A missing header tells you the `if` was false and nothing more, and three
+   of the four clauses can fail on a run that is entirely healthy. Walk them
+   in order:
 
-   - `run_annotation_analytics` itself raised → `Annotation/analytics layer
-     failed (non-fatal)` (caught in `automation.py`);
-   - its Step C raised → `Labeled observations step failed (non-fatal)`
-     (caught in `analytics_annotations.py`);
-   - `build_labeled_observations` swallowed its own exception and returned
-     `None` → `labeled_observations generation failed (non-fatal)` (caught in
-     `labeled_observations.py`);
-   - it returned `None` with **no** warning at all, because `history/` was
-     missing or the scan produced zero rows.
+   1. `write_csv_exports` — ruled out above.
+   2. **The returned `as_of_jst` is a Friday.** This is
+      `automation_result.as_of_jst`, not the date the run was launched with.
+      When the provider's newest completed window is one business day behind,
+      `automation.py` rewrites `as_of_jst` back to Thursday and re-fetches,
+      logging `Provider data is 1 business day behind ... adjusting as_of_jst
+      from ... to ...`. That is a supported fallback: the run is green and the
+      data is fine, but it is no longer a Friday run, so the weekly block is
+      skipped. Read the effective `as_of_jst` out of the log before going
+      further.
+   3. `FX_LAST_RETRY=1` — set only on the last scheduled attempt. A Friday run
+      with no header is **expected** for the earlier attempts; confirm you are
+      reading the final one.
+   4. `_has_fresh_observations` — the gate proper, which tests one thing:
+      whether `labeled_observations_path` came back truthy. Four things leave
+      it falsy and **only three of them log anything**:
 
-   So: check for the header first. If it is absent on a Friday final attempt,
-   grep the log for those three warning strings; if none appear, the
-   observations step returned no rows and you must inspect `history/` itself.
+      - `run_annotation_analytics` itself raised → `Annotation/analytics layer
+        failed (non-fatal)` (caught in `automation.py`);
+      - its Step C raised → `Labeled observations step failed (non-fatal)`
+        (caught in `analytics_annotations.py`);
+      - `build_labeled_observations` swallowed its own exception and returned
+        `None` → `labeled_observations generation failed (non-fatal)` (caught
+        in `labeled_observations.py`);
+      - it returned `None` with **no** warning at all, because `history/` was
+        missing or the scan produced zero rows.
+
+   Only once clauses 1–3 check out and none of those three warnings appears
+   may you conclude that the observations step returned no rows and go
+   inspect `history/` itself.
 
    Case (a) is what happened on 08-29, 09-05 and 09-12, the only absences
    since the artifact began appearing weekly from 2026-04-18 through 08-22.
