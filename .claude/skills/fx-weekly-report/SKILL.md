@@ -56,16 +56,17 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    `FX_LAST_RETRY=1` AND step 8 produced fresh observations), and the
    workflow pushes it to the data branch. **A missing Saturday artifact is
    therefore a symptom, never the normal state** — generation-and-publication
-   did not succeed. **Three of its four failure points leave the run green**,
-   so never read a green Friday as proof the artifact exists. Walk them in
-   pipeline order, each with its own log signature:
+   did not succeed. **Two of its four failure points leave the run green**, so
+   a green Friday is not proof the artifact exists — and equally, a red Friday
+   is not proof the guard was the cause. Walk them in pipeline order, each
+   with its own log signature:
 
    | # | Failure point | Run | Log signature |
    |---|---|---|---|
-   | a | Business-day guard raises in step 1 of `run_fx_daily_protocol_once` — a delayed retry crossed 15:00 UTC into JST Saturday | **red** | `is not a protocol business day` |
+   | a | **Any** failure before the weekly block, which needs an `automation_result` the run never produced: the business-day guard (a delayed retry crossed 15:00 UTC into JST Saturday), but equally a config/validation error, a final-retry data-fetch failure, a stale-snapshot rejection, a migration error | **red** | whichever `_fail` message applies — `is not a protocol business day`, `Data fetch failed on final retry`, or the generic `Protocol run failed` wrapper. Read the message; do not assume the guard |
    | b | The `_has_fresh_observations` gate skipped the weekly block, because nothing produced a `labeled_observations_path` | green | **no** `--- Weekly report (Friday auto-trigger) ---` header. The skip prints nothing, so the missing header is the only reliable tell — see below for which warning, if any, accompanies it |
    | c | The weekly block ran and threw; also a non-fatal `except` | green | `[WARN] Weekly report generation failed` |
-   | d | Generation succeeded but the data-branch push step failed | green or red | the push step's own conclusion |
+   | d | Generation succeeded but the data-branch push step failed | **red** (the step has no `continue-on-error`) | the push step's own failure |
 
    **Case (b) has four sub-paths and only three of them log anything**, so do
    not conclude from a clean log that the gate was not the cause. The gate
