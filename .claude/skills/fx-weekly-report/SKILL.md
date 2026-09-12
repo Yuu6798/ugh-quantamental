@@ -55,13 +55,20 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    and exports it on Friday's final attempt (`as_of_jst` is a Friday AND
    `FX_LAST_RETRY=1` AND step 8 produced fresh observations), and the
    workflow pushes it to the data branch. **A missing Saturday artifact is
-   therefore a symptom, never the normal state** — it means that Friday run
-   did not reach the block. It was produced every week from 2026-04-18 to
-   2026-08-22 and has been absent since (08-29, 09-05, 09-12), each time
-   because the delayed final retry crossed 15:00 UTC into JST Saturday and
-   the business-day guard failed the run before the weekly block. Diagnose
-   which run failed and report it under 運用ヘルス; do not record the absence
-   as expected. A second directory also exists per week —
+   therefore a symptom, never the normal state** — generation-and-publication
+   did not succeed. It has three distinct failure points, and a green run
+   does not rule the artifact out, so check them in order before concluding:
+   (a) the Friday final run never reached the block — the business-day guard
+   raises in step 1 of `run_fx_daily_protocol_once` when a delayed retry
+   crosses 15:00 UTC into JST Saturday (this is what happened on 08-29,
+   09-05 and 09-12, the only absences since the artifact began appearing
+   weekly on 2026-04-18 through 08-22); (b) the block ran and threw — it is
+   wrapped in a non-fatal `except` that only prints
+   `[WARN] Weekly report generation failed`, so the run is green and the
+   artifact is absent; (c) generation succeeded but the data-branch push
+   step failed. Inspect the Friday run's log for the guard error and for
+   that WARN line, and the push step's conclusion; report what you find
+   under 運用ヘルス. Never record the absence as expected. A second directory also exists per week —
    `fx-analysis-pipeline.yml`'s *Monday*-dated one covers the **previous**
    week, so reading it silently gives you last week's numbers. **Always
    verify the window in the title line** of whatever file you open. To
