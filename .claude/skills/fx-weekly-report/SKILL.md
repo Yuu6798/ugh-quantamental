@@ -49,14 +49,77 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
 ## 3. Collect the numbers
 
 1. **Weekly v2 artifact** (source of truth for aggregates):
-   `csv/analytics/weekly/<saturday YYYYMMDD>/weekly_report.md`, written Friday
-   ~12:00–13:00 UTC with window `<start>`–`<end>`. **Always verify the window
-   in its title line** — two directories exist per week and they cover
-   different weeks: the Saturday-dated one is the week that just closed, while
-   `fx-analysis-pipeline.yml`'s Monday run writes a *Monday*-dated directory
-   covering the **previous** week. Reading the Monday directory silently gives
-   you last week's numbers. If it is missing or the window is wrong,
-   regenerate without touching the branch:
+   `csv/analytics/weekly/<saturday YYYYMMDD>/weekly_report.md` with window
+   `<start>`–`<end>`. Its producer is **the daily protocol itself**, not the
+   disabled `fx-weekly-report.yml`: `run_fx_daily_protocol.py` auto-generates
+   and exports it on Friday's final attempt (`as_of_jst` is a Friday AND
+   `FX_LAST_RETRY=1` AND step 8 produced fresh observations), and the
+   workflow pushes it to the data branch. **A missing Saturday artifact is
+   therefore a symptom, never the normal state** — generation-and-publication
+   did not succeed — **once you have ruled out that CSV exports were off at
+   all**. `FX_WRITE_CSV_EXPORTS=0` skips Step 8 entirely *and* fails the
+   trigger's own first clause, so the run is green with no header and no
+   warning even though `history/` is perfectly healthy. Check the workflow
+   env / repo variable first; that is a configuration state, not one of the
+   failures below, and diagnosing it as "zero observation rows" sends you to
+   the wrong place.
+
+   With exports on: **two of the four failure points leave the run green**, so
+   a green Friday is not proof the artifact exists — and equally, a red Friday
+   is not proof the guard was the cause. Walk them in pipeline order, each
+   with its own log signature:
+
+   | # | Failure point | Run | Log signature |
+   |---|---|---|---|
+   | a | **Any** failure before the weekly block, which needs an `automation_result` the run never produced: the business-day guard (a delayed retry crossed 15:00 UTC into JST Saturday), but equally a config/validation error, a final-retry data-fetch failure, a stale-snapshot rejection, a migration error | **red** | whichever `_fail` message applies — `is not a protocol business day`, `Data fetch failed on final retry`, or the generic `Protocol run failed` wrapper. Read the message; do not assume the guard |
+   | b | The Friday auto-trigger's `if` was false. It has **four** clauses — `write_csv_exports`, the returned `as_of_jst` is a Friday, `FX_LAST_RETRY=1`, fresh observations — and any one of them skips the block | green | **no** `--- Weekly report (Friday auto-trigger) ---` header. The skip prints nothing, so the missing header is the only tell common to all four — see below for finding which clause |
+   | c | The weekly block ran and threw; also a non-fatal `except` | green | `[WARN] Weekly report generation failed` |
+   | d | Generation succeeded but the data-branch push step failed | **red** (the step has no `continue-on-error`) | the push step's own failure |
+
+   **Case (b): establish which clause was false before blaming the data.**
+   A missing header tells you the `if` was false and nothing more, and three
+   of the four clauses can fail on a run that is entirely healthy. Walk them
+   in order:
+
+   1. `write_csv_exports` — ruled out above.
+   2. **The returned `as_of_jst` is a Friday.** This is
+      `automation_result.as_of_jst`, not the date the run was launched with.
+      When the provider's newest completed window is one business day behind,
+      `automation.py` rewrites `as_of_jst` back to Thursday and re-fetches,
+      logging `Provider data is 1 business day behind ... adjusting as_of_jst
+      from ... to ...`. That is a supported fallback: the run is green and the
+      data is fine, but it is no longer a Friday run, so the weekly block is
+      skipped. Read the effective `as_of_jst` out of the log before going
+      further.
+   3. `FX_LAST_RETRY=1` — set only on the last scheduled attempt. A Friday run
+      with no header is **expected** for the earlier attempts; confirm you are
+      reading the final one.
+   4. `_has_fresh_observations` — the gate proper, which tests one thing:
+      whether `labeled_observations_path` came back truthy. Four things leave
+      it falsy and **only three of them log anything**:
+
+      - `run_annotation_analytics` itself raised → `Annotation/analytics layer
+        failed (non-fatal)` (caught in `automation.py`);
+      - its Step C raised → `Labeled observations step failed (non-fatal)`
+        (caught in `analytics_annotations.py`);
+      - `build_labeled_observations` swallowed its own exception and returned
+        `None` → `labeled_observations generation failed (non-fatal)` (caught
+        in `labeled_observations.py`);
+      - it returned `None` with **no** warning at all, because `history/` was
+        missing or the scan produced zero rows.
+
+   Only once clauses 1–3 check out and none of those three warnings appears
+   may you conclude that the observations step returned no rows and go
+   inspect `history/` itself.
+
+   Case (a) is what happened on 08-29, 09-05 and 09-12, the only absences
+   since the artifact began appearing weekly from 2026-04-18 through 08-22.
+   Report what you find under 運用ヘルス; never record the absence as
+   expected. A second directory also exists per week —
+   `fx-analysis-pipeline.yml`'s *Monday*-dated one covers the **previous**
+   week, so reading it silently gives you last week's numbers. **Always
+   verify the window in the title line** of whatever file you open. To
+   regenerate as a workaround, without touching the branch:
    `FX_CSV_OUTPUT_DIR=<scratchpad>/fxdata/csv FX_REPORT_DATE=<next Monday> FX_WEEK_DAYS=5 python scripts/run_fx_weekly_report.py`
    (report date = next Monday makes the window land on `<start>`–`<end>`).
    **Sanity-check the artifact's `Obs` column before using any number from
@@ -156,6 +219,22 @@ Interpretation rules learned over the series — apply, don't re-derive:
   Quote median close error and range hit alongside direction rate whenever
   FLAT days distort it (e.g. 7/13 week: 25% direction but best-in-series
   median error).
+- **A claim appears in three places; correcting one does not correct the
+  others.** Every conclusion is stated in the TL;DR, argued in its body
+  section, and restated imperatively in 次週への持ち越し. After changing any
+  claim, grep the whole report for its key term and re-read *every* hit —
+  the TL;DR included, since that is what a reader carries away. The
+  2026-09-12 report failed this twice in consecutive review rounds: the
+  momentum attribution was retracted in the body, still stood in the
+  carry-over (round 4), was fixed there, and still stood in the TL;DR
+  (round 5). A narrow "body↔carry-over" pass is not enough. Treat this as a
+  mandatory consistency sweep alongside prose↔table.
+- **A carry-over that names a script must state whether that script can
+  actually do the job.** `analyze_estar_lag.py` hard-codes its analysis and
+  search windows to 2026-08-28 with no CLI override, so "run it on September
+  data" is not executable as written. Check the tool's parameters before
+  directing the next brief at it, and make any needed parameterization an
+  explicit prerequisite task.
 - `baseline_simple_technical` carries a standing up-bias; its direction rate
   flatters it in rising weeks. Compare via close error, not rate alone.
 - `state_correctness_hit` compares forecast dominant_state against the
