@@ -63,9 +63,28 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    | # | Failure point | Run | Log signature |
    |---|---|---|---|
    | a | Business-day guard raises in step 1 of `run_fx_daily_protocol_once` — a delayed retry crossed 15:00 UTC into JST Saturday | **red** | `is not a protocol business day` |
-   | b | Step 8 (annotation/analytics) threw; its non-fatal `except` leaves `annotation_analytics=None`, so the `_has_fresh_observations` gate skips the weekly block | green | `Annotation/analytics layer failed (non-fatal)` **and no** `--- Weekly report (Friday auto-trigger) ---` header. The skip itself prints nothing — the missing header is the tell |
+   | b | The `_has_fresh_observations` gate skipped the weekly block, because nothing produced a `labeled_observations_path` | green | **no** `--- Weekly report (Friday auto-trigger) ---` header. The skip prints nothing, so the missing header is the only reliable tell — see below for which warning, if any, accompanies it |
    | c | The weekly block ran and threw; also a non-fatal `except` | green | `[WARN] Weekly report generation failed` |
    | d | Generation succeeded but the data-branch push step failed | green or red | the push step's own conclusion |
+
+   **Case (b) has four sub-paths and only three of them log anything**, so do
+   not conclude from a clean log that the gate was not the cause. The gate
+   tests one thing — whether `labeled_observations_path` came back truthy —
+   and every one of these leaves it falsy:
+
+   - `run_annotation_analytics` itself raised → `Annotation/analytics layer
+     failed (non-fatal)` (caught in `automation.py`);
+   - its Step C raised → `Labeled observations step failed (non-fatal)`
+     (caught in `analytics_annotations.py`);
+   - `build_labeled_observations` swallowed its own exception and returned
+     `None` → `labeled_observations generation failed (non-fatal)` (caught in
+     `labeled_observations.py`);
+   - it returned `None` with **no** warning at all, because `history/` was
+     missing or the scan produced zero rows.
+
+   So: check for the header first. If it is absent on a Friday final attempt,
+   grep the log for those three warning strings; if none appear, the
+   observations step returned no rows and you must inspect `history/` itself.
 
    Case (a) is what happened on 08-29, 09-05 and 09-12, the only absences
    since the artifact began appearing weekly from 2026-04-18 through 08-22.
