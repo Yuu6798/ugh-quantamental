@@ -56,7 +56,15 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    `FX_LAST_RETRY=1` AND step 8 produced fresh observations), and the
    workflow pushes it to the data branch. **A missing Saturday artifact is
    therefore a symptom, never the normal state** — generation-and-publication
-   did not succeed. **Two of its four failure points leave the run green**, so
+   did not succeed — **once you have ruled out that CSV exports were off at
+   all**. `FX_WRITE_CSV_EXPORTS=0` skips Step 8 entirely *and* fails the
+   trigger's own first clause, so the run is green with no header and no
+   warning even though `history/` is perfectly healthy. Check the workflow
+   env / repo variable first; that is a configuration state, not one of the
+   failures below, and diagnosing it as "zero observation rows" sends you to
+   the wrong place.
+
+   With exports on: **two of the four failure points leave the run green**, so
    a green Friday is not proof the artifact exists — and equally, a red Friday
    is not proof the guard was the cause. Walk them in pipeline order, each
    with its own log signature:
