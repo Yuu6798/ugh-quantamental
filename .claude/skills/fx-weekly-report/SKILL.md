@@ -49,14 +49,15 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
 ## 3. Collect the numbers
 
 1. **Weekly v2 artifact** (source of truth for aggregates):
-   `csv/analytics/weekly/<saturday YYYYMMDD>/weekly_report.md`, written Friday
-   ~12:00–13:00 UTC with window `<start>`–`<end>`. **Always verify the window
-   in its title line** — two directories exist per week and they cover
-   different weeks: the Saturday-dated one is the week that just closed, while
-   `fx-analysis-pipeline.yml`'s Monday run writes a *Monday*-dated directory
-   covering the **previous** week. Reading the Monday directory silently gives
-   you last week's numbers. If it is missing or the window is wrong,
-   regenerate without touching the branch:
+   `csv/analytics/weekly/<saturday YYYYMMDD>/weekly_report.md` with window
+   `<start>`–`<end>`. **In practice this file does not exist**: the Saturday
+   job lived in `fx-weekly-report.yml`, whose schedule was disabled in favour
+   of `fx-analysis-pipeline.yml`, so local regeneration is the normal path,
+   not a fallback (2026-08-28 onward; confirmed again 2026-09-05 and 09-12).
+   What the branch does carry is `fx-analysis-pipeline.yml`'s *Monday*-dated
+   directory, which covers the **previous** week — reading it silently gives
+   you last week's numbers, so **always verify the window in the title line**
+   of whatever file you open. Regenerate without touching the branch:
    `FX_CSV_OUTPUT_DIR=<scratchpad>/fxdata/csv FX_REPORT_DATE=<next Monday> FX_WEEK_DAYS=5 python scripts/run_fx_weekly_report.py`
    (report date = next Monday makes the window land on `<start>`–`<end>`).
    **Sanity-check the artifact's `Obs` column before using any number from
