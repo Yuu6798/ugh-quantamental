@@ -172,14 +172,16 @@ Interpretation rules learned over the series — apply, don't re-derive:
   Quote median close error and range hit alongside direction rate whenever
   FLAT days distort it (e.g. 7/13 week: 25% direction but best-in-series
   median error).
-- **After correcting any claim in the body, re-read 次週への持ち越し for the
-  same claim.** The carry-over section restates the body's conclusions in
-  imperative form, so a correction that stops at the body leaves the next
-  session acting on the retracted version. The 2026-09-12 report hit this
-  three times in one review round: the delay range, the mechanism attribution,
-  and the proposed fix were each fixed in the body while the carry-over still
-  carried the old wording. Treat body↔carry-over as a second mandatory
-  consistency pass, alongside prose↔table.
+- **A claim appears in three places; correcting one does not correct the
+  others.** Every conclusion is stated in the TL;DR, argued in its body
+  section, and restated imperatively in 次週への持ち越し. After changing any
+  claim, grep the whole report for its key term and re-read *every* hit —
+  the TL;DR included, since that is what a reader carries away. The
+  2026-09-12 report failed this twice in consecutive review rounds: the
+  momentum attribution was retracted in the body, still stood in the
+  carry-over (round 4), was fixed there, and still stood in the TL;DR
+  (round 5). A narrow "body↔carry-over" pass is not enough. Treat this as a
+  mandatory consistency sweep alongside prose↔table.
 - **A carry-over that names a script must state whether that script can
   actually do the job.** `analyze_estar_lag.py` hard-codes its analysis and
   search windows to 2026-08-28 with no CLI override, so "run it on September
