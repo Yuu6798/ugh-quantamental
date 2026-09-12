@@ -172,6 +172,20 @@ Interpretation rules learned over the series — apply, don't re-derive:
   Quote median close error and range hit alongside direction rate whenever
   FLAT days distort it (e.g. 7/13 week: 25% direction but best-in-series
   median error).
+- **After correcting any claim in the body, re-read 次週への持ち越し for the
+  same claim.** The carry-over section restates the body's conclusions in
+  imperative form, so a correction that stops at the body leaves the next
+  session acting on the retracted version. The 2026-09-12 report hit this
+  three times in one review round: the delay range, the mechanism attribution,
+  and the proposed fix were each fixed in the body while the carry-over still
+  carried the old wording. Treat body↔carry-over as a second mandatory
+  consistency pass, alongside prose↔table.
+- **A carry-over that names a script must state whether that script can
+  actually do the job.** `analyze_estar_lag.py` hard-codes its analysis and
+  search windows to 2026-08-28 with no CLI override, so "run it on September
+  data" is not executable as written. Check the tool's parameters before
+  directing the next brief at it, and make any needed parameterization an
+  explicit prerequisite task.
 - `baseline_simple_technical` carries a standing up-bias; its direction rate
   flatters it in rising weeks. Compare via close error, not rate alone.
 - `state_correctness_hit` compares forecast dominant_state against the
