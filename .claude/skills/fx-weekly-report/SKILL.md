@@ -50,14 +50,22 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
 
 1. **Weekly v2 artifact** (source of truth for aggregates):
    `csv/analytics/weekly/<saturday YYYYMMDD>/weekly_report.md` with window
-   `<start>`–`<end>`. **In practice this file does not exist**: the Saturday
-   job lived in `fx-weekly-report.yml`, whose schedule was disabled in favour
-   of `fx-analysis-pipeline.yml`, so local regeneration is the normal path,
-   not a fallback (2026-08-28 onward; confirmed again 2026-09-05 and 09-12).
-   What the branch does carry is `fx-analysis-pipeline.yml`'s *Monday*-dated
-   directory, which covers the **previous** week — reading it silently gives
-   you last week's numbers, so **always verify the window in the title line**
-   of whatever file you open. Regenerate without touching the branch:
+   `<start>`–`<end>`. Its producer is **the daily protocol itself**, not the
+   disabled `fx-weekly-report.yml`: `run_fx_daily_protocol.py` auto-generates
+   and exports it on Friday's final attempt (`as_of_jst` is a Friday AND
+   `FX_LAST_RETRY=1` AND step 8 produced fresh observations), and the
+   workflow pushes it to the data branch. **A missing Saturday artifact is
+   therefore a symptom, never the normal state** — it means that Friday run
+   did not reach the block. It was produced every week from 2026-04-18 to
+   2026-08-22 and has been absent since (08-29, 09-05, 09-12), each time
+   because the delayed final retry crossed 15:00 UTC into JST Saturday and
+   the business-day guard failed the run before the weekly block. Diagnose
+   which run failed and report it under 運用ヘルス; do not record the absence
+   as expected. A second directory also exists per week —
+   `fx-analysis-pipeline.yml`'s *Monday*-dated one covers the **previous**
+   week, so reading it silently gives you last week's numbers. **Always
+   verify the window in the title line** of whatever file you open. To
+   regenerate as a workaround, without touching the branch:
    `FX_CSV_OUTPUT_DIR=<scratchpad>/fxdata/csv FX_REPORT_DATE=<next Monday> FX_WEEK_DAYS=5 python scripts/run_fx_weekly_report.py`
    (report date = next Monday makes the window land on `<start>`–`<end>`).
    **Sanity-check the artifact's `Obs` column before using any number from
