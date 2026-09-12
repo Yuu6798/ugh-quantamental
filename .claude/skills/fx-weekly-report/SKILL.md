@@ -56,19 +56,21 @@ git -C <scratchpad>/fxdata checkout -f origin/fx-daily-data && git -C <scratchpa
    `FX_LAST_RETRY=1` AND step 8 produced fresh observations), and the
    workflow pushes it to the data branch. **A missing Saturday artifact is
    therefore a symptom, never the normal state** — generation-and-publication
-   did not succeed. It has three distinct failure points, and a green run
-   does not rule the artifact out, so check them in order before concluding:
-   (a) the Friday final run never reached the block — the business-day guard
-   raises in step 1 of `run_fx_daily_protocol_once` when a delayed retry
-   crosses 15:00 UTC into JST Saturday (this is what happened on 08-29,
-   09-05 and 09-12, the only absences since the artifact began appearing
-   weekly on 2026-04-18 through 08-22); (b) the block ran and threw — it is
-   wrapped in a non-fatal `except` that only prints
-   `[WARN] Weekly report generation failed`, so the run is green and the
-   artifact is absent; (c) generation succeeded but the data-branch push
-   step failed. Inspect the Friday run's log for the guard error and for
-   that WARN line, and the push step's conclusion; report what you find
-   under 運用ヘルス. Never record the absence as expected. A second directory also exists per week —
+   did not succeed. **Three of its four failure points leave the run green**,
+   so never read a green Friday as proof the artifact exists. Walk them in
+   pipeline order, each with its own log signature:
+
+   | # | Failure point | Run | Log signature |
+   |---|---|---|---|
+   | a | Business-day guard raises in step 1 of `run_fx_daily_protocol_once` — a delayed retry crossed 15:00 UTC into JST Saturday | **red** | `is not a protocol business day` |
+   | b | Step 8 (annotation/analytics) threw; its non-fatal `except` leaves `annotation_analytics=None`, so the `_has_fresh_observations` gate skips the weekly block | green | `Annotation/analytics layer failed (non-fatal)` **and no** `--- Weekly report (Friday auto-trigger) ---` header. The skip itself prints nothing — the missing header is the tell |
+   | c | The weekly block ran and threw; also a non-fatal `except` | green | `[WARN] Weekly report generation failed` |
+   | d | Generation succeeded but the data-branch push step failed | green or red | the push step's own conclusion |
+
+   Case (a) is what happened on 08-29, 09-05 and 09-12, the only absences
+   since the artifact began appearing weekly from 2026-04-18 through 08-22.
+   Report what you find under 運用ヘルス; never record the absence as
+   expected. A second directory also exists per week —
    `fx-analysis-pipeline.yml`'s *Monday*-dated one covers the **previous**
    week, so reading it silently gives you last week's numbers. **Always
    verify the window in the title line** of whatever file you open. To
