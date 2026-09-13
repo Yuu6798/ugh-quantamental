@@ -317,9 +317,21 @@ for *that* window's outcome/evaluation too — filed there under the
 identical to a later catch-up's `forecast_batch_id` for the window one day
 after. Publishing catch-up recoveries under the start date would silently
 overwrite that already-archived content; keying by the end date instead
-gives every recovery its own directory that cannot pre-exist from a normal
-run (if the end-day run had happened normally, the window would not be a
-catch-up candidate).
+gives every recovery its own directory.
+
+**That directory is not, however, the only place the window's evaluation
+can live, and the parenthetical this paragraph used to carry — "if the
+end-day run had happened normally, the window would not be a catch-up
+candidate" — was false.** Candidacy is distance `>= 1`, so the window that
+closed yesterday is a candidate on every run, including runs where
+yesterday evaluated it normally. A normal step-6 evaluation files that
+window under the end date but keyed by the **end day's own** batch, which
+is a *different* directory from the recovery's (keyed by the window's
+start). Condition 3 below must therefore treat either directory as
+published; a check that looked only at the recovery location read every
+normally-evaluated window as unpublished and republished it, so each run
+wrote a second directory holding the same evaluations and readers counted
+them twice.
 
 Because `publish_csv_to_history_only` never writes `forecast.csv` on its
 own, and the recovered window's own `forecast.csv` lives under a
@@ -332,8 +344,27 @@ optional `forecast_path` argument, so the end-date directory is
 self-contained (`forecast.csv` + `outcome.csv` + `evaluation.csv`) for
 downstream rebuilds that only consider a directory carrying all three
 (`labeled_observations.collect_evaluated_forecast_rows`). The
-history-completeness check that gates condition 3 above therefore requires
-all three files at the end-date location, not just outcome/evaluation.
+history-completeness check that gates condition 3 above therefore asks
+whether this window's evaluation is published, in either of the two
+directories described above, by verifying content rather than filenames:
+
+1. `outcome.csv` names the window's `outcome_id`. The path cannot
+   establish this on its own — forecast batch IDs omit the schema version
+   while outcome IDs include it, so a directory can hold a complete set
+   describing a *different* outcome of the same window.
+2. `evaluation.csv` carries a full batch of rows for that `outcome_id`.
+   `publish_csv_to_history_only` copies outcome, evaluation and forecast in
+   sequence, so an interrupted publish can leave a current outcome beside
+   the previous evaluations.
+3. The evaluated batch's `forecast_id`s are archived — in that same
+   directory, or in the window's own start-date origin directory. A
+   directory owned by a different batch carries a `forecast.csv` of its
+   own, which says nothing about this window, and
+   `collect_evaluated_forecast_rows` joins by `forecast_id`, so
+   evaluations whose forecasts were never archived stay invisible to
+   rebuilds.
+
+Anything unreadable counts as unpublished; re-publishing is idempotent.
 
 A batch's forecast rows can legitimately appear in two directories once
 recovered this way (its own start-date one and the recovery's end-date

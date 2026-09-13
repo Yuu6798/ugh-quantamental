@@ -186,7 +186,12 @@ def _csv_column_values(path: str, column: str) -> list[str] | None:
     try:
         with open(path, newline="", encoding="utf-8") as fh:
             return [row.get(column, "") for row in csv.DictReader(fh)]
-    except OSError:
+    except (OSError, UnicodeDecodeError, csv.Error):
+        # An interrupted copy can leave invalid UTF-8 or malformed CSV behind.
+        # Neither is an OSError, and letting either escape would reach the
+        # catch-up loop's broad handler, which skips the candidate before the
+        # publication-repair branch -- leaving the corrupt archive in place on
+        # every retry, the opposite of this helper's contract.
         return None
 
 

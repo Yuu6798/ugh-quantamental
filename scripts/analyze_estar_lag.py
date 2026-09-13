@@ -1052,6 +1052,17 @@ def run_analysis(
         out: dict[str, dict[str, str | None]] = {}
         for variant_name in ABLATION_VARIANT_NAMES:
             out[variant_name] = {}
+            baseline_primary, _ = baseline_transitions[variant_name]
+            # With no baseline transition date there is no lag to attribute, and
+            # every ablation's shift is None: _rank_key would tie them all and
+            # min() would report whichever term happens to be configured first.
+            # The CLI makes these windows ordinary (the September window is
+            # NO_POST_SHOCK_RECOVERY for three of four variants), so say
+            # nothing rather than emit an arbitrary causal attribution.
+            if baseline_primary.date is None:
+                for ref_kind in REFERENCE_KINDS:
+                    out[variant_name][ref_kind] = None
+                continue
             for ref_kind in REFERENCE_KINDS:
                 candidates = [
                     row
