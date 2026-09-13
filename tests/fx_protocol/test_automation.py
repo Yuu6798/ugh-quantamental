@@ -662,20 +662,26 @@ class TestRunFxDailyProtocolOnce:
             ),
         )
 
-    def test_saturday_landing_carries_over_to_complete_friday(self) -> None:
+    @pytest.mark.parametrize("days_past_friday", [1, 2])
+    def test_weekend_landing_carries_over_to_complete_friday(
+        self, days_past_friday: int
+    ) -> None:
         """A late run that crosses midnight JST continues under the Friday as_of.
 
         This is the path that produces the weekly report: the Friday block in
         scripts/run_fx_daily_protocol.py is gated on
         ``automation_result.as_of_jst.isoweekday() == 5``, so the carried-over run
         must report the Friday, create nothing new, and not raise.
+
+        Both weekend days carry over, because the fallback targets the previous
+        *business* day rather than the previous calendar day.
         """
         from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
 
         snap = self._make_friday_snapshot()
         friday_as_of = snap.as_of_jst
-        saturday_as_of = friday_as_of + timedelta(days=1)
-        assert saturday_as_of.isoweekday() == 6
+        landing_as_of = friday_as_of + timedelta(days=days_past_friday)
+        assert landing_as_of.isoweekday() in (6, 7)
 
         provider = self._make_provider(snap)
         session = self._make_session()
@@ -693,11 +699,11 @@ class TestRunFxDailyProtocolOnce:
         session.commit()
         assert friday_result.forecast_created is True
 
-        # The delayed final retry now sees Saturday.  is_protocol_business_day is
-        # left unpatched: the real calendar must classify this Saturday itself.
+        # The delayed final retry now sees the weekend.  is_protocol_business_day
+        # is left unpatched: the real calendar must classify the day itself.
         with patch(
             "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
-            return_value=saturday_as_of,
+            return_value=landing_as_of,
         ):
             carried = run_fx_daily_protocol_once(cfg, provider, session)
 
@@ -716,7 +722,7 @@ class TestRunFxDailyProtocolOnce:
         assert len(batch.forecasts) == EXPECTED_DAILY_BATCH_SIZE
         session.close()
 
-    def test_saturday_landing_still_raises_without_a_complete_friday(self) -> None:
+    def test_weekend_landing_still_raises_without_a_complete_friday(self) -> None:
         """Without a complete previous-day batch the run must keep failing.
 
         A missing batch is a real outage, not a delayed retry, so the carry-over
@@ -725,7 +731,7 @@ class TestRunFxDailyProtocolOnce:
         from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
 
         snap = self._make_friday_snapshot()
-        saturday_as_of = snap.as_of_jst + timedelta(days=1)
+        landing_as_of = snap.as_of_jst + timedelta(days=1)
         provider = self._make_provider(snap)
         session = self._make_session()
         cfg = FxDailyAutomationConfig(
@@ -735,7 +741,7 @@ class TestRunFxDailyProtocolOnce:
 
         with patch(
             "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
-            return_value=saturday_as_of,
+            return_value=landing_as_of,
         ):
             with pytest.raises(ValueError, match="no complete forecast batch"):
                 run_fx_daily_protocol_once(cfg, provider, session)

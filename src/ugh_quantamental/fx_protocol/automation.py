@@ -251,6 +251,11 @@ def run_fx_daily_protocol_once(
         # forecast batch is already complete: the day's work is then provably
         # done and every remaining step is idempotent.  An absent or partial
         # batch is a genuine outage and must keep failing.
+        #
+        # Note this is the previous *business* day, not the previous calendar
+        # day, so a Sunday landing also carries over to Friday.  That is the
+        # intent: the batch-completeness check, not the size of the gap, is what
+        # makes the carry-over safe.
         carried_over = prev_as_of_jst(as_of_jst)
         if _has_complete_forecast_batch(session, config, carried_over):
             logger.warning(
