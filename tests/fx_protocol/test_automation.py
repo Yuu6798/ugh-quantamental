@@ -641,6 +641,106 @@ class TestRunFxDailyProtocolOnce:
                 run_fx_daily_protocol_once(cfg, provider, session)
         session.close()
 
+    def _make_friday_snapshot(self) -> FxProtocolMarketSnapshot:
+        """Snapshot whose newest completed window ends on a Friday 08:00 JST."""
+        # 24 business-day steps from 2026-01-05 (Mon) land on 2026-02-06 (Fri).
+        wins = _build_windows_raw(24)
+        as_of = wins[-1].window_end_jst
+        assert as_of.isoweekday() == 5, "fixture must end on a Friday"
+        return FxProtocolMarketSnapshot(
+            pair=CurrencyPair.USDJPY,
+            as_of_jst=as_of,
+            current_spot=150.0,
+            completed_windows=wins,
+            market_data_provenance=MarketDataProvenance(
+                vendor="test",
+                feed_name="feed",
+                price_type="mid",
+                resolution="1d",
+                timezone="Asia/Tokyo",
+                retrieved_at_utc=datetime(2026, 2, 6, 0, 0, 0, tzinfo=timezone.utc),
+            ),
+        )
+
+    def test_saturday_landing_carries_over_to_complete_friday(self) -> None:
+        """A late run that crosses midnight JST continues under the Friday as_of.
+
+        This is the path that produces the weekly report: the Friday block in
+        scripts/run_fx_daily_protocol.py is gated on
+        ``automation_result.as_of_jst.isoweekday() == 5``, so the carried-over run
+        must report the Friday, create nothing new, and not raise.
+        """
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+
+        snap = self._make_friday_snapshot()
+        friday_as_of = snap.as_of_jst
+        saturday_as_of = friday_as_of + timedelta(days=1)
+        assert saturday_as_of.isoweekday() == 6
+
+        provider = self._make_provider(snap)
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig(
+            run_outcome_evaluation=False,
+            run_forecast_generation=True,
+        )
+
+        # Friday's own attempt succeeds and persists a complete batch.
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=friday_as_of,
+        ):
+            friday_result = run_fx_daily_protocol_once(cfg, provider, session)
+        session.commit()
+        assert friday_result.forecast_created is True
+
+        # The delayed final retry now sees Saturday.  is_protocol_business_day is
+        # left unpatched: the real calendar must classify this Saturday itself.
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=saturday_as_of,
+        ):
+            carried = run_fx_daily_protocol_once(cfg, provider, session)
+
+        assert carried.as_of_jst == friday_as_of
+        assert carried.as_of_jst.isoweekday() == 5
+        assert carried.forecast_batch_id == friday_result.forecast_batch_id
+        assert carried.forecast_created is False
+
+        # No duplicate records: the batch still holds exactly one full day.
+        from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
+        from ugh_quantamental.persistence.repositories import FxForecastRepository
+
+        batch = FxForecastRepository.load_fx_forecast_batch(
+            session, carried.forecast_batch_id
+        )
+        assert len(batch.forecasts) == EXPECTED_DAILY_BATCH_SIZE
+        session.close()
+
+    def test_saturday_landing_still_raises_without_a_complete_friday(self) -> None:
+        """Without a complete previous-day batch the run must keep failing.
+
+        A missing batch is a real outage, not a delayed retry, so the carry-over
+        must not mask it.
+        """
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+
+        snap = self._make_friday_snapshot()
+        saturday_as_of = snap.as_of_jst + timedelta(days=1)
+        provider = self._make_provider(snap)
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig(
+            run_outcome_evaluation=False,
+            run_forecast_generation=True,
+        )
+
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=saturday_as_of,
+        ):
+            with pytest.raises(ValueError, match="no complete forecast batch"):
+                run_fx_daily_protocol_once(cfg, provider, session)
+        session.close()
+
     def test_one_day_lag_adjusts_as_of_jst(self) -> None:
         """Provider 1 business day behind: as_of_jst falls back to newest_end."""
         from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once

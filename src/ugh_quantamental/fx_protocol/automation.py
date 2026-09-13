@@ -180,6 +180,24 @@ def _make_default_ugh_request(snapshot_ref: str):  # type: ignore[return]
     )
 
 
+def _has_complete_forecast_batch(
+    session: "Session",
+    config: FxDailyAutomationConfig,
+    as_of_jst: datetime,
+) -> bool:
+    """Return ``True`` iff *as_of_jst* already has a complete forecast batch persisted.
+
+    Used to decide whether a run that landed on a non-business day may carry over
+    to the preceding business day instead of failing.
+    """
+    # Deferred to avoid transitive SQLAlchemy import at module load time.
+    from ugh_quantamental.persistence.repositories import FxForecastRepository
+
+    batch_id = make_forecast_batch_id(config.pair, as_of_jst, config.protocol_version)
+    batch = FxForecastRepository.load_fx_forecast_batch(session, batch_id)
+    return batch is not None and len(batch.forecasts) == EXPECTED_DAILY_BATCH_SIZE
+
+
 def run_fx_daily_protocol_once(
     config: FxDailyAutomationConfig,
     provider: FxMarketDataProvider,
@@ -221,10 +239,34 @@ def run_fx_daily_protocol_once(
     now_utc = datetime.now(timezone.utc)
     as_of_jst = current_as_of_jst(now_utc)
     if not is_protocol_business_day(as_of_jst):
-        raise ValueError(
-            f"Today ({as_of_jst.date()} JST) is not a protocol business day. "
-            "Run on Mon–Fri only."
-        )
+        # A scheduled attempt that starts late can cross midnight JST and land on
+        # a weekend, even though the protocol day it belongs to is the business
+        # day that just ended.  Raising here fails the whole run and skips every
+        # later step -- including the Friday weekly-report block in
+        # scripts/run_fx_daily_protocol.py, which requires an as_of_jst that is a
+        # Friday.  That is how three consecutive Saturday-dated weekly artifacts
+        # were lost (2026-08-29, 09-05, 09-12).
+        #
+        # Carry over to the previous business day, but only when that day's
+        # forecast batch is already complete: the day's work is then provably
+        # done and every remaining step is idempotent.  An absent or partial
+        # batch is a genuine outage and must keep failing.
+        carried_over = prev_as_of_jst(as_of_jst)
+        if _has_complete_forecast_batch(session, config, carried_over):
+            logger.warning(
+                "Run landed on %s JST, which is not a protocol business day; "
+                "carrying over to the previous business day %s, whose forecast "
+                "batch is already complete.",
+                as_of_jst.date().isoformat(),
+                carried_over.date().isoformat(),
+            )
+            as_of_jst = carried_over
+        else:
+            raise ValueError(
+                f"Today ({as_of_jst.date()} JST) is not a protocol business day, "
+                f"and the previous business day ({carried_over.date()} JST) has no "
+                "complete forecast batch to carry over. Run on Mon–Fri only."
+            )
 
     # --- Step 2: fetch snapshot ---
     snapshot = provider.fetch_snapshot(as_of_jst)
