@@ -50,3 +50,7 @@
 ## 2026-09-13 (PR #130 merge sweep overflow)
 
 - **PR #124 / 2026-08 月次レビュー + briefs 4 本 + 運用修正** (2026-08-31) - docs/skills/CI。8 月週報 3 本 + `engine_review_2026_08_findings.md` + Task Brief 4 本 (ESTAR-LAG / GOV-FLAT-AWARE / OUTCOME-CATCHUP / PRICE-ALERT) + mail step `continue-on-error` + skill 更新 (2 層 ops check、prose↔table 自己整合ルール)。Codex レビュー 16+ rounds / 41+ threads 全 resolve・全件採用 — 主要訂正: e_star 転換年表 (up 予測 ⟺ e_star 正で引き直し、β 6 営業日 / α・γ 14 営業日、variant 間 8 営業日分散)、レンジ較正トレードオフの定量化 (縮小余地 9pips 未満)、briefs の実装可能性硬化 (実在 API 名、CSV history export、typed config 経路、ablation の参照値/抽出規則/派生入力再構築、result contract)。5 round 到達で自己整合チェックを skill に encode。
+
+## 2026-09-13 (PR #131 merge sweep overflow)
+
+- **PR #125 / 2026-08 briefs 4 本の一括実装** (2026-08-31) - GOV-FLAT-AWARE (excl-flat 列 + 同一 cohort delta 判定移行) / OUTCOME-CATCHUP (有界遡及 FX_OUTCOME_CATCHUP_DAYS=5、savepoint 隔離、window-END dir 発行、publication repair) / ESTAR-LAG (`scripts/analyze_estar_lag.py` + `docs/analysis/estar_lag_2026_08.md` — **SMA20 仮説棄却、momentum_5d が律速**) / PRICE-ALERT (`run_fx_price_alert.py` + workflow、stdlib-only、真 bp 単位、22:00 JST gap 監視、Issue 通知)。Claude 完結実装 (Sonnet worktree agent 4 並列 → cherry-pick 統合 → self-review 1 回で 10+ 件修正)。Codex 2 rounds 全採用 (evaluation_id / forecast_id dedupe、snapshot lookup 全 dir 探索 ほか)。ユーザー側 auto-fix runner と並走し衝突ゼロで統合。
