@@ -1145,7 +1145,9 @@ class TestHasPublishedEvaluation:
         with open(_os.path.join(directory, "outcome.csv"), "w", encoding="utf-8") as fh:
             fh.write(f"outcome_id\n{self.OUTCOME_ID}\n")
         with open(_os.path.join(directory, "forecast.csv"), "w", encoding="utf-8") as fh:
-            fh.write("forecast_id\n" + "".join(f"{i}\n" for i in sorted(self.FORECAST_IDS)))
+            fh.write(",".join(self.FORECAST_COLUMNS) + "\n")
+            for fid in sorted(self.FORECAST_IDS):
+                fh.write(self._forecast_row(fid) + "\n")
         with open(
             _os.path.join(directory, "evaluation.csv"), "w", encoding="utf-8"
         ) as fh:
@@ -1171,6 +1173,27 @@ class TestHasPublishedEvaluation:
         "direction_hit",
         "evaluated_at_utc",
     )
+
+    #: The columns collect_evaluated_forecast_rows reads off a forecast row.
+    FORECAST_COLUMNS = (
+        "forecast_id",
+        "forecast_batch_id",
+        "as_of_jst",
+        "strategy_kind",
+        "forecast_direction",
+        "expected_close_change_bp",
+    )
+
+    def _forecast_row(self, fid: str) -> str:
+        values = {
+            "forecast_id": fid,
+            "forecast_batch_id": "batch-1",
+            "as_of_jst": "2026-03-13T08:00:00+09:00",
+            "strategy_kind": "ugh_v2_alpha",
+            "forecast_direction": "up",
+            "expected_close_change_bp": "12.0",
+        }
+        return ",".join(values[c] for c in self.FORECAST_COLUMNS)
 
     def _evaluation_row(self, fid: str) -> str:
         values = {
@@ -1211,6 +1234,30 @@ class TestHasPublishedEvaluation:
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             self._write(tmpdir, self._full_evaluations() + 'x,"unterminated')
+            assert self._call(tmpdir) is False
+
+    def test_forecast_archive_missing_a_read_column_is_not_published(self) -> None:
+        """A forecast archive the rebuild cannot read is not published either.
+
+        collect_evaluated_forecast_rows needs as_of_jst to date the row and
+        strategy_kind to give the observation its dimensions; without them the
+        deterministic annotation pass drops the row and the labeled observation
+        loses its slices, so the forecast rows still need republishing.
+        """
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write(tmpdir, self._full_evaluations())
+            columns = tuple(c for c in self.FORECAST_COLUMNS if c != "as_of_jst")
+            drop = self.FORECAST_COLUMNS.index("as_of_jst")
+            with open(
+                _os.path.join(tmpdir, "forecast.csv"), "w", encoding="utf-8"
+            ) as fh:
+                fh.write(",".join(columns) + "\n")
+                for fid in sorted(self.FORECAST_IDS):
+                    parts = self._forecast_row(fid).split(",")
+                    del parts[drop]
+                    fh.write(",".join(parts) + "\n")
             assert self._call(tmpdir) is False
 
     def test_missing_required_column_is_not_published(self) -> None:
@@ -1317,5 +1364,6 @@ class TestHasPublishedEvaluation:
             with open(
                 _os.path.join(tmpdir, "forecast.csv"), "w", encoding="utf-8"
             ) as fh:
-                fh.write("forecast_id\nf1\n")
+                fh.write(",".join(self.FORECAST_COLUMNS) + "\n")
+                fh.write(self._forecast_row(sorted(self.FORECAST_IDS)[0]) + "\n")
             assert self._call(tmpdir) is False

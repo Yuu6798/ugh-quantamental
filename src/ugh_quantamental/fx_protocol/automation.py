@@ -184,6 +184,19 @@ def _make_default_ugh_request(snapshot_ref: str):  # type: ignore[return]
 #: Columns ``observability._parse_evaluation_row`` indexes directly.  An
 #: archived evaluation missing any of them cannot be read back, so it does not
 #: count as published no matter how well-formed the file is.
+#: Columns ``labeled_observations.collect_evaluated_forecast_rows`` reads off a
+#: forecast row.  Without ``as_of_jst`` the deterministic annotation pass cannot
+#: date the row and drops it; without ``strategy_kind`` the labeled observation
+#: loses its dimensions.  An archive short of these is not usable either.
+_FORECAST_REQUIRED_COLUMNS: tuple[str, ...] = (
+    "forecast_id",
+    "forecast_batch_id",
+    "as_of_jst",
+    "strategy_kind",
+    "forecast_direction",
+    "expected_close_change_bp",
+)
+
 _EVALUATION_REQUIRED_COLUMNS: tuple[str, ...] = (
     "evaluation_id",
     "forecast_id",
@@ -261,10 +274,10 @@ def _has_published_evaluation(
        ``publish_csv_to_history_only`` copies outcome, evaluation and forecast
        in sequence, so an interrupted publish can leave a current outcome
        beside the previous evaluations.
-    3. The batch's forecast rows are archived, in *history_dir* or in one of
-       *forecast_dirs* (the window's own origin directory).  A directory owned
-       by a different batch carries a ``forecast.csv`` of its own, which says
-       nothing about this window.
+    3. The batch's forecast rows are archived and readable, in *history_dir* or
+       in one of *forecast_dirs* (the window's own origin directory).  A
+       directory owned by a different batch carries a ``forecast.csv`` of its
+       own, which says nothing about this window.
     """
     outcome_rows = _read_csv_rows(os.path.join(history_dir, "outcome.csv"))
     if outcome_rows is None or not any(
@@ -284,7 +297,9 @@ def _has_published_evaluation(
         return False
 
     for candidate in (history_dir, *forecast_dirs):
-        forecast_rows = _read_csv_rows(os.path.join(candidate, "forecast.csv"))
+        forecast_rows = _read_csv_rows(
+            os.path.join(candidate, "forecast.csv"), _FORECAST_REQUIRED_COLUMNS
+        )
         if forecast_rows is not None and forecast_ids <= {
             row.get("forecast_id", "") for row in forecast_rows
         }:

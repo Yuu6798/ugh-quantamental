@@ -941,24 +941,41 @@ def run_analysis(
         )
         for name in ABLATION_SIGNAL_FEATURES
     }
-    pre_shock_term_means = {
-        name: (
-            sum(_estar_term_value(daily_replays[d], name) for d in pre_shock_days)
-            / len(pre_shock_days)
-        )
-        for name in ABLATION_ESTAR_TERMS
+    # e_star terms are referenced PER VARIANT, unlike the statistics and the
+    # SignalFeatures: compute_u reads config.t_weight, which the variants
+    # override (beta 0.20 against alpha's 0.30), so alpha's historical u_score
+    # is not beta's. Injecting it would conflate "restore this term to its
+    # pre-shock level" with "give this variant a different baseline".
+    pre_shock_term_means_by_variant = {
+        variant_name: {
+            name: (
+                sum(
+                    _estar_term_value(daily_replays_by_variant[variant_name][d], name)
+                    for d in pre_shock_days
+                )
+                / len(pre_shock_days)
+            )
+            for name in ABLATION_ESTAR_TERMS
+        }
+        for variant_name in ABLATION_VARIANT_NAMES
     }
 
-    ablation_axes: tuple[tuple[str, tuple[str, ...], dict[str, float]], ...] = (
-        ("statistic", ABLATION_STATS, pre_shock_means),
-        ("estar_term", ABLATION_ESTAR_TERMS, pre_shock_term_means),
-        ("signal_feature", ABLATION_SIGNAL_FEATURES, pre_shock_feature_means),
-    )
 
     ablation_rows: list[dict[str, Any]] = []
     for variant_name in ABLATION_VARIANT_NAMES:
         cfg = _variant_config(variant_name)
         baseline_primary, baseline_secondary = baseline_transitions[variant_name]
+        # Rebuilt per variant so the e_star-term references are that
+        # variant's own; the other two axes are variant-independent.
+        ablation_axes: tuple[tuple[str, tuple[str, ...], dict[str, float]], ...] = (
+            ("statistic", ABLATION_STATS, pre_shock_means),
+            (
+                "estar_term",
+                ABLATION_ESTAR_TERMS,
+                pre_shock_term_means_by_variant[variant_name],
+            ),
+            ("signal_feature", ABLATION_SIGNAL_FEATURES, pre_shock_feature_means),
+        )
         for axis, names, ref_means in ablation_axes:
             for stat_name in names:
                 for ref_kind in REFERENCE_KINDS:
