@@ -46,3 +46,7 @@
 ## 2026-09-12 (PR #129 merge sweep overflow)
 
 - **PR #123 / fx-market-context skill + v2.6 初運用週の事後検証** (2026-08-09) - docs/skills-only。`fx-market-context` skill 新設 (WebSearch で相場コンテキストをリサーチ、週報の必須ステップ化) + `fx-weekly-report` skill 更新 + 8/3–8/7 週報 + findings §10 追補。v2.6 初運用週は Range 4/4 (100%、リプレイ予測と整合)。レビュー ~13 round / 23 threads 全 resolve — 主要訂正: 介入の向き (円買いは USDJPY 押し下げ、底の説明にならない)、state→方向の因果否定 (方向は e_star 経路のみ、state は projection の部分的下流だが fire evidence の主項は prior 自己強化 + event features)、exhaustion ラベルは転換の ground truth でない、intervention_risk は move-size のみで裏付けに使えない、半幅使用率は終値軸で中央値 36%。却下 1 件 (窓の非重複をデータで提示)。
+
+## 2026-09-13 (PR #130 merge sweep overflow)
+
+- **PR #124 / 2026-08 月次レビュー + briefs 4 本 + 運用修正** (2026-08-31) - docs/skills/CI。8 月週報 3 本 + `engine_review_2026_08_findings.md` + Task Brief 4 本 (ESTAR-LAG / GOV-FLAT-AWARE / OUTCOME-CATCHUP / PRICE-ALERT) + mail step `continue-on-error` + skill 更新 (2 層 ops check、prose↔table 自己整合ルール)。Codex レビュー 16+ rounds / 41+ threads 全 resolve・全件採用 — 主要訂正: e_star 転換年表 (up 予測 ⟺ e_star 正で引き直し、β 6 営業日 / α・γ 14 営業日、variant 間 8 営業日分散)、レンジ較正トレードオフの定量化 (縮小余地 9pips 未満)、briefs の実装可能性硬化 (実在 API 名、CSV history export、typed config 経路、ablation の参照値/抽出規則/派生入力再構築、result contract)。5 round 到達で自己整合チェックを skill に encode。
