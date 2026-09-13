@@ -181,7 +181,23 @@ def _make_default_ugh_request(snapshot_ref: str):  # type: ignore[return]
     )
 
 
-def _read_csv_rows(path: str) -> list[dict[str, str]] | None:
+#: Columns ``observability._parse_evaluation_row`` indexes directly.  An
+#: archived evaluation missing any of them cannot be read back, so it does not
+#: count as published no matter how well-formed the file is.
+_EVALUATION_REQUIRED_COLUMNS: tuple[str, ...] = (
+    "evaluation_id",
+    "forecast_id",
+    "outcome_id",
+    "pair",
+    "strategy_kind",
+    "direction_hit",
+    "evaluated_at_utc",
+)
+
+
+def _read_csv_rows(
+    path: str, required_columns: tuple[str, ...] = ()
+) -> list[dict[str, str]] | None:
     """Return the CSV at *path* as a list of row dicts, or ``None`` if unusable.
 
     ``strict=True`` so an archive truncated inside a quoted field raises
@@ -208,6 +224,15 @@ def _read_csv_rows(path: str) -> list[dict[str, str]] | None:
     # _parse_evaluation_row on the first field it coerces.
     for row in rows:
         if None in row or None in row.values():
+            return None
+
+    # A header that is itself short parses cleanly -- every row matches it, so
+    # no None appears -- yet the reader indexes columns it does not have.
+    # "Published" is defined as "the reader can consume it", so a file missing
+    # a column that reader requires is not published however well-formed it is.
+    if required_columns and rows:
+        present = set(rows[0])
+        if not set(required_columns) <= present:
             return None
     return rows
 
@@ -247,7 +272,9 @@ def _has_published_evaluation(
     ):
         return False
 
-    evaluation_rows = _read_csv_rows(os.path.join(history_dir, "evaluation.csv"))
+    evaluation_rows = _read_csv_rows(
+        os.path.join(history_dir, "evaluation.csv"), _EVALUATION_REQUIRED_COLUMNS
+    )
     if evaluation_rows is None:
         return False
     matching = [row for row in evaluation_rows if row.get("outcome_id") == outcome_id]

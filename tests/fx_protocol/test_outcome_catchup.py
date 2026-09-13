@@ -1158,17 +1158,43 @@ class TestHasPublishedEvaluation:
             directory, self.OUTCOME_ID, self.FORECAST_IDS
         )
 
-    def _full_evaluations(self, *, truncate_last: bool = False) -> str:
-        """One evaluation row per forecast in the batch, as production writes.
+    #: The columns observability._parse_evaluation_row indexes directly. The
+    #: fixture carries all of them, because "published" means the reader can
+    #: consume the archive -- a shorter row set would assert a weaker contract
+    #: than the one the code is supposed to enforce.
+    COLUMNS = (
+        "evaluation_id",
+        "forecast_id",
+        "outcome_id",
+        "pair",
+        "strategy_kind",
+        "direction_hit",
+        "evaluated_at_utc",
+    )
 
-        A third column stands in for the many real ones after the IDs, so the
-        truncation case below is representable: the IDs survive and everything
-        after them is lost.
-        """
+    def _evaluation_row(self, fid: str) -> str:
+        values = {
+            "evaluation_id": f"ev-{fid}",
+            "forecast_id": fid,
+            "outcome_id": self.OUTCOME_ID,
+            "pair": "USDJPY",
+            "strategy_kind": "ugh_v2_alpha",
+            "direction_hit": "true",
+            "evaluated_at_utc": "2026-03-16T01:00:00Z",
+        }
+        return ",".join(values[c] for c in self.COLUMNS)
+
+    def _full_evaluations(self, *, truncate_last: bool = False) -> str:
+        """One evaluation row per forecast in the batch, as production writes."""
         fids = sorted(self.FORECAST_IDS)
-        rows = "".join(f"{self.OUTCOME_ID},{fid},true\n" for fid in fids[:-1])
-        last = f"{self.OUTCOME_ID},{fids[-1]}" + ("\n" if truncate_last else ",true\n")
-        return f"outcome_id,forecast_id,direction_hit\n{rows}{last}"
+        rows = "".join(f"{self._evaluation_row(fid)}\n" for fid in fids[:-1])
+        last = self._evaluation_row(fids[-1])
+        if truncate_last:
+            # Cut between fields, keeping the IDs every other check looks at.
+            keep = max(self.COLUMNS.index("forecast_id"), self.COLUMNS.index("outcome_id"))
+            last = ",".join(last.split(",")[: keep + 1])
+        header = ",".join(self.COLUMNS)
+        return f"{header}\n{rows}{last}\n"
 
     def test_complete_archive_is_published(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1185,6 +1211,27 @@ class TestHasPublishedEvaluation:
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             self._write(tmpdir, self._full_evaluations() + 'x,"unterminated')
+            assert self._call(tmpdir) is False
+
+    def test_missing_required_column_is_not_published(self) -> None:
+        """A short header parses cleanly but the reader cannot consume it.
+
+        Every row matches the header, so nothing comes back as None; the
+        archive is well-formed and still unusable, because
+        _parse_evaluation_row indexes columns that are not there.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            columns = tuple(c for c in self.COLUMNS if c != "evaluated_at_utc")
+            rows = "".join(
+                ",".join(
+                    self._evaluation_row(fid).split(",")[
+                        : self.COLUMNS.index("evaluated_at_utc")
+                    ]
+                )
+                + "\n"
+                for fid in sorted(self.FORECAST_IDS)
+            )
+            self._write(tmpdir, f"{','.join(columns)}\n{rows}")
             assert self._call(tmpdir) is False
 
     def test_row_truncated_after_the_ids_is_not_published(self) -> None:
@@ -1206,13 +1253,15 @@ class TestHasPublishedEvaluation:
             self._write(
                 tmpdir,
                 body[: body.rindex("\n") + 1]
-                + f"{self.OUTCOME_ID},{fid},true,extra\n",
+                + f"{self._evaluation_row(fid)},extra\n",
             )
             assert self._call(tmpdir) is False
 
     def test_short_evaluation_set_is_not_published(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            self._write(tmpdir, f"outcome_id,forecast_id\n{self.OUTCOME_ID},f0\n")
+            header = ",".join(self.COLUMNS)
+            row = self._evaluation_row(sorted(self.FORECAST_IDS)[0])
+            self._write(tmpdir, f"{header}\n{row}\n")
             assert self._call(tmpdir) is False
 
     def test_evaluations_without_forecast_ids_are_not_published(self) -> None:
@@ -1223,16 +1272,30 @@ class TestHasPublishedEvaluation:
         to every rebuild -- accepting it would skip the repair for good.
         """
         with tempfile.TemporaryDirectory() as tmpdir:
-            rows = "".join(f"{self.OUTCOME_ID}\n" for _ in self.FORECAST_IDS)
-            self._write(tmpdir, f"outcome_id\n{rows}")
+            columns = tuple(c for c in self.COLUMNS if c != "forecast_id")
+            header = ",".join(columns)
+            row = ",".join(
+                {
+                    "evaluation_id": "ev-1",
+                    "outcome_id": self.OUTCOME_ID,
+                    "pair": "USDJPY",
+                    "strategy_kind": "ugh_v2_alpha",
+                    "direction_hit": "true",
+                    "evaluated_at_utc": "2026-03-16T01:00:00Z",
+                }[c]
+                for c in columns
+            )
+            rows = "".join(f"{row}\n" for _ in self.FORECAST_IDS)
+            self._write(tmpdir, f"{header}\n{rows}")
             assert self._call(tmpdir) is False
 
     def test_evaluations_naming_other_forecasts_are_not_published(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             rows = "".join(
-                f"{self.OUTCOME_ID},other-{fid}\n" for fid in sorted(self.FORECAST_IDS)
+                f"{self._evaluation_row('other-' + fid)}\n"
+                for fid in sorted(self.FORECAST_IDS)
             )
-            self._write(tmpdir, f"outcome_id,forecast_id\n{rows}")
+            self._write(tmpdir, f"{','.join(self.COLUMNS)}\n{rows}")
             assert self._call(tmpdir) is False
 
     def test_other_outcome_is_not_published(self) -> None:
