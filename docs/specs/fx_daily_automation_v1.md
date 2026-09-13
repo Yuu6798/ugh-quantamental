@@ -352,7 +352,10 @@ directories described above, by verifying content rather than filenames:
    establish this on its own — forecast batch IDs omit the schema version
    while outcome IDs include it, so a directory can hold a complete set
    describing a *different* outcome of the same window.
-2. `evaluation.csv` carries a full batch of rows for that `outcome_id`.
+2. `evaluation.csv` carries a full batch of rows for that `outcome_id`,
+   **and the `forecast_id`s on those rows are exactly the batch's**. Rows
+   without a usable `forecast_id` join to nothing, so an archive holding
+   them is not published in any sense that matters.
    `publish_csv_to_history_only` copies outcome, evaluation and forecast in
    sequence, so an interrupted publish can leave a current outcome beside
    the previous evaluations.

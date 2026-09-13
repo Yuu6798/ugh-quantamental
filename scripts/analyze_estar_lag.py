@@ -856,7 +856,15 @@ def run_analysis(
     # 3. Per-variant baseline (unablated) e_star series + transitions.
     # ------------------------------------------------------------------
     search_days = [d for d in present_days if windows.search_start <= d <= windows.search_end]
-    search_dates_iso = [d.isoformat() for d in search_days]
+    # The shift calendar is the COMPLETE business-day sequence of the search
+    # window, not just the days that have snapshots.  business_day_shift
+    # subtracts list indices, so leaving a missing day out would silently
+    # collapse the distance across it -- a Friday-to-Tuesday move would read as
+    # one business day when Monday's snapshot is absent.  Missing snapshots are
+    # explicitly supported and skipped, so this is reachable by construction.
+    search_dates_iso = [
+        d.isoformat() for d in business_days(windows.search_start, windows.search_end)
+    ]
 
     variant_baseline_rows: list[dict[str, Any]] = []
     baseline_transitions: dict[str, tuple[Transition, Transition]] = {}
@@ -1048,8 +1056,8 @@ def run_analysis(
             return (1, row["primary_shift_business_days"])
         return (2, 0)
 
-    def _rate_limiting_for(axis: str) -> dict[str, dict[str, str | None]]:
-        out: dict[str, dict[str, str | None]] = {}
+    def _rate_limiting_for(axis: str) -> dict[str, dict[str, list[str] | None]]:
+        out: dict[str, dict[str, list[str] | None]] = {}
         for variant_name in ABLATION_VARIANT_NAMES:
             out[variant_name] = {}
             baseline_primary, _ = baseline_transitions[variant_name]
@@ -1071,8 +1079,26 @@ def run_analysis(
                     and row["reference_kind"] == ref_kind
                     and row["axis"] == axis
                 ]
-                best = min(candidates, key=_rank_key) if candidates else None
-                out[variant_name][ref_kind] = best["stat"] if best else None
+                if not candidates:
+                    out[variant_name][ref_kind] = None
+                    continue
+                best = min(_rank_key(row) for row in candidates)
+                # Only an intervention that actually moved the transition
+                # earlier -- or removed the lag outright -- is evidence of a
+                # rate limiter. A best rank of "resolved but not earlier" means
+                # nothing here carried it.
+                if best[0] == 1 and best[1] >= 0:
+                    out[variant_name][ref_kind] = None
+                    continue
+                if best[0] == 2:
+                    out[variant_name][ref_kind] = None
+                    continue
+                # Report every candidate sharing the best rank. Taking min()'s
+                # single winner would make the answer depend on the order the
+                # terms happen to be listed in, not on the evidence.
+                out[variant_name][ref_kind] = sorted(
+                    row["stat"] for row in candidates if _rank_key(row) == best
+                )
         return out
 
     # Ranked within an axis, never across them: a statistic and a signal

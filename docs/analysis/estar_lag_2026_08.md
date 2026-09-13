@@ -34,7 +34,16 @@
 >   項の isolation) と `axis == signal_feature` (それらの上流) が加わる。
 >   ランク付けは軸ごとに独立で、`summary.json` の
 >   `rate_limiting_candidate_by_variant_and_reference` は従来どおり statistic 軸
->   のみを指す。
+>   のみを指す。ただし **値は単一名からリストに変わった**: 同順位が複数ある場合に
+>   1 つだけ選ぶと、答えが証拠ではなく列挙順で決まってしまうため。転換を前倒し
+>   する介入が 1 つも無い場合は `null` になる。
+> - **これにより当時の値が 1 セルだけ訂正される**。beta × 中立参照は
+>   `momentum_5d` 単独と報告されていたが、実際には `prev_close_change_bp` と
+>   **shift -2 で同値**であり (§4.1 の表がそのまま示している)、単独名は
+>   `ABLATION_STATS` の並び順で決まっていた。§4.1 の shift 表と、そこから導いた
+>   本文の結論は影響を受けない — momentum_5d が単独最良なのは alpha の両参照と
+>   delta の中立参照、`prev_close_change_bp` が単独最良なのは beta/delta の
+>   pre-shock 参照、残る 1 セルが同値、という読み方になる。
 > - 日付窓はすべて CLI 引数になった。既定値は本ドキュメントの窓を再現する。
 > - `neutral` 参照は項ごとに定義される。符号付き量は 0.0 のままだが、
 >   `alignment` は乗法の単位元 1.0、`fire_probability` は無情報事前確率 0.5 を
