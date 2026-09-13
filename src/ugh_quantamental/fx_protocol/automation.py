@@ -195,19 +195,31 @@ def _has_published_evaluation(history_dir: str, outcome_id: str) -> bool:
     is read rather than inferred from the directory name.
     """
     outcome_path = os.path.join(history_dir, "outcome.csv")
+    evaluation_path = os.path.join(history_dir, "evaluation.csv")
     if not (
         os.path.isfile(outcome_path)
-        and os.path.isfile(os.path.join(history_dir, "evaluation.csv"))
+        and os.path.isfile(evaluation_path)
         and os.path.isfile(os.path.join(history_dir, "forecast.csv"))
     ):
         return False
     try:
         with open(outcome_path, newline="", encoding="utf-8") as fh:
-            return any(row.get("outcome_id") == outcome_id for row in csv.DictReader(fh))
+            if not any(row.get("outcome_id") == outcome_id for row in csv.DictReader(fh)):
+                return False
+        # publish_csv_to_history_only copies outcome, evaluation and forecast in
+        # sequence, so an interrupted publish can leave a current outcome.csv
+        # beside the previous evaluation.csv.  Checking the outcome alone would
+        # read that as complete and skip the repair forever, so require the
+        # evaluations to be present, for this outcome, and a full day's worth.
+        with open(evaluation_path, newline="", encoding="utf-8") as fh:
+            matching = sum(
+                1 for row in csv.DictReader(fh) if row.get("outcome_id") == outcome_id
+            )
     except OSError:
         # An unreadable archive is not proof of publication; re-publishing is
         # idempotent, so fall back to "not published".
         return False
+    return matching == EXPECTED_DAILY_BATCH_SIZE
 
 
 def _has_complete_forecast_batch(

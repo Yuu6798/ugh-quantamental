@@ -5,8 +5,8 @@ Read-only, deterministic, no network calls. Replays the persisted
 ``history/{date}/{batch_id}/input_snapshot.json`` artifacts of the
 ``fx-daily-data`` branch through the existing, unmodified
 ``compute_snapshot_statistics`` -> ``derive_*`` -> projection-engine pipeline
-to locate which raw statistic rate-limits the post-7/30-shock ``e_star``
-sign transition, per UGH v2 variant.
+to locate what rate-limits the post-shock ``e_star`` sign transition, per
+UGH v2 variant.
 
 Every date window is a CLI argument; the defaults reproduce the 2026-08 run.
 
@@ -23,18 +23,25 @@ Two outputs:
    That product, not raw ``e_star``, is what the FLAT epsilon is compared
    against in ``forecasting.py``, so a direction collapsing to flat can be
    attributed to whichever factor actually moved.
-2. An ablation grid (``ablation.csv`` / ``.md``) over two axes, for variants
+2. An ablation grid (``ablation.csv`` / ``.md``) over three axes, for variants
    alpha / beta / delta and two reference values (pre-shock mean, neutral
    0.0), recording each transition-date shift versus the unablated baseline:
 
    - ``statistic``: one raw statistic (``spot_vs_sma20``, ``momentum_5d``,
      ``prev_close_change_bp`` numerator) is held at the reference value and
      the whole statistics -> request path is rebuilt.
-   - ``signal_feature``: one term of ``e_star`` (``fundamental_score``,
-     ``technical_score``, ``price_implied_score``, ``fire_probability``, and
-     the three gravity terms) is held at the reference value on the built
-     request. A statistic feeds several derived scores at once, so the
-     statistic axis alone cannot say which term of ``e_star`` carried a move.
+   - ``estar_term``: one argument ``compute_e_raw`` or ``compute_gravity_bias``
+     actually consumes -- ``u_score``, ``technical_score``,
+     ``price_implied_score``, ``fire_probability``, ``alignment`` and the three
+     gravity terms. **This is the axis that isolates a single term of
+     ``e_star``.** ``u_score`` and ``alignment`` are engine intermediates, so
+     they are substituted after the engine derives them.
+   - ``signal_feature``: ``fundamental_score`` / ``technical_score``, which are
+     upstream of those terms rather than terms themselves -- both feed
+     ``compute_u``, and ``technical_score`` also appears directly in
+     ``direction_signal``, so overriding either moves more than one term. Read
+     it as "which signal did the engine see differently", never as an
+     isolation.
 
    Candidates are ranked within an axis, never across them.
 
@@ -66,6 +73,7 @@ import os
 import sys
 from dataclasses import dataclass
 from datetime import date, timedelta
+from types import SimpleNamespace
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -148,25 +156,42 @@ ABLATION_STATS: tuple[str, ...] = (
     "prev_close_change_bp",
 )
 
-#: ``SignalFeatures`` fields that feed e_star directly, eligible for ablation
-#: on their own axis. The statistics above are upstream of several of these at
-#: once, so a statistic ablation cannot attribute a move to one term of
-#: e_star; these can.
+#: The arguments ``compute_e_raw`` and ``compute_gravity_bias`` actually
+#: consume, each held at a reference value one at a time. This is the axis that
+#: answers "which term of e_star carried the move".
 #:
-#:  - fundamental_score becomes u_score, and technical_score /
-#:    price_implied_score are the other two direction_signal terms
-#:    (compute_e_raw);
-#:  - fire_probability drives the conviction multiplier;
-#:  - grv_lock / regime_fit / narrative_dispersion are the gravity_bias terms
-#:    (compute_gravity_bias).
-ABLATION_SIGNAL_FEATURES: tuple[str, ...] = (
-    "fundamental_score",
+#: ``u_score`` and ``alignment`` are engine intermediates rather than
+#: ``SignalFeatures`` fields, so they are overridden after the engine computes
+#: them (see ``_replay_projection``):
+#:
+#:  - direction_signal = (u_weight*u_score + t_weight*technical_score
+#:    + p_weight*price_implied_score) / sum(weights);
+#:  - conviction_multiplier is driven by fire_probability;
+#:  - alignment multiplies the whole product, and also feeds conviction;
+#:  - grv_lock / regime_fit / narrative_dispersion are the gravity terms.
+ABLATION_ESTAR_TERMS: tuple[str, ...] = (
+    "u_score",
     "technical_score",
     "price_implied_score",
     "fire_probability",
+    "alignment",
     "grv_lock",
     "regime_fit",
     "narrative_dispersion",
+)
+
+#: Terms above that are engine intermediates, not SignalFeatures fields.
+_ESTAR_INTERMEDIATE_TERMS: frozenset[str] = frozenset({"u_score", "alignment"})
+
+#: ``SignalFeatures`` fields that are upstream of the terms above rather than
+#: terms themselves. ``fundamental_score`` and ``technical_score`` both feed
+#: ``compute_u``, and ``technical_score`` additionally appears directly in
+#: ``direction_signal``, so overriding either one moves more than a single
+#: e_star term. Kept as a separate, separately-ranked axis: useful for "which
+#: signal did the engine read differently", never read as an isolation.
+ABLATION_SIGNAL_FEATURES: tuple[str, ...] = (
+    "fundamental_score",
+    "technical_score",
 )
 
 #: Variants included in the ablation grid (brief: alpha, beta, delta — gamma
@@ -412,6 +437,10 @@ class DayReplay:
     #: override).  Held whole so every e_star input term is reachable for
     #: reference means, not just the handful mirrored above.
     signal_features: Any
+    #: Engine intermediates, not SignalFeatures fields: compute_e_raw consumes
+    #: both directly, so both are ablation terms in their own right.
+    u_score: float
+    alignment: float
     e_raw: float
     gravity_bias: float
     e_star: float
@@ -430,6 +459,87 @@ class DayReplay:
     shock_window_in_trailing20: bool
 
 
+def _estar_term_value(replay: DayReplay, name: str) -> float:
+    """Return one e_star term's value from a replay.
+
+    ``u_score`` and ``alignment`` are engine intermediates recorded on the
+    replay; every other term is a ``SignalFeatures`` field.
+    """
+    if name in _ESTAR_INTERMEDIATE_TERMS:
+        return float(getattr(replay, name))
+    return float(getattr(replay.signal_features, name))
+
+
+def _replay_projection(req: Any, config: Any, term_override: dict[str, float] | None):
+    """Run the projection engine, optionally overriding u_score / alignment.
+
+    ``run_projection_engine`` takes features, not the intermediates it derives
+    from them, so ``u_score`` and ``alignment`` cannot be substituted through
+    its signature. With no override this delegates to the engine outright; with
+    one it recomposes the same published engine functions in the same order,
+    then asserts that recomposition reproduces the engine exactly on the
+    unablated path, so a future change to the engine's composition fails here
+    instead of silently producing a different analysis.
+    """
+    from ugh_quantamental.engine.projection import (
+        compute_alignment,
+        compute_conviction,
+        compute_e_raw,
+        compute_e_star,
+        compute_gravity_bias,
+        compute_mismatch_px,
+        compute_mismatch_sem,
+        compute_u,
+        run_projection_engine,
+    )
+
+    proj = req.projection
+    engine_result = run_projection_engine(
+        projection_id=proj.projection_id,
+        horizon_days=proj.horizon_days,
+        question_features=proj.question_features,
+        signal_features=proj.signal_features,
+        alignment_inputs=proj.alignment_inputs,
+        config=config,
+    )
+    if not term_override:
+        return engine_result
+
+    qf, sf, cfg = proj.question_features, proj.signal_features, config
+    u_score = term_override.get("u_score", compute_u(qf, sf, cfg))
+    alignment = term_override.get(
+        "alignment", compute_alignment(proj.alignment_inputs, cfg)
+    )
+    e_raw = compute_e_raw(u_score, sf, alignment, cfg)
+    gravity_bias = compute_gravity_bias(sf, cfg)
+    e_star = compute_e_star(e_raw, gravity_bias)
+    mismatch_px = compute_mismatch_px(e_star, sf)
+    mismatch_sem = compute_mismatch_sem(qf, sf)
+    conviction = compute_conviction(sf, alignment, mismatch_px, mismatch_sem)
+
+    # Same inputs as the engine except for the override: the un-overridden
+    # terms must reproduce it, or this recomposition has drifted.
+    check_u = compute_u(qf, sf, cfg)
+    check_alignment = compute_alignment(proj.alignment_inputs, cfg)
+    check_e_star = compute_e_star(
+        compute_e_raw(check_u, sf, check_alignment, cfg), gravity_bias
+    )
+    if abs(check_e_star - engine_result.e_star) > 1e-12:
+        raise RuntimeError(
+            "the ablation recomposition no longer matches run_projection_engine "
+            f"({check_e_star} vs {engine_result.e_star}); update _replay_projection"
+        )
+
+    return SimpleNamespace(
+        u_score=u_score,
+        alignment=alignment,
+        e_raw=e_raw,
+        gravity_bias=gravity_bias,
+        e_star=e_star,
+        conviction=conviction,
+    )
+
+
 def compute_day_replay(
     snapshot: Any,
     *,
@@ -438,6 +548,7 @@ def compute_day_replay(
     shock_day: date,
     stats_override: dict[str, float] | None = None,
     signal_feature_override: dict[str, float] | None = None,
+    estar_term_override: dict[str, float] | None = None,
 ) -> DayReplay:
     """Rebuild the full statistics -> request -> projection path for one day.
 
@@ -455,9 +566,16 @@ def compute_day_replay(
     so overriding them isolates one input to e_star rather than one raw
     statistic that several derived scores share. Use the statistics axis to
     ask "which market measurement moved the call", and the signal-feature axis
-    to ask "which term of e_star carried it".
+    to ask "which signal did the engine read differently".
+
+    When *estar_term_override* is given, one argument that ``compute_e_raw`` or
+    ``compute_gravity_bias`` actually consumes is substituted -- including
+    ``u_score`` and ``alignment``, which the engine derives internally and so
+    cannot be reached through the request. That is the axis that isolates a
+    single term of e_star; the two SignalFeatures above do not, because both
+    feed ``compute_u`` and ``technical_score`` additionally appears in
+    ``direction_signal``.
     """
-    from ugh_quantamental.engine.projection import run_projection_engine
     from ugh_quantamental.fx_protocol.market_ugh_builder import (
         build_ugh_request_from_snapshot,
         compute_snapshot_statistics,
@@ -477,14 +595,11 @@ def compute_day_replay(
             raise ValueError(f"Unknown SignalFeatures field(s): {sorted(unknown)}")
         sf = sf.model_copy(update=dict(signal_feature_override))
 
-    result = run_projection_engine(
-        projection_id=req.projection.projection_id,
-        horizon_days=req.projection.horizon_days,
-        question_features=req.projection.question_features,
-        signal_features=sf,
-        alignment_inputs=req.projection.alignment_inputs,
-        config=config,
-    )
+    if sf is not req.projection.signal_features:
+        req = req.model_copy(
+            update={"projection": req.projection.model_copy(update={"signal_features": sf})}
+        )
+    result = _replay_projection(req, config, estar_term_override)
 
     trailing = snapshot.completed_windows[-_MIN_TRAILING_WINDOWS:]
     shock_in_window = any(
@@ -503,6 +618,8 @@ def compute_day_replay(
         price_implied_score=sf.price_implied_score,
         fire_probability=sf.fire_probability,
         signal_features=sf,
+        u_score=result.u_score,
+        alignment=result.alignment,
         e_raw=result.e_raw,
         gravity_bias=result.gravity_bias,
         e_star=result.e_star,
@@ -735,17 +852,21 @@ def run_analysis(
     # ------------------------------------------------------------------
     # 4. Ablation grid: variants alpha/beta/delta x axes x references.
     #
-    # Two axes, distinguished by the "axis" column:
+    # Three axes, distinguished by the "axis" column:
     #   "statistic"      -- a raw market measurement, substituted before any
     #                       derivation, as in the original 2026-08 run.
-    #   "signal_feature" -- one term of e_star, substituted on the built
-    #                       request.  Several derived scores read the same
-    #                       statistic, so the statistic axis alone cannot say
-    #                       which term of e_star carried a move.
+    #   "estar_term"     -- an argument compute_e_raw / compute_gravity_bias
+    #                       actually consumes.  This is the axis that isolates
+    #                       one term of e_star.
+    #   "signal_feature" -- a SignalFeatures field that is upstream of those
+    #                       terms rather than one of them: fundamental_score
+    #                       and technical_score both feed compute_u, and
+    #                       technical_score also appears in direction_signal,
+    #                       so neither override moves a single term.  Useful,
+    #                       but never read as an isolation.
     #
-    # Pre-shock reference means for signal features are taken from the same
-    # alpha replays as the statistics, so both axes are referenced against the
-    # same pre-shock days.
+    # All reference means come from the same alpha replays over the same
+    # pre-shock days, so the axes are comparable to each other.
     # ------------------------------------------------------------------
     pre_shock_feature_means = {
         name: (
@@ -754,9 +875,17 @@ def run_analysis(
         )
         for name in ABLATION_SIGNAL_FEATURES
     }
+    pre_shock_term_means = {
+        name: (
+            sum(_estar_term_value(daily_replays[d], name) for d in pre_shock_days)
+            / len(pre_shock_days)
+        )
+        for name in ABLATION_ESTAR_TERMS
+    }
 
     ablation_axes: tuple[tuple[str, tuple[str, ...], dict[str, float]], ...] = (
         ("statistic", ABLATION_STATS, pre_shock_means),
+        ("estar_term", ABLATION_ESTAR_TERMS, pre_shock_term_means),
         ("signal_feature", ABLATION_SIGNAL_FEATURES, pre_shock_feature_means),
     )
 
@@ -783,7 +912,19 @@ def run_analysis(
                                 override if axis == "statistic" else None
                             ),
                             signal_feature_override=(
-                                override if axis == "signal_feature" else None
+                                override
+                                if axis == "signal_feature"
+                                or (
+                                    axis == "estar_term"
+                                    and stat_name not in _ESTAR_INTERMEDIATE_TERMS
+                                )
+                                else None
+                            ),
+                            estar_term_override=(
+                                override
+                                if axis == "estar_term"
+                                and stat_name in _ESTAR_INTERMEDIATE_TERMS
+                                else None
                             ),
                         )
                         series.append((day.isoformat(), replay.e_star))
@@ -870,6 +1011,7 @@ def run_analysis(
     # feature are not substitutable explanations, and mixing them would let
     # the larger family decide the answer.
     rate_limiting = _rate_limiting_for("statistic")
+    rate_limiting_estar_term = _rate_limiting_for("estar_term")
     rate_limiting_signal_feature = _rate_limiting_for("signal_feature")
 
     summary = {
@@ -883,6 +1025,7 @@ def run_analysis(
         },
         "shock_day": windows.shock_day.isoformat(),
         "missing_dates": missing_dates,
+        "rate_limiting_estar_term": rate_limiting_estar_term,
         "rate_limiting_signal_feature": rate_limiting_signal_feature,
         "clamp_saturated_day_count": len(clamp_saturated_dates),
         "clamp_saturated_dates": clamp_saturated_dates,

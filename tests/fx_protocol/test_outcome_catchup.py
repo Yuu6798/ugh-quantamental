@@ -709,6 +709,57 @@ class TestOutcomeCatchupEndToEnd:
         finally:
             session.close()
 
+    def test_interrupted_publish_is_repaired_not_skipped(self) -> None:
+        """A current outcome.csv beside stale evaluations must not read as done.
+
+        publish_csv_to_history_only copies outcome, evaluation and forecast in
+        sequence, so an interrupted publish can leave the right outcome_id in
+        outcome.csv while evaluation.csv still holds the previous rows.
+        Checking the outcome alone would skip the repair on every retry.
+        """
+        session = self._make_session()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                cfg = FxDailyAutomationConfig(
+                    run_outcome_evaluation=True,
+                    run_forecast_generation=True,
+                    write_csv_exports=True,
+                    csv_output_dir=tmpdir,
+                )
+                self._run(session, 20, cfg)
+                session.commit()
+                _, first = self._run(session, 22, cfg)
+                session.commit()
+                assert len(first.catchup_windows) == 1
+                cu = first.catchup_windows[0]
+
+                history_dir = os.path.join(
+                    tmpdir,
+                    "history",
+                    cu.window_end_jst.strftime("%Y%m%d"),
+                    cu.forecast_batch_id,
+                )
+                eval_path = os.path.join(history_dir, "evaluation.csv")
+                assert os.path.isfile(eval_path)
+                # Simulate the interruption: outcome.csv is current, the
+                # evaluations belong to something else.
+                with open(eval_path, "w", encoding="utf-8") as fh:
+                    fh.write("evaluation_id,outcome_id\nold-eval,some-other-outcome\n")
+
+                _, retry = self._run(session, 22, cfg)
+                session.commit()
+                assert len(retry.catchup_windows) == 1
+                assert retry.catchup_windows[0].outcome_id == cu.outcome_id
+
+                import csv as _csv
+
+                with open(eval_path, newline="", encoding="utf-8") as fh:
+                    rows = list(_csv.DictReader(fh))
+                assert len(rows) == 7
+                assert all(r["outcome_id"] == cu.outcome_id for r in rows)
+        finally:
+            session.close()
+
     def test_catchup_recovers_two_day_gap_with_default_bound(self) -> None:
         """Two consecutive missing days (D2, D3): D4 recovers D1 at distance 2."""
         session = self._make_session()
