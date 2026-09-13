@@ -722,6 +722,57 @@ class TestRunFxDailyProtocolOnce:
         assert len(batch.forecasts) == EXPECTED_DAILY_BATCH_SIZE
         session.close()
 
+    def test_carry_over_refuses_to_slide_back_on_a_lagging_provider(self) -> None:
+        """A regressed provider must not drag a carried-over run further back.
+
+        The carry-over only fires when the Friday batch is complete, so the
+        provider did return Friday-ending data earlier.  If it now reports a
+        Thursday-ending window, taking the ordinary one-day fallback would
+        republish Thursday into latest/ over good artifacts and drop out of the
+        Friday weekly-report gate -- a regression, not a rescue.
+        """
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+
+        snap = self._make_friday_snapshot()
+        friday_as_of = snap.as_of_jst
+        saturday_as_of = friday_as_of + timedelta(days=1)
+
+        # A snapshot one business day behind: newest window ends Thursday.
+        stale_wins = _build_windows_raw(23)
+        stale = FxProtocolMarketSnapshot(
+            pair=CurrencyPair.USDJPY,
+            as_of_jst=stale_wins[-1].window_end_jst,
+            current_spot=150.0,
+            completed_windows=stale_wins,
+            market_data_provenance=snap.market_data_provenance,
+        )
+        assert stale.as_of_jst == friday_as_of - timedelta(days=1)
+
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig(
+            run_outcome_evaluation=False,
+            run_forecast_generation=True,
+        )
+
+        # Friday's own attempt sees fresh data and persists a complete batch.
+        fresh_provider = self._make_provider(snap)
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=friday_as_of,
+        ):
+            run_fx_daily_protocol_once(cfg, fresh_provider, session)
+        session.commit()
+
+        # The weekend retry carries over to Friday, but the provider has regressed.
+        stale_provider = self._make_provider(stale)
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=saturday_as_of,
+        ):
+            with pytest.raises(ValueError, match="Refusing to move the as_of backwards"):
+                run_fx_daily_protocol_once(cfg, stale_provider, session)
+        session.close()
+
     def test_carry_over_is_not_recorded_as_provider_lag(self) -> None:
         """A carried-over run must not append a false lag row to provider_health.csv.
 

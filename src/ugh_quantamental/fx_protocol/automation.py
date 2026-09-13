@@ -238,6 +238,7 @@ def run_fx_daily_protocol_once(
     # --- Step 1: canonical as_of_jst ---
     now_utc = datetime.now(timezone.utc)
     as_of_jst = current_as_of_jst(now_utc)
+    carried_over_from_non_business_day = False
     if not is_protocol_business_day(as_of_jst):
         # A scheduled attempt that starts late can cross midnight JST and land on
         # a weekend, even though the protocol day it belongs to is the business
@@ -258,6 +259,7 @@ def run_fx_daily_protocol_once(
         # makes the carry-over safe.
         carried_over = prev_as_of_jst(as_of_jst)
         if _has_complete_forecast_batch(session, config, carried_over):
+            carried_over_from_non_business_day = True
             logger.warning(
                 "Run landed on %s JST, which is not a protocol business day; "
                 "carrying over to the previous business day %s, whose forecast "
@@ -296,6 +298,22 @@ def run_fx_daily_protocol_once(
         raise ValueError("Provider returned a snapshot with no completed windows.")
     newest_end = snapshot.completed_windows[-1].window_end_jst
     if newest_end != as_of_jst:
+        if carried_over_from_non_business_day:
+            # The carry-over only happens when as_of_jst's batch is already
+            # complete, which means an earlier attempt did see a snapshot ending
+            # at as_of_jst.  A provider that now reports an older window has
+            # regressed.  Taking the ordinary one-day fallback here would move
+            # as_of_jst back another day, republish that older day into latest/
+            # over good artifacts, and drop out of the Friday weekly-report gate
+            # -- turning a rescue into a regression.  Fail instead: the already
+            # persisted data is untouched, and the run is no worse off than
+            # before this rescue existed.
+            raise ValueError(
+                f"Carried over to {as_of_jst.date()} JST, whose forecast batch is "
+                f"complete, but the provider's newest completed window ends at "
+                f"{newest_end.isoformat()}. Refusing to move the as_of backwards "
+                "and republish stale artifacts."
+            )
         if newest_end == prev_as_of_jst(as_of_jst):
             logger.warning(
                 "Provider data is 1 business day behind "
