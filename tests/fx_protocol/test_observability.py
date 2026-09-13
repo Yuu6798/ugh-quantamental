@@ -462,6 +462,47 @@ class TestBuildScoreboardRows:
         assert rw_row["range_hit_count"] == ""
         assert rw_row["range_hit_rate"] == ""
 
+    def test_state_correctness_rolled_up_separately_from_proxy(self) -> None:
+        """stC is a distinct axis from the state proxy and needs its own rollup.
+
+        Proxy measures persistence (forecast state == next-day forecast state);
+        correctness measures the realized state.  Only the proxy was
+        aggregated, so stC had no cumulative view outside per-day evaluations.
+        """
+        base = self._make_evals()
+        ugh_eval = next(e for e in base if e.strategy_kind.value == "ugh")
+        rw_eval = next(e for e in base if e.strategy_kind.value != "ugh")
+        # Same evaluation, proxy hit but correctness miss: the two rates must
+        # not be able to stand in for one another.
+        evals = (
+            ugh_eval.model_copy(
+                update={"state_proxy_hit": True, "state_correctness_hit": False}
+            ),
+            rw_eval,
+        )
+
+        rows = build_scoreboard_rows(evals, datetime.now(_UTC))
+        ugh_row = next(r for r in rows if r["strategy_kind"] == "ugh")
+        assert ugh_row["state_proxy_hit_count"] == 1
+        assert ugh_row["state_proxy_hit_rate"] == 1.0
+        assert ugh_row["state_correctness_hit_count"] == 0
+        assert ugh_row["state_correctness_hit_rate"] == 0.0
+
+        # A strategy with no stC evaluation stays blank rather than 0.
+        rw_row = next(r for r in rows if r["strategy_kind"] != "ugh")
+        assert rw_row["state_correctness_hit_count"] == ""
+        assert rw_row["state_correctness_hit_rate"] == ""
+
+    def test_scoreboard_fieldnames_cover_every_row_key(self) -> None:
+        """The CSV writer is driven by SCOREBOARD_FIELDNAMES; a row key missing
+        from it would be silently dropped from scoreboard.csv."""
+        from ugh_quantamental.fx_protocol.observability import SCOREBOARD_FIELDNAMES
+
+        rows = build_scoreboard_rows(self._make_evals(), datetime.now(_UTC))
+        assert rows
+        for row in rows:
+            assert set(row) == set(SCOREBOARD_FIELDNAMES)
+
     def test_empty_evals_returns_empty(self) -> None:
         rows = build_scoreboard_rows((), datetime.now(_UTC))
         assert rows == []

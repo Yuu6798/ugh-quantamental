@@ -128,12 +128,21 @@ Cumulative strategy performance metrics aggregated from all historical evaluatio
 | range_hit_rate | float or blank | Range hit rate (UGH only) |
 | state_proxy_hit_count | int or blank | State proxy hits (UGH only) |
 | state_proxy_hit_rate | float or blank | State proxy hit rate (UGH only) |
+| state_correctness_hit_count | int or blank | State correctness hits (UGH only) |
+| state_correctness_hit_rate | float or blank | State correctness hit rate (UGH only) |
 | mean_close_error_bp | float | Mean close error in basis points |
 | median_close_error_bp | float | Median close error in basis points |
 | mean_magnitude_error_bp | float | Mean magnitude error in basis points |
 | last_updated_utc | string (ISO 8601) | When scoreboard was generated |
 
 Data source: all `evaluation.csv` files found in `history/` directories.
+
+The two state axes are independent and neither substitutes for the other:
+`state_proxy_hit` measures persistence (the forecast state equals the next
+day's forecast state) while `state_correctness_hit` measures the realized
+state. Each count/rate pair is computed only over the evaluations where its
+own field is non-null, so a strategy that never produces one of them keeps
+that pair blank rather than reporting zero.
 
 ### 3.5 provider_health.csv
 

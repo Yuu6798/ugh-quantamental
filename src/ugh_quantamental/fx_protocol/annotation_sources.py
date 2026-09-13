@@ -94,6 +94,57 @@ def resolve_effective_event_tags(
     return "|".join(effective), source
 
 
+def resolve_annotation_source(
+    *,
+    has_ai: bool,
+    has_auto: bool,
+    manual_status: str,
+    manual_label_won: bool,
+    fallback_won: bool,
+) -> str:
+    """Return the overall ``annotation_source`` for one labeled-observation row.
+
+    Source attribution follows what actually *won* an effective field, not raw
+    input availability:
+
+    - any AI-populated field makes the row AI-annotated;
+    - ``manual_compat`` claims the source only when a manual *label* won AND the
+      manual row carries a status.  A blank-status manual draft whose labels win
+      stays ``none``, as before the fallback tier existed;
+    - a genuine fallback win outranks a status-only manual draft (status set but
+      no labels): the fallback supplied the real labels, so the row is fallback
+      coverage, not manual;
+    - a status-only manual with no fallback win still maps to ``manual_compat``,
+      preserving pre-fallback-tier behaviour.
+
+    Parameters
+    ----------
+    has_ai:
+        Whether any AI annotation field was populated for the row.
+    has_auto:
+        Whether automatic event tags were derived for the row.
+    manual_status:
+        The manual row's ``annotation_status`` (empty when absent).
+    manual_label_won:
+        Whether a manual value won any effective label.
+    fallback_won:
+        Whether an OHLC-fallback value won any effective label.
+    """
+    if has_ai and has_auto:
+        return SOURCE_AI_PLUS_AUTO
+    if has_ai:
+        return SOURCE_AI
+    if has_auto:
+        return SOURCE_AUTO_ONLY
+    if manual_label_won and manual_status:
+        return SOURCE_MANUAL_COMPAT
+    if fallback_won:
+        return SOURCE_FALLBACK
+    if manual_status:
+        return SOURCE_MANUAL_COMPAT
+    return SOURCE_NONE
+
+
 def build_annotation_source_summary(
     observations: list[dict[str, str]],
 ) -> dict[str, Any]:

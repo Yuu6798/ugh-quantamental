@@ -592,6 +592,228 @@ class TestOutcomeCatchupEndToEnd:
         finally:
             session.close()
 
+    def test_normally_evaluated_window_is_not_republished_by_catchup(self) -> None:
+        """A window already evaluated in Step 4 must not be recovered again.
+
+        Every run sees the preceding window as a catch-up candidate.  That
+        window was evaluated normally on the day it closed and published under
+        the batch keyed by its END date; catch-up publishes under the batch
+        keyed by its START date.  When the completeness check only looked at
+        the latter, the window looked unpublished on every subsequent run, so
+        each run wrote a second directory holding the same evaluations and
+        readers counted them twice -- the corruption PR #128 fixed on the read
+        side.  Nothing should be written here at all.
+        """
+        session = self._make_session()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                cfg = FxDailyAutomationConfig(
+                    run_outcome_evaluation=True,
+                    run_forecast_generation=True,
+                    write_csv_exports=True,
+                    csv_output_dir=tmpdir,
+                )
+                # Day1: forecast for window bd20->bd21.
+                self._run(session, 20, cfg)
+                session.commit()
+
+                # Day2: evaluates window bd20->bd21 normally (no gap anywhere).
+                snap2, r2 = self._run(session, 21, cfg)
+                session.commit()
+                assert r2.outcome_recorded is True
+                date_day2 = snap2.as_of_jst.strftime("%Y%m%d")
+                normal_dir = os.path.join(
+                    tmpdir, "history", date_day2, r2.forecast_batch_id
+                )
+                assert os.path.isfile(os.path.join(normal_dir, "evaluation.csv"))
+
+                # Day3: nothing is missing, so catch-up has nothing to recover.
+                _, r3 = self._run(session, 22, cfg)
+                session.commit()
+                assert r3.catchup_windows == ()
+
+                # history/<day2>/ must still hold exactly the one directory
+                # Day2's own run created.  A second one would be the duplicate.
+                day2_dirs = sorted(
+                    os.listdir(os.path.join(tmpdir, "history", date_day2))
+                )
+                assert day2_dirs == [r2.forecast_batch_id]
+        finally:
+            session.close()
+
+    def test_archived_files_for_another_outcome_do_not_count_as_published(self) -> None:
+        """A complete directory naming a different outcome must not block publication.
+
+        Forecast batch IDs omit the schema version while outcome IDs include
+        it, so after a schema bump without a protocol bump the END-date
+        directory can hold a complete set describing an older outcome of the
+        same window.  With the evaluation already in the database, an
+        existence-only check would read that directory as current and skip
+        republishing the real one forever.
+        """
+        session = self._make_session()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                cfg = FxDailyAutomationConfig(
+                    run_outcome_evaluation=True,
+                    run_forecast_generation=True,
+                    write_csv_exports=True,
+                    csv_output_dir=tmpdir,
+                )
+                # Day1 forecast, Day2 missing, Day3 recovers: the outcome and
+                # its evaluations are now in the database.
+                self._run(session, 20, cfg)
+                session.commit()
+                _, first = self._run(session, 22, cfg)
+                session.commit()
+                assert len(first.catchup_windows) == 1
+                cu = first.catchup_windows[0]
+
+                date_str = cu.window_end_jst.strftime("%Y%m%d")
+                catchup_dir = os.path.join(
+                    tmpdir, "history", date_str, cu.forecast_batch_id
+                )
+                eval_path = os.path.join(catchup_dir, "evaluation.csv")
+                assert os.path.isfile(eval_path)
+                # Lose the published evaluation, as in the history-repair case.
+                os.remove(eval_path)
+
+                # Plant a complete-looking archive under the END-date batch
+                # naming some other outcome of the same window.
+                from ugh_quantamental.fx_protocol.ids import make_forecast_batch_id
+
+                planted = os.path.join(
+                    tmpdir,
+                    "history",
+                    date_str,
+                    make_forecast_batch_id(
+                        cfg.pair, cu.window_end_jst, cfg.protocol_version
+                    ),
+                )
+                os.makedirs(planted, exist_ok=True)
+                with open(
+                    os.path.join(planted, "outcome.csv"), "w", encoding="utf-8"
+                ) as fh:
+                    fh.write("outcome_id\nsome-other-outcome-id\n")
+                for name in ("evaluation.csv", "forecast.csv"):
+                    with open(os.path.join(planted, name), "w", encoding="utf-8") as fh:
+                        fh.write("header\n")
+
+                # The planted directory describes a different outcome, so the
+                # repair must still happen.
+                _, retry = self._run(session, 22, cfg)
+                session.commit()
+                assert len(retry.catchup_windows) == 1
+                assert retry.catchup_windows[0].outcome_id == cu.outcome_id
+                assert os.path.isfile(eval_path)
+        finally:
+            session.close()
+
+    def test_interrupted_publish_is_repaired_not_skipped(self) -> None:
+        """A current outcome.csv beside stale evaluations must not read as done.
+
+        publish_csv_to_history_only copies outcome, evaluation and forecast in
+        sequence, so an interrupted publish can leave the right outcome_id in
+        outcome.csv while evaluation.csv still holds the previous rows.
+        Checking the outcome alone would skip the repair on every retry.
+        """
+        session = self._make_session()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                cfg = FxDailyAutomationConfig(
+                    run_outcome_evaluation=True,
+                    run_forecast_generation=True,
+                    write_csv_exports=True,
+                    csv_output_dir=tmpdir,
+                )
+                self._run(session, 20, cfg)
+                session.commit()
+                _, first = self._run(session, 22, cfg)
+                session.commit()
+                assert len(first.catchup_windows) == 1
+                cu = first.catchup_windows[0]
+
+                history_dir = os.path.join(
+                    tmpdir,
+                    "history",
+                    cu.window_end_jst.strftime("%Y%m%d"),
+                    cu.forecast_batch_id,
+                )
+                eval_path = os.path.join(history_dir, "evaluation.csv")
+                assert os.path.isfile(eval_path)
+                # Simulate the interruption: outcome.csv is current, the
+                # evaluations belong to something else.
+                with open(eval_path, "w", encoding="utf-8") as fh:
+                    fh.write("evaluation_id,outcome_id\nold-eval,some-other-outcome\n")
+
+                _, retry = self._run(session, 22, cfg)
+                session.commit()
+                assert len(retry.catchup_windows) == 1
+                assert retry.catchup_windows[0].outcome_id == cu.outcome_id
+
+                import csv as _csv
+
+                with open(eval_path, newline="", encoding="utf-8") as fh:
+                    rows = list(_csv.DictReader(fh))
+                assert len(rows) == 7
+                assert all(r["outcome_id"] == cu.outcome_id for r in rows)
+        finally:
+            session.close()
+
+    def test_unarchived_forecast_rows_are_republished(self) -> None:
+        """Evaluations whose forecasts were never archived must not read as done.
+
+        collect_evaluated_forecast_rows joins by forecast_id across batches, so
+        an evaluation whose forecast rows are absent from history is invisible
+        to weekly and monthly analytics.  The END-date directory has a
+        forecast.csv of its own -- that day's batch -- which says nothing about
+        this window, so existence alone must not end the repair.
+        """
+        session = self._make_session()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                cfg = FxDailyAutomationConfig(
+                    run_outcome_evaluation=True,
+                    run_forecast_generation=True,
+                    write_csv_exports=True,
+                    csv_output_dir=tmpdir,
+                )
+                self._run(session, 20, cfg)
+                session.commit()
+                _, first = self._run(session, 22, cfg)
+                session.commit()
+                assert len(first.catchup_windows) == 1
+                cu = first.catchup_windows[0]
+
+                history_dir = os.path.join(
+                    tmpdir,
+                    "history",
+                    cu.window_end_jst.strftime("%Y%m%d"),
+                    cu.forecast_batch_id,
+                )
+                origin_dir = os.path.join(
+                    tmpdir,
+                    "history",
+                    cu.window_start_jst.strftime("%Y%m%d"),
+                    cu.forecast_batch_id,
+                )
+                forecast_path = os.path.join(history_dir, "forecast.csv")
+                assert os.path.isfile(forecast_path)
+                # Lose every archived copy of this window's forecast rows, as
+                # if exports had been off the day they were generated.
+                os.remove(forecast_path)
+                origin_forecast = os.path.join(origin_dir, "forecast.csv")
+                if os.path.isfile(origin_forecast):
+                    os.remove(origin_forecast)
+
+                _, retry = self._run(session, 22, cfg)
+                session.commit()
+                assert len(retry.catchup_windows) == 1
+                assert retry.catchup_windows[0].outcome_id == cu.outcome_id
+                assert os.path.isfile(forecast_path)
+        finally:
+            session.close()
+
     def test_catchup_recovers_two_day_gap_with_default_bound(self) -> None:
         """Two consecutive missing days (D2, D3): D4 recovers D1 at distance 2."""
         session = self._make_session()
@@ -825,13 +1047,12 @@ class TestOutcomeCatchupEndToEnd:
                     write_csv_exports=True,
                     csv_output_dir=tmpdir,
                     # Bound to distance 1 so Day4's catch-up only considers
-                    # window bd21->bd22 (this test's target). At the default
-                    # bound, bd20->bd21 (Day1's window, distance 2, already
-                    # evaluated normally by Day2's Step 4) would ALSO surface
-                    # as a candidate — a separate, pre-existing history-key
-                    # mismatch between Step 4's own publish location and
-                    # catch-up's completeness check that is out of scope for
-                    # this fix; isolate this test from it.
+                    # window bd21->bd22 (this test's target), keeping the
+                    # assertions below about a single candidate.  The
+                    # history-key mismatch this comment used to defer — Step 4
+                    # publishing under the END-date batch while catch-up
+                    # checked only the START-date one — is fixed; see
+                    # test_normally_evaluated_window_is_not_republished_by_catchup.
                     outcome_catchup_days=1,
                 )
                 # Day1 (n=20): forecast for window bd20->bd21.
@@ -903,3 +1124,246 @@ class TestOutcomeCatchupEndToEnd:
                     assert fh.read() != original_evaluation_content
         finally:
             session.close()
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="SQLAlchemy not installed")
+class TestHasPublishedEvaluation:
+    """Unit tests for the catch-up publication-completeness check."""
+
+    OUTCOME_ID = "oc-1"
+
+    @property
+    def FORECAST_IDS(self) -> frozenset[str]:
+        from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
+
+        return frozenset(f"f{i}" for i in range(EXPECTED_DAILY_BATCH_SIZE))
+
+    def _write(self, directory: str, evaluation_body: str) -> None:
+        import os as _os
+
+        _os.makedirs(directory, exist_ok=True)
+        with open(_os.path.join(directory, "outcome.csv"), "w", encoding="utf-8") as fh:
+            fh.write(f"outcome_id\n{self.OUTCOME_ID}\n")
+        with open(_os.path.join(directory, "forecast.csv"), "w", encoding="utf-8") as fh:
+            fh.write(",".join(self.FORECAST_COLUMNS) + "\n")
+            for fid in sorted(self.FORECAST_IDS):
+                fh.write(self._forecast_row(fid) + "\n")
+        with open(
+            _os.path.join(directory, "evaluation.csv"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(evaluation_body)
+
+    def _call(self, directory: str) -> bool:
+        from ugh_quantamental.fx_protocol.automation import _has_published_evaluation
+
+        return _has_published_evaluation(
+            directory, self.OUTCOME_ID, self.FORECAST_IDS
+        )
+
+    #: The columns observability._parse_evaluation_row indexes directly. The
+    #: fixture carries all of them, because "published" means the reader can
+    #: consume the archive -- a shorter row set would assert a weaker contract
+    #: than the one the code is supposed to enforce.
+    COLUMNS = (
+        "evaluation_id",
+        "forecast_id",
+        "outcome_id",
+        "pair",
+        "strategy_kind",
+        "direction_hit",
+        "evaluated_at_utc",
+    )
+
+    #: The columns collect_evaluated_forecast_rows reads off a forecast row.
+    FORECAST_COLUMNS = (
+        "forecast_id",
+        "forecast_batch_id",
+        "as_of_jst",
+        "strategy_kind",
+        "forecast_direction",
+        "expected_close_change_bp",
+    )
+
+    def _forecast_row(self, fid: str) -> str:
+        values = {
+            "forecast_id": fid,
+            "forecast_batch_id": "batch-1",
+            "as_of_jst": "2026-03-13T08:00:00+09:00",
+            "strategy_kind": "ugh_v2_alpha",
+            "forecast_direction": "up",
+            "expected_close_change_bp": "12.0",
+        }
+        return ",".join(values[c] for c in self.FORECAST_COLUMNS)
+
+    def _evaluation_row(self, fid: str) -> str:
+        values = {
+            "evaluation_id": f"ev-{fid}",
+            "forecast_id": fid,
+            "outcome_id": self.OUTCOME_ID,
+            "pair": "USDJPY",
+            "strategy_kind": "ugh_v2_alpha",
+            "direction_hit": "true",
+            "evaluated_at_utc": "2026-03-16T01:00:00Z",
+        }
+        return ",".join(values[c] for c in self.COLUMNS)
+
+    def _full_evaluations(self, *, truncate_last: bool = False) -> str:
+        """One evaluation row per forecast in the batch, as production writes."""
+        fids = sorted(self.FORECAST_IDS)
+        rows = "".join(f"{self._evaluation_row(fid)}\n" for fid in fids[:-1])
+        last = self._evaluation_row(fids[-1])
+        if truncate_last:
+            # Cut between fields, keeping the IDs every other check looks at.
+            keep = max(self.COLUMNS.index("forecast_id"), self.COLUMNS.index("outcome_id"))
+            last = ",".join(last.split(",")[: keep + 1])
+        header = ",".join(self.COLUMNS)
+        return f"{header}\n{rows}{last}\n"
+
+    def test_complete_archive_is_published(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write(tmpdir, self._full_evaluations())
+            assert self._call(tmpdir) is True
+
+    def test_truncated_quoted_field_is_not_published(self) -> None:
+        """A full set of rows followed by an unterminated quote must be rejected.
+
+        The row-count and outcome-id checks pass on this file; only strict CSV
+        parsing rejects it. The default parser accepts an unterminated quote at
+        end of file and yields a silently shortened value, so without strict
+        parsing an interrupted copy would skip the repair for good.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write(tmpdir, self._full_evaluations() + 'x,"unterminated')
+            assert self._call(tmpdir) is False
+
+    def test_forecast_archive_missing_a_read_column_is_not_published(self) -> None:
+        """A forecast archive the rebuild cannot read is not published either.
+
+        collect_evaluated_forecast_rows needs as_of_jst to date the row and
+        strategy_kind to give the observation its dimensions; without them the
+        deterministic annotation pass drops the row and the labeled observation
+        loses its slices, so the forecast rows still need republishing.
+        """
+        import os as _os
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write(tmpdir, self._full_evaluations())
+            columns = tuple(c for c in self.FORECAST_COLUMNS if c != "as_of_jst")
+            drop = self.FORECAST_COLUMNS.index("as_of_jst")
+            with open(
+                _os.path.join(tmpdir, "forecast.csv"), "w", encoding="utf-8"
+            ) as fh:
+                fh.write(",".join(columns) + "\n")
+                for fid in sorted(self.FORECAST_IDS):
+                    parts = self._forecast_row(fid).split(",")
+                    del parts[drop]
+                    fh.write(",".join(parts) + "\n")
+            assert self._call(tmpdir) is False
+
+    def test_missing_required_column_is_not_published(self) -> None:
+        """A short header parses cleanly but the reader cannot consume it.
+
+        Every row matches the header, so nothing comes back as None; the
+        archive is well-formed and still unusable, because
+        _parse_evaluation_row indexes columns that are not there.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            columns = tuple(c for c in self.COLUMNS if c != "evaluated_at_utc")
+            rows = "".join(
+                ",".join(
+                    self._evaluation_row(fid).split(",")[
+                        : self.COLUMNS.index("evaluated_at_utc")
+                    ]
+                )
+                + "\n"
+                for fid in sorted(self.FORECAST_IDS)
+            )
+            self._write(tmpdir, f"{','.join(columns)}\n{rows}")
+            assert self._call(tmpdir) is False
+
+    def test_row_truncated_after_the_ids_is_not_published(self) -> None:
+        """A row cut short is padded with None, which strict parsing allows.
+
+        The surviving columns are exactly the IDs every other check looks at,
+        so the archive passes them all; the lost columns come back as None and
+        break _parse_evaluation_row on the first field it coerces, taking the
+        scoreboard rebuild down with it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write(tmpdir, self._full_evaluations(truncate_last=True))
+            assert self._call(tmpdir) is False
+
+    def test_row_with_extra_fields_is_not_published(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            body = self._full_evaluations().rstrip("\n")
+            fid = sorted(self.FORECAST_IDS)[-1]
+            self._write(
+                tmpdir,
+                body[: body.rindex("\n") + 1]
+                + f"{self._evaluation_row(fid)},extra\n",
+            )
+            assert self._call(tmpdir) is False
+
+    def test_short_evaluation_set_is_not_published(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            header = ",".join(self.COLUMNS)
+            row = self._evaluation_row(sorted(self.FORECAST_IDS)[0])
+            self._write(tmpdir, f"{header}\n{row}\n")
+            assert self._call(tmpdir) is False
+
+    def test_evaluations_without_forecast_ids_are_not_published(self) -> None:
+        """Rows that cannot be joined are not a usable archive.
+
+        collect_evaluated_forecast_rows joins by forecast_id, so a full set of
+        rows carrying the right outcome but no forecast_id column is invisible
+        to every rebuild -- accepting it would skip the repair for good.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            columns = tuple(c for c in self.COLUMNS if c != "forecast_id")
+            header = ",".join(columns)
+            row = ",".join(
+                {
+                    "evaluation_id": "ev-1",
+                    "outcome_id": self.OUTCOME_ID,
+                    "pair": "USDJPY",
+                    "strategy_kind": "ugh_v2_alpha",
+                    "direction_hit": "true",
+                    "evaluated_at_utc": "2026-03-16T01:00:00Z",
+                }[c]
+                for c in columns
+            )
+            rows = "".join(f"{row}\n" for _ in self.FORECAST_IDS)
+            self._write(tmpdir, f"{header}\n{rows}")
+            assert self._call(tmpdir) is False
+
+    def test_evaluations_naming_other_forecasts_are_not_published(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = "".join(
+                f"{self._evaluation_row('other-' + fid)}\n"
+                for fid in sorted(self.FORECAST_IDS)
+            )
+            self._write(tmpdir, f"{','.join(self.COLUMNS)}\n{rows}")
+            assert self._call(tmpdir) is False
+
+    def test_other_outcome_is_not_published(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write(tmpdir, self._full_evaluations())
+            import os as _os
+
+            with open(
+                _os.path.join(tmpdir, "outcome.csv"), "w", encoding="utf-8"
+            ) as fh:
+                fh.write("outcome_id\nsome-other\n")
+            assert self._call(tmpdir) is False
+
+    def test_missing_forecast_rows_are_not_published(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write(tmpdir, self._full_evaluations())
+            import os as _os
+
+            with open(
+                _os.path.join(tmpdir, "forecast.csv"), "w", encoding="utf-8"
+            ) as fh:
+                fh.write(",".join(self.FORECAST_COLUMNS) + "\n")
+                fh.write(self._forecast_row(sorted(self.FORECAST_IDS)[0]) + "\n")
+            assert self._call(tmpdir) is False

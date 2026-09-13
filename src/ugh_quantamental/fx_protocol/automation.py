@@ -8,6 +8,7 @@ SQLAlchemy is required at call time; the module itself is importable without it.
 
 from __future__ import annotations
 
+import csv
 import logging
 import os
 import shutil
@@ -178,6 +179,132 @@ def _make_default_ugh_request(snapshot_ref: str):  # type: ignore[return]
             ),
         ),
     )
+
+
+#: Columns ``observability._parse_evaluation_row`` indexes directly.  An
+#: archived evaluation missing any of them cannot be read back, so it does not
+#: count as published no matter how well-formed the file is.
+#: Columns ``labeled_observations.collect_evaluated_forecast_rows`` reads off a
+#: forecast row.  Without ``as_of_jst`` the deterministic annotation pass cannot
+#: date the row and drops it; without ``strategy_kind`` the labeled observation
+#: loses its dimensions.  An archive short of these is not usable either.
+_FORECAST_REQUIRED_COLUMNS: tuple[str, ...] = (
+    "forecast_id",
+    "forecast_batch_id",
+    "as_of_jst",
+    "strategy_kind",
+    "forecast_direction",
+    "expected_close_change_bp",
+)
+
+_EVALUATION_REQUIRED_COLUMNS: tuple[str, ...] = (
+    "evaluation_id",
+    "forecast_id",
+    "outcome_id",
+    "pair",
+    "strategy_kind",
+    "direction_hit",
+    "evaluated_at_utc",
+)
+
+
+def _read_csv_rows(
+    path: str, required_columns: tuple[str, ...] = ()
+) -> list[dict[str, str]] | None:
+    """Return the CSV at *path* as a list of row dicts, or ``None`` if unusable.
+
+    ``strict=True`` so an archive truncated inside a quoted field raises
+    instead of yielding a silently shortened value: the default parser accepts
+    an unterminated quote at EOF, which is exactly what an interrupted copy
+    leaves behind.  A row that is structurally short or long does not raise
+    even then, so those are rejected explicitly.
+    """
+    try:
+        with open(path, newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh, strict=True))
+    except (OSError, UnicodeDecodeError, csv.Error):
+        # None of these is proof of publication, and re-publishing is
+        # idempotent.  Letting one escape would reach the catch-up loop's broad
+        # handler, which skips the candidate before the publication-repair
+        # branch -- leaving the corrupt archive in place on every retry.
+        return None
+
+    # A row cut short keeps its leading columns and has the rest padded with
+    # None; one with extra fields collects them under the None restkey. Neither
+    # raises, so strict parsing alone does not catch a copy interrupted partway
+    # through a row -- and the leading columns are exactly the IDs the caller
+    # checks, so such a row would pass every content check and then break
+    # _parse_evaluation_row on the first field it coerces.
+    for row in rows:
+        if None in row or None in row.values():
+            return None
+
+    # A header that is itself short parses cleanly -- every row matches it, so
+    # no None appears -- yet the reader indexes columns it does not have.
+    # "Published" is defined as "the reader can consume it", so a file missing
+    # a column that reader requires is not published however well-formed it is.
+    if required_columns and rows:
+        present = set(rows[0])
+        if not set(required_columns) <= present:
+            return None
+    return rows
+
+
+def _has_published_evaluation(
+    history_dir: str,
+    outcome_id: str,
+    forecast_ids: frozenset[str],
+    forecast_dirs: tuple[str, ...] = (),
+) -> bool:
+    """Return ``True`` iff *outcome_id*'s evaluation is published **and usable**.
+
+    "Usable" means what ``collect_evaluated_forecast_rows`` needs, since that is
+    the reader every rebuild goes through: it joins evaluations to forecasts by
+    ``forecast_id``.  An archive that exists but cannot be joined is invisible
+    to the weekly and monthly analytics, so accepting it here would skip the
+    repair for good.  Each condition below has been observed to fail on its own:
+
+    1. ``outcome.csv`` in *history_dir* names *outcome_id*.  The path cannot
+       establish this: forecast batch IDs omit the schema version while outcome
+       IDs include it, so a directory can hold a complete set describing a
+       different outcome of the same window.
+    2. ``evaluation.csv`` there carries a full batch of rows for that outcome,
+       **and those rows carry exactly the batch's forecast IDs**.  Rows without
+       a usable ``forecast_id`` join to nothing.
+       ``publish_csv_to_history_only`` copies outcome, evaluation and forecast
+       in sequence, so an interrupted publish can leave a current outcome
+       beside the previous evaluations.
+    3. The batch's forecast rows are archived and readable, in *history_dir* or
+       in one of *forecast_dirs* (the window's own origin directory).  A
+       directory owned by a different batch carries a ``forecast.csv`` of its
+       own, which says nothing about this window.
+    """
+    outcome_rows = _read_csv_rows(os.path.join(history_dir, "outcome.csv"))
+    if outcome_rows is None or not any(
+        row.get("outcome_id") == outcome_id for row in outcome_rows
+    ):
+        return False
+
+    evaluation_rows = _read_csv_rows(
+        os.path.join(history_dir, "evaluation.csv"), _EVALUATION_REQUIRED_COLUMNS
+    )
+    if evaluation_rows is None:
+        return False
+    matching = [row for row in evaluation_rows if row.get("outcome_id") == outcome_id]
+    if len(matching) != EXPECTED_DAILY_BATCH_SIZE:
+        return False
+    if {row.get("forecast_id", "") for row in matching} != set(forecast_ids):
+        return False
+
+    for candidate in (history_dir, *forecast_dirs):
+        forecast_rows = _read_csv_rows(
+            os.path.join(candidate, "forecast.csv"), _FORECAST_REQUIRED_COLUMNS
+        )
+        if forecast_rows is not None and forecast_ids <= {
+            row.get("forecast_id", "") for row in forecast_rows
+        }:
+            return True
+    return False
 
 
 def _has_complete_forecast_batch(
@@ -483,22 +610,48 @@ def run_fx_daily_protocol_once(
                 cu_date_str = window.window_end_jst.strftime("%Y%m%d")
                 cu_history_complete = False
                 if config.write_csv_exports:
-                    cu_history_dir = os.path.join(
+                    cu_history_root = os.path.join(
+                        config.csv_output_dir, "history", cu_date_str
+                    )
+                    # Two directories under that date can already hold this
+                    # window's evaluation, and either one means "published":
+                    #
+                    #  - cu_batch_id: the catch-up location, keyed by the
+                    #    window's own forecast batch (i.e. its START date).
+                    #  - the batch keyed by the window's END date: the
+                    #    directory owned by the run of the day the window
+                    #    closed.  A window evaluated normally in Step 4 lands
+                    #    there, never under cu_batch_id.
+                    #
+                    # Checking only the first made every normally-evaluated
+                    # window look unpublished, so each run republished the
+                    # preceding window into a second directory holding the same
+                    # evaluations.  Readers then counted them twice, which is
+                    # what corrupted the weekly, monthly and governance inputs
+                    # in PR #128 (fixed there on the read side with a
+                    # forecast_id dedupe; this stops the write).
+                    cu_normal_batch_id = make_forecast_batch_id(
+                        config.pair, window.window_end_jst, config.protocol_version
+                    )
+                    cu_forecast_ids = frozenset(
+                        f.forecast_id for f in cu_batch.forecasts
+                    )
+                    # Where this window's own forecast rows were archived on
+                    # the day they were generated.
+                    cu_origin_dir = os.path.join(
                         config.csv_output_dir,
                         "history",
-                        cu_date_str,
+                        window.window_start_jst.strftime("%Y%m%d"),
                         cu_batch_id,
                     )
-                    # forecast.csv is required too: collect_evaluated_forecast_rows
-                    # (labeled_observations.py) only reads a directory that has
-                    # forecast.csv alongside evaluation.csv, so a dir missing it
-                    # would make a recovered window's evaluations invisible to
-                    # rebuilds/analytics even though the DB and outcome/evaluation
-                    # CSVs are already correct.
-                    cu_history_complete = (
-                        os.path.isfile(os.path.join(cu_history_dir, "outcome.csv"))
-                        and os.path.isfile(os.path.join(cu_history_dir, "evaluation.csv"))
-                        and os.path.isfile(os.path.join(cu_history_dir, "forecast.csv"))
+                    cu_history_complete = any(
+                        _has_published_evaluation(
+                            os.path.join(cu_history_root, batch_dir),
+                            cu_outcome_id,
+                            cu_forecast_ids,
+                            (cu_origin_dir,),
+                        )
+                        for batch_dir in (cu_batch_id, cu_normal_batch_id)
                     )
 
                 if cu_existing_complete and (

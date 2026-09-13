@@ -1,5 +1,12 @@
 # Task Brief: FX-ESTAR-LAG - ショック後 e_star 転換遅延の feature 別 replay 分析
 
+> **実装はこの brief より先に進んでいる (2026-09-13)。** `analyze_estar_lag.py` は
+> 日付窓の CLI 化、`pre_expansion_close_change_bp` の 3 成分出力、全 variant の
+> 日次系列、および `estar_term` / `signal_feature` の 2 軸 ablation を持つ。
+> 本 brief が定める生統計 3 本の介入契約は `axis == statistic` として保存されて
+> おり、出力は当時と一致する。現行の契約は
+> `docs/analysis/estar_lag_2026_08.md` 冒頭の注記を参照。
+
 ## Phase
 2026-08 月次レビュー §1 (`docs/engine_review_2026_08_findings.md`)。分析のみ —
 engine 改変は本 brief のスコープ外 (結果を見て次 brief で判断)。

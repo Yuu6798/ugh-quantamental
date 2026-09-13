@@ -296,12 +296,9 @@ def _collect_labeled_observation_rows(
     then iterate over forecasts and look up evaluations from that index.
     """
     from ugh_quantamental.fx_protocol.annotation_sources import (
-        SOURCE_AI,
-        SOURCE_AI_PLUS_AUTO,
-        SOURCE_AUTO_ONLY,
         SOURCE_FALLBACK,
         SOURCE_MANUAL_COMPAT,
-        SOURCE_NONE,
+        resolve_annotation_source,
         resolve_effective_event_tags,
         resolve_effective_label,
     )
@@ -423,7 +420,6 @@ def _collect_labeled_observation_rows(
                 )
 
                 # Determine overall annotation_source from all effective fields.
-                # Any AI-populated field makes the row AI-annotated.
                 has_ai = bool(
                     ai.get("ai_regime_label", "")
                     or ai.get("ai_volatility_label", "")
@@ -431,35 +427,13 @@ def _collect_labeled_observation_rows(
                     or ai.get("ai_event_tags", "")
                     or ai.get("ai_failure_reason", "")
                 )
-                has_auto = bool(auto_tags)
-                # Source attribution follows what actually WON an effective
-                # field, not raw input availability:
-                #  - manual_compat claims the source only when a manual *label*
-                #    won AND the manual row carries a status. A blank-status
-                #    manual draft whose labels win stays unlabeled (none), as
-                #    before the fallback tier existed.
-                #  - a genuine fallback win outranks a status-only manual draft
-                #    (status set but no labels): the fallback supplied the real
-                #    labels, so the row is fallback coverage, not manual.
-                #  - a status-only manual with no fallback win still maps to
-                #    manual_compat (preserves pre-fallback-tier behavior).
-                manual_status = manual.get("annotation_status", "")
-                manual_label_won = SOURCE_MANUAL_COMPAT in (regime_src, vol_src, ir_src)
-                fallback_won = SOURCE_FALLBACK in (regime_src, vol_src)
-                if has_ai and has_auto:
-                    annotation_source = SOURCE_AI_PLUS_AUTO
-                elif has_ai:
-                    annotation_source = SOURCE_AI
-                elif has_auto:
-                    annotation_source = SOURCE_AUTO_ONLY
-                elif manual_label_won and manual_status:
-                    annotation_source = SOURCE_MANUAL_COMPAT
-                elif fallback_won:
-                    annotation_source = SOURCE_FALLBACK
-                elif manual_status:
-                    annotation_source = SOURCE_MANUAL_COMPAT
-                else:
-                    annotation_source = SOURCE_NONE
+                annotation_source = resolve_annotation_source(
+                    has_ai=has_ai,
+                    has_auto=bool(auto_tags),
+                    manual_status=manual.get("annotation_status", ""),
+                    manual_label_won=SOURCE_MANUAL_COMPAT in (regime_src, vol_src, ir_src),
+                    fallback_won=SOURCE_FALLBACK in (regime_src, vol_src),
+                )
 
                 manual_et = "|".join(sorted(manual_tag_list)) if manual_tag_list else ""
                 auto_et = "|".join(auto_tags) if auto_tags else ""
