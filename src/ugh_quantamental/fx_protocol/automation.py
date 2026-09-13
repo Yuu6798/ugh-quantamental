@@ -274,6 +274,11 @@ def run_fx_daily_protocol_once(
             )
 
     # --- Step 2: fetch snapshot ---
+    # The as_of the provider is actually queried with.  Step 7 measures provider
+    # lag against this, not against wall-clock "today": a run carried over from a
+    # weekend queries the previous business day and gets that day's current data,
+    # which is not provider lag.
+    requested_as_of_jst = as_of_jst
     snapshot = provider.fetch_snapshot(as_of_jst)
 
     # Freshness guard: the newest completed window must close at exactly as_of_jst.
@@ -695,8 +700,7 @@ def run_fx_daily_protocol_once(
         newest_end = snapshot.completed_windows[-1].window_end_jst
         _snapshot_lag = 0
         _used_fallback = False
-        original_as_of = current_as_of_jst(now_utc)
-        if newest_end != original_as_of:
+        if newest_end != requested_as_of_jst:
             _snapshot_lag = 1
             _used_fallback = True
 

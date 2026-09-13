@@ -722,6 +722,60 @@ class TestRunFxDailyProtocolOnce:
         assert len(batch.forecasts) == EXPECTED_DAILY_BATCH_SIZE
         session.close()
 
+    def test_carry_over_is_not_recorded_as_provider_lag(self) -> None:
+        """A carried-over run must not append a false lag row to provider_health.csv.
+
+        Provider lag is measured against the as_of the provider was actually
+        queried with.  The carried-over run queries the Friday and gets current
+        Friday data, so lag is 0 and no fallback adjustment was used; measuring
+        against wall-clock "today" would mark every rescued run as lagging and
+        feed that into the weekly and monthly rollups.
+        """
+        import csv
+        import os
+        import tempfile
+
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+
+        snap = self._make_friday_snapshot()
+        friday_as_of = snap.as_of_jst
+        saturday_as_of = friday_as_of + timedelta(days=1)
+        provider = self._make_provider(snap)
+        session = self._make_session()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = FxDailyAutomationConfig(
+                run_outcome_evaluation=False,
+                run_forecast_generation=True,
+                write_csv_exports=True,
+                csv_output_dir=tmpdir,
+            )
+            with patch(
+                "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+                return_value=friday_as_of,
+            ):
+                run_fx_daily_protocol_once(cfg, provider, session)
+            session.commit()
+
+            with patch(
+                "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+                return_value=saturday_as_of,
+            ):
+                carried = run_fx_daily_protocol_once(cfg, provider, session)
+
+            assert carried.as_of_jst == friday_as_of
+
+            with open(
+                os.path.join(tmpdir, "provider_health.csv"), newline=""
+            ) as fh:
+                rows = list(csv.DictReader(fh))
+            assert rows, "provider_health.csv should have at least one row"
+            assert all(r["snapshot_lag_business_days"] == "0" for r in rows)
+            assert all(
+                r["used_fallback_adjustment"].lower() == "false" for r in rows
+            )
+        session.close()
+
     def test_weekend_landing_still_raises_without_a_complete_friday(self) -> None:
         """Without a complete previous-day batch the run must keep failing.
 
