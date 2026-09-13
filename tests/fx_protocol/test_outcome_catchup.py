@@ -1131,7 +1131,12 @@ class TestHasPublishedEvaluation:
     """Unit tests for the catch-up publication-completeness check."""
 
     OUTCOME_ID = "oc-1"
-    FORECAST_IDS = frozenset({"f1", "f2"})
+
+    @property
+    def FORECAST_IDS(self) -> frozenset[str]:
+        from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
+
+        return frozenset(f"f{i}" for i in range(EXPECTED_DAILY_BATCH_SIZE))
 
     def _write(self, directory: str, evaluation_body: str) -> None:
         import os as _os
@@ -1140,7 +1145,7 @@ class TestHasPublishedEvaluation:
         with open(_os.path.join(directory, "outcome.csv"), "w", encoding="utf-8") as fh:
             fh.write(f"outcome_id\n{self.OUTCOME_ID}\n")
         with open(_os.path.join(directory, "forecast.csv"), "w", encoding="utf-8") as fh:
-            fh.write("forecast_id\nf1\nf2\n")
+            fh.write("forecast_id\n" + "".join(f"{i}\n" for i in sorted(self.FORECAST_IDS)))
         with open(
             _os.path.join(directory, "evaluation.csv"), "w", encoding="utf-8"
         ) as fh:
@@ -1154,10 +1159,11 @@ class TestHasPublishedEvaluation:
         )
 
     def _full_evaluations(self) -> str:
-        from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
-
-        rows = "".join(f"{self.OUTCOME_ID}\n" for _ in range(EXPECTED_DAILY_BATCH_SIZE))
-        return f"outcome_id\n{rows}"
+        """One evaluation row per forecast in the batch, as production writes."""
+        rows = "".join(
+            f"{self.OUTCOME_ID},{fid}\n" for fid in sorted(self.FORECAST_IDS)
+        )
+        return f"outcome_id,forecast_id\n{rows}"
 
     def test_complete_archive_is_published(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1178,7 +1184,27 @@ class TestHasPublishedEvaluation:
 
     def test_short_evaluation_set_is_not_published(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
-            self._write(tmpdir, f"outcome_id\n{self.OUTCOME_ID}\n")
+            self._write(tmpdir, f"outcome_id,forecast_id\n{self.OUTCOME_ID},f0\n")
+            assert self._call(tmpdir) is False
+
+    def test_evaluations_without_forecast_ids_are_not_published(self) -> None:
+        """Rows that cannot be joined are not a usable archive.
+
+        collect_evaluated_forecast_rows joins by forecast_id, so a full set of
+        rows carrying the right outcome but no forecast_id column is invisible
+        to every rebuild -- accepting it would skip the repair for good.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = "".join(f"{self.OUTCOME_ID}\n" for _ in self.FORECAST_IDS)
+            self._write(tmpdir, f"outcome_id\n{rows}")
+            assert self._call(tmpdir) is False
+
+    def test_evaluations_naming_other_forecasts_are_not_published(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            rows = "".join(
+                f"{self.OUTCOME_ID},other-{fid}\n" for fid in sorted(self.FORECAST_IDS)
+            )
+            self._write(tmpdir, f"outcome_id,forecast_id\n{rows}")
             assert self._call(tmpdir) is False
 
     def test_other_outcome_is_not_published(self) -> None:

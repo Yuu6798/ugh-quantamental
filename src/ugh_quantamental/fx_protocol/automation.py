@@ -181,21 +181,22 @@ def _make_default_ugh_request(snapshot_ref: str):  # type: ignore[return]
     )
 
 
-def _csv_column_values(path: str, column: str) -> list[str] | None:
-    """Return *column* from every row of the CSV at *path*, or ``None`` if unreadable."""
+def _read_csv_rows(path: str) -> list[dict[str, str]] | None:
+    """Return the CSV at *path* as a list of row dicts, or ``None`` if unusable.
+
+    ``strict=True`` so an archive truncated inside a quoted field raises
+    instead of yielding a silently shortened value: the default parser accepts
+    an unterminated quote at EOF, which is exactly what an interrupted copy
+    leaves behind.
+    """
     try:
         with open(path, newline="", encoding="utf-8") as fh:
-            # strict=True so an archive truncated inside a quoted field raises
-            # instead of yielding a silently shortened value: the default
-            # parser accepts an unterminated quote at EOF, which is exactly
-            # what an interrupted copy leaves behind.
-            return [row.get(column, "") for row in csv.DictReader(fh, strict=True)]
+            return list(csv.DictReader(fh, strict=True))
     except (OSError, UnicodeDecodeError, csv.Error):
-        # An interrupted copy can leave invalid UTF-8 or malformed CSV behind.
-        # Neither is an OSError, and letting either escape would reach the
-        # catch-up loop's broad handler, which skips the candidate before the
-        # publication-repair branch -- leaving the corrupt archive in place on
-        # every retry, the opposite of this helper's contract.
+        # None of these is proof of publication, and re-publishing is
+        # idempotent.  Letting one escape would reach the catch-up loop's broad
+        # handler, which skips the candidate before the publication-repair
+        # branch -- leaving the corrupt archive in place on every retry.
         return None
 
 
@@ -205,47 +206,49 @@ def _has_published_evaluation(
     forecast_ids: frozenset[str],
     forecast_dirs: tuple[str, ...] = (),
 ) -> bool:
-    """Return ``True`` iff *outcome_id*'s evaluation is fully published.
+    """Return ``True`` iff *outcome_id*'s evaluation is published **and usable**.
 
-    Three things have to hold, and each has been observed to fail on its own:
+    "Usable" means what ``collect_evaluated_forecast_rows`` needs, since that is
+    the reader every rebuild goes through: it joins evaluations to forecasts by
+    ``forecast_id``.  An archive that exists but cannot be joined is invisible
+    to the weekly and monthly analytics, so accepting it here would skip the
+    repair for good.  Each condition below has been observed to fail on its own:
 
     1. ``outcome.csv`` in *history_dir* names *outcome_id*.  The path cannot
        establish this: forecast batch IDs omit the schema version while outcome
        IDs include it, so a directory can hold a complete set describing a
        different outcome of the same window.
-    2. ``evaluation.csv`` there carries a full day of rows for that outcome.
+    2. ``evaluation.csv`` there carries a full batch of rows for that outcome,
+       **and those rows carry exactly the batch's forecast IDs**.  Rows without
+       a usable ``forecast_id`` join to nothing.
        ``publish_csv_to_history_only`` copies outcome, evaluation and forecast
        in sequence, so an interrupted publish can leave a current outcome
        beside the previous evaluations.
-    3. The evaluated batch's forecast rows are archived, in *history_dir* or in
-       one of *forecast_dirs* (the window's own origin directory).
-       ``collect_evaluated_forecast_rows`` joins by ``forecast_id`` across all
-       batches, so evaluations whose forecasts were never written -- exports
-       disabled on the day the forecast was generated -- stay invisible to the
-       weekly and monthly analytics.  A directory owned by a *different* batch
-       has a ``forecast.csv`` of its own, which says nothing about this window.
-
-    An unreadable archive is not proof of publication; re-publishing is
-    idempotent, so anything unreadable counts as unpublished.
+    3. The batch's forecast rows are archived, in *history_dir* or in one of
+       *forecast_dirs* (the window's own origin directory).  A directory owned
+       by a different batch carries a ``forecast.csv`` of its own, which says
+       nothing about this window.
     """
-    outcome_path = os.path.join(history_dir, "outcome.csv")
-    evaluation_path = os.path.join(history_dir, "evaluation.csv")
-    if not (os.path.isfile(outcome_path) and os.path.isfile(evaluation_path)):
+    outcome_rows = _read_csv_rows(os.path.join(history_dir, "outcome.csv"))
+    if outcome_rows is None or not any(
+        row.get("outcome_id") == outcome_id for row in outcome_rows
+    ):
         return False
 
-    outcome_ids = _csv_column_values(outcome_path, "outcome_id")
-    if outcome_ids is None or outcome_id not in outcome_ids:
+    evaluation_rows = _read_csv_rows(os.path.join(history_dir, "evaluation.csv"))
+    if evaluation_rows is None:
         return False
-
-    evaluated = _csv_column_values(evaluation_path, "outcome_id")
-    if evaluated is None or evaluated.count(outcome_id) != EXPECTED_DAILY_BATCH_SIZE:
+    matching = [row for row in evaluation_rows if row.get("outcome_id") == outcome_id]
+    if len(matching) != EXPECTED_DAILY_BATCH_SIZE:
+        return False
+    if {row.get("forecast_id", "") for row in matching} != set(forecast_ids):
         return False
 
     for candidate in (history_dir, *forecast_dirs):
-        archived = _csv_column_values(
-            os.path.join(candidate, "forecast.csv"), "forecast_id"
-        )
-        if archived is not None and forecast_ids <= set(archived):
+        forecast_rows = _read_csv_rows(os.path.join(candidate, "forecast.csv"))
+        if forecast_rows is not None and forecast_ids <= {
+            row.get("forecast_id", "") for row in forecast_rows
+        }:
             return True
     return False
 
