@@ -1124,3 +1124,81 @@ class TestOutcomeCatchupEndToEnd:
                     assert fh.read() != original_evaluation_content
         finally:
             session.close()
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="SQLAlchemy not installed")
+class TestHasPublishedEvaluation:
+    """Unit tests for the catch-up publication-completeness check."""
+
+    OUTCOME_ID = "oc-1"
+    FORECAST_IDS = frozenset({"f1", "f2"})
+
+    def _write(self, directory: str, evaluation_body: str) -> None:
+        import os as _os
+
+        _os.makedirs(directory, exist_ok=True)
+        with open(_os.path.join(directory, "outcome.csv"), "w", encoding="utf-8") as fh:
+            fh.write(f"outcome_id\n{self.OUTCOME_ID}\n")
+        with open(_os.path.join(directory, "forecast.csv"), "w", encoding="utf-8") as fh:
+            fh.write("forecast_id\nf1\nf2\n")
+        with open(
+            _os.path.join(directory, "evaluation.csv"), "w", encoding="utf-8"
+        ) as fh:
+            fh.write(evaluation_body)
+
+    def _call(self, directory: str) -> bool:
+        from ugh_quantamental.fx_protocol.automation import _has_published_evaluation
+
+        return _has_published_evaluation(
+            directory, self.OUTCOME_ID, self.FORECAST_IDS
+        )
+
+    def _full_evaluations(self) -> str:
+        from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
+
+        rows = "".join(f"{self.OUTCOME_ID}\n" for _ in range(EXPECTED_DAILY_BATCH_SIZE))
+        return f"outcome_id\n{rows}"
+
+    def test_complete_archive_is_published(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write(tmpdir, self._full_evaluations())
+            assert self._call(tmpdir) is True
+
+    def test_truncated_quoted_field_is_not_published(self) -> None:
+        """A full set of rows followed by an unterminated quote must be rejected.
+
+        The row-count and outcome-id checks pass on this file; only strict CSV
+        parsing rejects it. The default parser accepts an unterminated quote at
+        end of file and yields a silently shortened value, so without strict
+        parsing an interrupted copy would skip the repair for good.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write(tmpdir, self._full_evaluations() + 'x,"unterminated')
+            assert self._call(tmpdir) is False
+
+    def test_short_evaluation_set_is_not_published(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write(tmpdir, f"outcome_id\n{self.OUTCOME_ID}\n")
+            assert self._call(tmpdir) is False
+
+    def test_other_outcome_is_not_published(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write(tmpdir, self._full_evaluations())
+            import os as _os
+
+            with open(
+                _os.path.join(tmpdir, "outcome.csv"), "w", encoding="utf-8"
+            ) as fh:
+                fh.write("outcome_id\nsome-other\n")
+            assert self._call(tmpdir) is False
+
+    def test_missing_forecast_rows_are_not_published(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write(tmpdir, self._full_evaluations())
+            import os as _os
+
+            with open(
+                _os.path.join(tmpdir, "forecast.csv"), "w", encoding="utf-8"
+            ) as fh:
+                fh.write("forecast_id\nf1\n")
+            assert self._call(tmpdir) is False

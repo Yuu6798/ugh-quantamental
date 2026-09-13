@@ -185,7 +185,11 @@ def _csv_column_values(path: str, column: str) -> list[str] | None:
     """Return *column* from every row of the CSV at *path*, or ``None`` if unreadable."""
     try:
         with open(path, newline="", encoding="utf-8") as fh:
-            return [row.get(column, "") for row in csv.DictReader(fh)]
+            # strict=True so an archive truncated inside a quoted field raises
+            # instead of yielding a silently shortened value: the default
+            # parser accepts an unterminated quote at EOF, which is exactly
+            # what an interrupted copy leaves behind.
+            return [row.get(column, "") for row in csv.DictReader(fh, strict=True)]
     except (OSError, UnicodeDecodeError, csv.Error):
         # An interrupted copy can leave invalid UTF-8 or malformed CSV behind.
         # Neither is an OSError, and letting either escape would reach the
