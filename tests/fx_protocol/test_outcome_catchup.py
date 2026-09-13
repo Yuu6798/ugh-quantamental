@@ -641,6 +641,74 @@ class TestOutcomeCatchupEndToEnd:
         finally:
             session.close()
 
+    def test_archived_files_for_another_outcome_do_not_count_as_published(self) -> None:
+        """A complete directory naming a different outcome must not block publication.
+
+        Forecast batch IDs omit the schema version while outcome IDs include
+        it, so after a schema bump without a protocol bump the END-date
+        directory can hold a complete set describing an older outcome of the
+        same window.  With the evaluation already in the database, an
+        existence-only check would read that directory as current and skip
+        republishing the real one forever.
+        """
+        session = self._make_session()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                cfg = FxDailyAutomationConfig(
+                    run_outcome_evaluation=True,
+                    run_forecast_generation=True,
+                    write_csv_exports=True,
+                    csv_output_dir=tmpdir,
+                )
+                # Day1 forecast, Day2 missing, Day3 recovers: the outcome and
+                # its evaluations are now in the database.
+                self._run(session, 20, cfg)
+                session.commit()
+                _, first = self._run(session, 22, cfg)
+                session.commit()
+                assert len(first.catchup_windows) == 1
+                cu = first.catchup_windows[0]
+
+                date_str = cu.window_end_jst.strftime("%Y%m%d")
+                catchup_dir = os.path.join(
+                    tmpdir, "history", date_str, cu.forecast_batch_id
+                )
+                eval_path = os.path.join(catchup_dir, "evaluation.csv")
+                assert os.path.isfile(eval_path)
+                # Lose the published evaluation, as in the history-repair case.
+                os.remove(eval_path)
+
+                # Plant a complete-looking archive under the END-date batch
+                # naming some other outcome of the same window.
+                from ugh_quantamental.fx_protocol.ids import make_forecast_batch_id
+
+                planted = os.path.join(
+                    tmpdir,
+                    "history",
+                    date_str,
+                    make_forecast_batch_id(
+                        cfg.pair, cu.window_end_jst, cfg.protocol_version
+                    ),
+                )
+                os.makedirs(planted, exist_ok=True)
+                with open(
+                    os.path.join(planted, "outcome.csv"), "w", encoding="utf-8"
+                ) as fh:
+                    fh.write("outcome_id\nsome-other-outcome-id\n")
+                for name in ("evaluation.csv", "forecast.csv"):
+                    with open(os.path.join(planted, name), "w", encoding="utf-8") as fh:
+                        fh.write("header\n")
+
+                # The planted directory describes a different outcome, so the
+                # repair must still happen.
+                _, retry = self._run(session, 22, cfg)
+                session.commit()
+                assert len(retry.catchup_windows) == 1
+                assert retry.catchup_windows[0].outcome_id == cu.outcome_id
+                assert os.path.isfile(eval_path)
+        finally:
+            session.close()
+
     def test_catchup_recovers_two_day_gap_with_default_bound(self) -> None:
         """Two consecutive missing days (D2, D3): D4 recovers D1 at distance 2."""
         session = self._make_session()

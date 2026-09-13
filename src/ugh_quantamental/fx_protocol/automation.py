@@ -8,6 +8,7 @@ SQLAlchemy is required at call time; the module itself is importable without it.
 
 from __future__ import annotations
 
+import csv
 import logging
 import os
 import shutil
@@ -180,17 +181,33 @@ def _make_default_ugh_request(snapshot_ref: str):  # type: ignore[return]
     )
 
 
-def _has_published_evaluation(history_dir: str) -> bool:
-    """Return ``True`` iff *history_dir* holds a fully published evaluation.
+def _has_published_evaluation(history_dir: str, outcome_id: str) -> bool:
+    """Return ``True`` iff *history_dir* holds a published evaluation for *outcome_id*.
 
     ``forecast.csv`` is required alongside the outcome/evaluation pair because
     ``collect_evaluated_forecast_rows`` only reads a directory that has it.
+
+    The path alone cannot establish which outcome the archived files describe:
+    forecast batch IDs omit the schema version while outcome IDs include it, so
+    a directory can hold a complete set for a *different* outcome of the same
+    window (a schema bump without a protocol bump).  Treating that as current
+    would skip publishing the real one forever, so the archived ``outcome_id``
+    is read rather than inferred from the directory name.
     """
-    return (
-        os.path.isfile(os.path.join(history_dir, "outcome.csv"))
+    outcome_path = os.path.join(history_dir, "outcome.csv")
+    if not (
+        os.path.isfile(outcome_path)
         and os.path.isfile(os.path.join(history_dir, "evaluation.csv"))
         and os.path.isfile(os.path.join(history_dir, "forecast.csv"))
-    )
+    ):
+        return False
+    try:
+        with open(outcome_path, newline="", encoding="utf-8") as fh:
+            return any(row.get("outcome_id") == outcome_id for row in csv.DictReader(fh))
+    except OSError:
+        # An unreadable archive is not proof of publication; re-publishing is
+        # idempotent, so fall back to "not published".
+        return False
 
 
 def _has_complete_forecast_batch(
@@ -521,7 +538,7 @@ def run_fx_daily_protocol_once(
                     )
                     cu_history_complete = any(
                         _has_published_evaluation(
-                            os.path.join(cu_history_root, batch_dir)
+                            os.path.join(cu_history_root, batch_dir), cu_outcome_id
                         )
                         for batch_dir in (cu_batch_id, cu_normal_batch_id)
                     )
