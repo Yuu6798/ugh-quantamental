@@ -180,6 +180,24 @@ def _make_default_ugh_request(snapshot_ref: str):  # type: ignore[return]
     )
 
 
+def _has_complete_forecast_batch(
+    session: "Session",
+    config: FxDailyAutomationConfig,
+    as_of_jst: datetime,
+) -> bool:
+    """Return ``True`` iff *as_of_jst* already has a complete forecast batch persisted.
+
+    Used to decide whether a run that landed on a non-business day may carry over
+    to the preceding business day instead of failing.
+    """
+    # Deferred to avoid transitive SQLAlchemy import at module load time.
+    from ugh_quantamental.persistence.repositories import FxForecastRepository
+
+    batch_id = make_forecast_batch_id(config.pair, as_of_jst, config.protocol_version)
+    batch = FxForecastRepository.load_fx_forecast_batch(session, batch_id)
+    return batch is not None and len(batch.forecasts) == EXPECTED_DAILY_BATCH_SIZE
+
+
 def run_fx_daily_protocol_once(
     config: FxDailyAutomationConfig,
     provider: FxMarketDataProvider,
@@ -220,13 +238,49 @@ def run_fx_daily_protocol_once(
     # --- Step 1: canonical as_of_jst ---
     now_utc = datetime.now(timezone.utc)
     as_of_jst = current_as_of_jst(now_utc)
+    carried_over_from_non_business_day = False
     if not is_protocol_business_day(as_of_jst):
-        raise ValueError(
-            f"Today ({as_of_jst.date()} JST) is not a protocol business day. "
-            "Run on Mon–Fri only."
-        )
+        # A scheduled attempt that starts late can cross midnight JST and land on
+        # a weekend, even though the protocol day it belongs to is the business
+        # day that just ended.  Raising here fails the whole run and skips every
+        # later step -- including the Friday weekly-report block in
+        # scripts/run_fx_daily_protocol.py, which requires an as_of_jst that is a
+        # Friday.  That is how three consecutive Saturday-dated weekly artifacts
+        # were lost (2026-08-29, 09-05, 09-12).
+        #
+        # Carry over to the previous business day, but only when that day's
+        # forecast batch is already complete: the day's work is then provably
+        # done and every remaining step is idempotent.  An absent or partial
+        # batch is a genuine outage and must keep failing.
+        #
+        # Note this is the previous *business* day, not the previous calendar
+        # day, so a Sunday landing also carries over to Friday.  That is the
+        # intent: the batch-completeness check, not the size of the gap, is what
+        # makes the carry-over safe.
+        carried_over = prev_as_of_jst(as_of_jst)
+        if _has_complete_forecast_batch(session, config, carried_over):
+            carried_over_from_non_business_day = True
+            logger.warning(
+                "Run landed on %s JST, which is not a protocol business day; "
+                "carrying over to the previous business day %s, whose forecast "
+                "batch is already complete.",
+                as_of_jst.date().isoformat(),
+                carried_over.date().isoformat(),
+            )
+            as_of_jst = carried_over
+        else:
+            raise ValueError(
+                f"Today ({as_of_jst.date()} JST) is not a protocol business day, "
+                f"and the previous business day ({carried_over.date()} JST) has no "
+                "complete forecast batch to carry over. Run on Mon–Fri only."
+            )
 
     # --- Step 2: fetch snapshot ---
+    # The as_of the provider is actually queried with.  Step 7 measures provider
+    # lag against this, not against wall-clock "today": a run carried over from a
+    # weekend queries the previous business day and gets that day's current data,
+    # which is not provider lag.
+    requested_as_of_jst = as_of_jst
     snapshot = provider.fetch_snapshot(as_of_jst)
 
     # Freshness guard: the newest completed window must close at exactly as_of_jst.
@@ -244,6 +298,22 @@ def run_fx_daily_protocol_once(
         raise ValueError("Provider returned a snapshot with no completed windows.")
     newest_end = snapshot.completed_windows[-1].window_end_jst
     if newest_end != as_of_jst:
+        if carried_over_from_non_business_day:
+            # The carry-over only happens when as_of_jst's batch is already
+            # complete, which means an earlier attempt did see a snapshot ending
+            # at as_of_jst.  A provider that now reports an older window has
+            # regressed.  Taking the ordinary one-day fallback here would move
+            # as_of_jst back another day, republish that older day into latest/
+            # over good artifacts, and drop out of the Friday weekly-report gate
+            # -- turning a rescue into a regression.  Fail instead: the already
+            # persisted data is untouched, and the run is no worse off than
+            # before this rescue existed.
+            raise ValueError(
+                f"Carried over to {as_of_jst.date()} JST, whose forecast batch is "
+                f"complete, but the provider's newest completed window ends at "
+                f"{newest_end.isoformat()}. Refusing to move the as_of backwards "
+                "and republish stale artifacts."
+            )
         if newest_end == prev_as_of_jst(as_of_jst):
             logger.warning(
                 "Provider data is 1 business day behind "
@@ -648,8 +718,7 @@ def run_fx_daily_protocol_once(
         newest_end = snapshot.completed_windows[-1].window_end_jst
         _snapshot_lag = 0
         _used_fallback = False
-        original_as_of = current_as_of_jst(now_utc)
-        if newest_end != original_as_of:
+        if newest_end != requested_as_of_jst:
             _snapshot_lag = 1
             _used_fallback = True
 

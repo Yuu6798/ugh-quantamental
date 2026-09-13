@@ -641,6 +641,217 @@ class TestRunFxDailyProtocolOnce:
                 run_fx_daily_protocol_once(cfg, provider, session)
         session.close()
 
+    def _make_friday_snapshot(self) -> FxProtocolMarketSnapshot:
+        """Snapshot whose newest completed window ends on a Friday 08:00 JST."""
+        # 24 business-day steps from 2026-01-05 (Mon) land on 2026-02-06 (Fri).
+        wins = _build_windows_raw(24)
+        as_of = wins[-1].window_end_jst
+        assert as_of.isoweekday() == 5, "fixture must end on a Friday"
+        return FxProtocolMarketSnapshot(
+            pair=CurrencyPair.USDJPY,
+            as_of_jst=as_of,
+            current_spot=150.0,
+            completed_windows=wins,
+            market_data_provenance=MarketDataProvenance(
+                vendor="test",
+                feed_name="feed",
+                price_type="mid",
+                resolution="1d",
+                timezone="Asia/Tokyo",
+                retrieved_at_utc=datetime(2026, 2, 6, 0, 0, 0, tzinfo=timezone.utc),
+            ),
+        )
+
+    @pytest.mark.parametrize("days_past_friday", [1, 2])
+    def test_weekend_landing_carries_over_to_complete_friday(
+        self, days_past_friday: int
+    ) -> None:
+        """A late run that crosses midnight JST continues under the Friday as_of.
+
+        This is the path that produces the weekly report: the Friday block in
+        scripts/run_fx_daily_protocol.py is gated on
+        ``automation_result.as_of_jst.isoweekday() == 5``, so the carried-over run
+        must report the Friday, create nothing new, and not raise.
+
+        Both weekend days carry over, because the fallback targets the previous
+        *business* day rather than the previous calendar day.
+        """
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+
+        snap = self._make_friday_snapshot()
+        friday_as_of = snap.as_of_jst
+        landing_as_of = friday_as_of + timedelta(days=days_past_friday)
+        assert landing_as_of.isoweekday() in (6, 7)
+
+        provider = self._make_provider(snap)
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig(
+            run_outcome_evaluation=False,
+            run_forecast_generation=True,
+        )
+
+        # Friday's own attempt succeeds and persists a complete batch.
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=friday_as_of,
+        ):
+            friday_result = run_fx_daily_protocol_once(cfg, provider, session)
+        session.commit()
+        assert friday_result.forecast_created is True
+
+        # The delayed final retry now sees the weekend.  is_protocol_business_day
+        # is left unpatched: the real calendar must classify the day itself.
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=landing_as_of,
+        ):
+            carried = run_fx_daily_protocol_once(cfg, provider, session)
+
+        assert carried.as_of_jst == friday_as_of
+        assert carried.as_of_jst.isoweekday() == 5
+        assert carried.forecast_batch_id == friday_result.forecast_batch_id
+        assert carried.forecast_created is False
+
+        # No duplicate records: the batch still holds exactly one full day.
+        from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
+        from ugh_quantamental.persistence.repositories import FxForecastRepository
+
+        batch = FxForecastRepository.load_fx_forecast_batch(
+            session, carried.forecast_batch_id
+        )
+        assert len(batch.forecasts) == EXPECTED_DAILY_BATCH_SIZE
+        session.close()
+
+    def test_carry_over_refuses_to_slide_back_on_a_lagging_provider(self) -> None:
+        """A regressed provider must not drag a carried-over run further back.
+
+        The carry-over only fires when the Friday batch is complete, so the
+        provider did return Friday-ending data earlier.  If it now reports a
+        Thursday-ending window, taking the ordinary one-day fallback would
+        republish Thursday into latest/ over good artifacts and drop out of the
+        Friday weekly-report gate -- a regression, not a rescue.
+        """
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+
+        snap = self._make_friday_snapshot()
+        friday_as_of = snap.as_of_jst
+        saturday_as_of = friday_as_of + timedelta(days=1)
+
+        # A snapshot one business day behind: newest window ends Thursday.
+        stale_wins = _build_windows_raw(23)
+        stale = FxProtocolMarketSnapshot(
+            pair=CurrencyPair.USDJPY,
+            as_of_jst=stale_wins[-1].window_end_jst,
+            current_spot=150.0,
+            completed_windows=stale_wins,
+            market_data_provenance=snap.market_data_provenance,
+        )
+        assert stale.as_of_jst == friday_as_of - timedelta(days=1)
+
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig(
+            run_outcome_evaluation=False,
+            run_forecast_generation=True,
+        )
+
+        # Friday's own attempt sees fresh data and persists a complete batch.
+        fresh_provider = self._make_provider(snap)
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=friday_as_of,
+        ):
+            run_fx_daily_protocol_once(cfg, fresh_provider, session)
+        session.commit()
+
+        # The weekend retry carries over to Friday, but the provider has regressed.
+        stale_provider = self._make_provider(stale)
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=saturday_as_of,
+        ):
+            with pytest.raises(ValueError, match="Refusing to move the as_of backwards"):
+                run_fx_daily_protocol_once(cfg, stale_provider, session)
+        session.close()
+
+    def test_carry_over_is_not_recorded_as_provider_lag(self) -> None:
+        """A carried-over run must not append a false lag row to provider_health.csv.
+
+        Provider lag is measured against the as_of the provider was actually
+        queried with.  The carried-over run queries the Friday and gets current
+        Friday data, so lag is 0 and no fallback adjustment was used; measuring
+        against wall-clock "today" would mark every rescued run as lagging and
+        feed that into the weekly and monthly rollups.
+        """
+        import csv
+        import os
+        import tempfile
+
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+
+        snap = self._make_friday_snapshot()
+        friday_as_of = snap.as_of_jst
+        saturday_as_of = friday_as_of + timedelta(days=1)
+        provider = self._make_provider(snap)
+        session = self._make_session()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = FxDailyAutomationConfig(
+                run_outcome_evaluation=False,
+                run_forecast_generation=True,
+                write_csv_exports=True,
+                csv_output_dir=tmpdir,
+            )
+            with patch(
+                "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+                return_value=friday_as_of,
+            ):
+                run_fx_daily_protocol_once(cfg, provider, session)
+            session.commit()
+
+            with patch(
+                "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+                return_value=saturday_as_of,
+            ):
+                carried = run_fx_daily_protocol_once(cfg, provider, session)
+
+            assert carried.as_of_jst == friday_as_of
+
+            with open(
+                os.path.join(tmpdir, "provider_health.csv"), newline=""
+            ) as fh:
+                rows = list(csv.DictReader(fh))
+            assert rows, "provider_health.csv should have at least one row"
+            assert all(r["snapshot_lag_business_days"] == "0" for r in rows)
+            assert all(
+                r["used_fallback_adjustment"].lower() == "false" for r in rows
+            )
+        session.close()
+
+    def test_weekend_landing_still_raises_without_a_complete_friday(self) -> None:
+        """Without a complete previous-day batch the run must keep failing.
+
+        A missing batch is a real outage, not a delayed retry, so the carry-over
+        must not mask it.
+        """
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+
+        snap = self._make_friday_snapshot()
+        landing_as_of = snap.as_of_jst + timedelta(days=1)
+        provider = self._make_provider(snap)
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig(
+            run_outcome_evaluation=False,
+            run_forecast_generation=True,
+        )
+
+        with patch(
+            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+            return_value=landing_as_of,
+        ):
+            with pytest.raises(ValueError, match="no complete forecast batch"):
+                run_fx_daily_protocol_once(cfg, provider, session)
+        session.close()
+
     def test_one_day_lag_adjusts_as_of_jst(self) -> None:
         """Provider 1 business day behind: as_of_jst falls back to newest_end."""
         from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
