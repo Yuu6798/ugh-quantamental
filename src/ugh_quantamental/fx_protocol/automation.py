@@ -180,6 +180,19 @@ def _make_default_ugh_request(snapshot_ref: str):  # type: ignore[return]
     )
 
 
+def _has_published_evaluation(history_dir: str) -> bool:
+    """Return ``True`` iff *history_dir* holds a fully published evaluation.
+
+    ``forecast.csv`` is required alongside the outcome/evaluation pair because
+    ``collect_evaluated_forecast_rows`` only reads a directory that has it.
+    """
+    return (
+        os.path.isfile(os.path.join(history_dir, "outcome.csv"))
+        and os.path.isfile(os.path.join(history_dir, "evaluation.csv"))
+        and os.path.isfile(os.path.join(history_dir, "forecast.csv"))
+    )
+
+
 def _has_complete_forecast_batch(
     session: "Session",
     config: FxDailyAutomationConfig,
@@ -483,22 +496,34 @@ def run_fx_daily_protocol_once(
                 cu_date_str = window.window_end_jst.strftime("%Y%m%d")
                 cu_history_complete = False
                 if config.write_csv_exports:
-                    cu_history_dir = os.path.join(
-                        config.csv_output_dir,
-                        "history",
-                        cu_date_str,
-                        cu_batch_id,
+                    cu_history_root = os.path.join(
+                        config.csv_output_dir, "history", cu_date_str
                     )
-                    # forecast.csv is required too: collect_evaluated_forecast_rows
-                    # (labeled_observations.py) only reads a directory that has
-                    # forecast.csv alongside evaluation.csv, so a dir missing it
-                    # would make a recovered window's evaluations invisible to
-                    # rebuilds/analytics even though the DB and outcome/evaluation
-                    # CSVs are already correct.
-                    cu_history_complete = (
-                        os.path.isfile(os.path.join(cu_history_dir, "outcome.csv"))
-                        and os.path.isfile(os.path.join(cu_history_dir, "evaluation.csv"))
-                        and os.path.isfile(os.path.join(cu_history_dir, "forecast.csv"))
+                    # Two directories under that date can already hold this
+                    # window's evaluation, and either one means "published":
+                    #
+                    #  - cu_batch_id: the catch-up location, keyed by the
+                    #    window's own forecast batch (i.e. its START date).
+                    #  - the batch keyed by the window's END date: the
+                    #    directory owned by the run of the day the window
+                    #    closed.  A window evaluated normally in Step 4 lands
+                    #    there, never under cu_batch_id.
+                    #
+                    # Checking only the first made every normally-evaluated
+                    # window look unpublished, so each run republished the
+                    # preceding window into a second directory holding the same
+                    # evaluations.  Readers then counted them twice, which is
+                    # what corrupted the weekly, monthly and governance inputs
+                    # in PR #128 (fixed there on the read side with a
+                    # forecast_id dedupe; this stops the write).
+                    cu_normal_batch_id = make_forecast_batch_id(
+                        config.pair, window.window_end_jst, config.protocol_version
+                    )
+                    cu_history_complete = any(
+                        _has_published_evaluation(
+                            os.path.join(cu_history_root, batch_dir)
+                        )
+                        for batch_dir in (cu_batch_id, cu_normal_batch_id)
                     )
 
                 if cu_existing_complete and (

@@ -592,6 +592,55 @@ class TestOutcomeCatchupEndToEnd:
         finally:
             session.close()
 
+    def test_normally_evaluated_window_is_not_republished_by_catchup(self) -> None:
+        """A window already evaluated in Step 4 must not be recovered again.
+
+        Every run sees the preceding window as a catch-up candidate.  That
+        window was evaluated normally on the day it closed and published under
+        the batch keyed by its END date; catch-up publishes under the batch
+        keyed by its START date.  When the completeness check only looked at
+        the latter, the window looked unpublished on every subsequent run, so
+        each run wrote a second directory holding the same evaluations and
+        readers counted them twice -- the corruption PR #128 fixed on the read
+        side.  Nothing should be written here at all.
+        """
+        session = self._make_session()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                cfg = FxDailyAutomationConfig(
+                    run_outcome_evaluation=True,
+                    run_forecast_generation=True,
+                    write_csv_exports=True,
+                    csv_output_dir=tmpdir,
+                )
+                # Day1: forecast for window bd20->bd21.
+                self._run(session, 20, cfg)
+                session.commit()
+
+                # Day2: evaluates window bd20->bd21 normally (no gap anywhere).
+                snap2, r2 = self._run(session, 21, cfg)
+                session.commit()
+                assert r2.outcome_recorded is True
+                date_day2 = snap2.as_of_jst.strftime("%Y%m%d")
+                normal_dir = os.path.join(
+                    tmpdir, "history", date_day2, r2.forecast_batch_id
+                )
+                assert os.path.isfile(os.path.join(normal_dir, "evaluation.csv"))
+
+                # Day3: nothing is missing, so catch-up has nothing to recover.
+                _, r3 = self._run(session, 22, cfg)
+                session.commit()
+                assert r3.catchup_windows == ()
+
+                # history/<day2>/ must still hold exactly the one directory
+                # Day2's own run created.  A second one would be the duplicate.
+                day2_dirs = sorted(
+                    os.listdir(os.path.join(tmpdir, "history", date_day2))
+                )
+                assert day2_dirs == [r2.forecast_batch_id]
+        finally:
+            session.close()
+
     def test_catchup_recovers_two_day_gap_with_default_bound(self) -> None:
         """Two consecutive missing days (D2, D3): D4 recovers D1 at distance 2."""
         session = self._make_session()
@@ -825,13 +874,12 @@ class TestOutcomeCatchupEndToEnd:
                     write_csv_exports=True,
                     csv_output_dir=tmpdir,
                     # Bound to distance 1 so Day4's catch-up only considers
-                    # window bd21->bd22 (this test's target). At the default
-                    # bound, bd20->bd21 (Day1's window, distance 2, already
-                    # evaluated normally by Day2's Step 4) would ALSO surface
-                    # as a candidate — a separate, pre-existing history-key
-                    # mismatch between Step 4's own publish location and
-                    # catch-up's completeness check that is out of scope for
-                    # this fix; isolate this test from it.
+                    # window bd21->bd22 (this test's target), keeping the
+                    # assertions below about a single candidate.  The
+                    # history-key mismatch this comment used to defer — Step 4
+                    # publishing under the END-date batch while catch-up
+                    # checked only the START-date one — is fixed; see
+                    # test_normally_evaluated_window_is_not_republished_by_catchup.
                     outcome_catchup_days=1,
                 )
                 # Day1 (n=20): forecast for window bd20->bd21.
