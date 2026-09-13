@@ -1,6 +1,6 @@
 # FX Monthly Governance Protocol v1 — Specification
 
-**Status**: Draft
+**Status**: Implemented (`monthly_governance.py` + `monthly_governance_exports.py`, run by `scripts/run_fx_analysis_pipeline.py` in monthly mode via `fx-analysis-pipeline.yml`; all four §7 outputs are produced and have been published monthly since 2026-03)
 **Depends on**: fx_monthly_review_v1, fx_observability_artifacts_v1
 **Scope**: Monthly governance layer — uses existing artifacts to make keep/change/version decisions
 **Pipeline**: Part of the FX Analysis Pipeline (weekly → monthly → governance), automated via `fx-analysis-pipeline.yml`

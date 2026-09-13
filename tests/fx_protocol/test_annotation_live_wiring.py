@@ -455,3 +455,65 @@ class TestWeeklyExportsThreadFallback:
         path = export_weekly_annotation_coverage_csv(report, str(tmp_path))
         rows = {r["field"]: r for r in _read_rows(path)}
         assert rows["regime_label"]["fallback_populated_count"] == "2"
+
+
+class TestResolveAnnotationSource:
+    """Unit tests for the extracted annotation_source precedence.
+
+    The rule used to live inline in ``_collect_labeled_observation_rows``, so
+    it could only be exercised through a full history scan.  As a pure
+    function each precedence branch is reachable directly.
+    """
+
+    def _resolve(self, **kwargs):
+        from ugh_quantamental.fx_protocol.annotation_sources import (
+            resolve_annotation_source,
+        )
+
+        defaults = {
+            "has_ai": False,
+            "has_auto": False,
+            "manual_status": "",
+            "manual_label_won": False,
+            "fallback_won": False,
+        }
+        defaults.update(kwargs)
+        return resolve_annotation_source(**defaults)
+
+    def test_ai_and_auto_outrank_everything(self) -> None:
+        assert (
+            self._resolve(
+                has_ai=True,
+                has_auto=True,
+                manual_status="done",
+                manual_label_won=True,
+                fallback_won=True,
+            )
+            == "ai_plus_auto"
+        )
+
+    def test_ai_alone(self) -> None:
+        assert self._resolve(has_ai=True, fallback_won=True) == "ai"
+
+    def test_auto_alone(self) -> None:
+        assert self._resolve(has_auto=True, manual_status="done") == "auto_only"
+
+    def test_manual_label_win_needs_a_status(self) -> None:
+        """A blank-status manual draft whose labels win stays unlabeled."""
+        assert self._resolve(manual_label_won=True, manual_status="") == "none"
+        assert (
+            self._resolve(manual_label_won=True, manual_status="done")
+            == "manual_compat"
+        )
+
+    def test_fallback_win_outranks_a_status_only_manual(self) -> None:
+        """The fallback supplied the real labels, so the row is its coverage."""
+        assert (
+            self._resolve(fallback_won=True, manual_status="done") == "ohlc_fallback"
+        )
+
+    def test_status_only_manual_without_fallback_stays_manual(self) -> None:
+        assert self._resolve(manual_status="done") == "manual_compat"
+
+    def test_nothing_present(self) -> None:
+        assert self._resolve() == "none"

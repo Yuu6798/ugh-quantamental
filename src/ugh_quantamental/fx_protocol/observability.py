@@ -62,6 +62,8 @@ SCOREBOARD_FIELDNAMES: tuple[str, ...] = (
     "range_hit_rate",
     "state_proxy_hit_count",
     "state_proxy_hit_rate",
+    "state_correctness_hit_count",
+    "state_correctness_hit_rate",
     "mean_close_error_bp",
     "median_close_error_bp",
     "mean_magnitude_error_bp",
@@ -370,6 +372,13 @@ def build_scoreboard_rows(
         state_evaluable = [e for e in evs if e.state_proxy_hit is not None]
         state_hits = sum(1 for e in state_evaluable if e.state_proxy_hit)
 
+        # state_correctness_hit is a distinct axis from state_proxy_hit:
+        # proxy measures persistence (forecast state == next-day forecast
+        # state), correctness measures the realized state.  Only proxy was
+        # rolled up, so stC had no cumulative view outside per-day evaluations.
+        stc_evaluable = [e for e in evs if e.state_correctness_hit is not None]
+        stc_hits = sum(1 for e in stc_evaluable if e.state_correctness_hit)
+
         close_errors = [e.close_error_bp for e in evs if e.close_error_bp is not None]
         mag_errors = [e.magnitude_error_bp for e in evs if e.magnitude_error_bp is not None]
 
@@ -389,6 +398,10 @@ def build_scoreboard_rows(
             "state_proxy_hit_count": state_hits if state_evaluable else "",
             "state_proxy_hit_rate": (
                 round(state_hits / len(state_evaluable), 4) if state_evaluable else ""
+            ),
+            "state_correctness_hit_count": stc_hits if stc_evaluable else "",
+            "state_correctness_hit_rate": (
+                round(stc_hits / len(stc_evaluable), 4) if stc_evaluable else ""
             ),
             "mean_close_error_bp": round(mean_close, 2) if mean_close is not None else "",
             "median_close_error_bp": round(median_close, 2) if median_close is not None else "",
