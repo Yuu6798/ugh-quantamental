@@ -16,6 +16,31 @@
   (`market_ugh_builder.build_ugh_request_from_snapshot(..., stats=...)`)
   経由の replay が本番と bit-identical であることを実データで確認済み
 
+> **スクリプト改訂に関する注記 (2026-09-13)。** 本ドキュメントの数値は
+> 2026-08 時点の `analyze_estar_lag.py` の出力であり、そのまま保存している。
+> その後スクリプトを拡張したため、**同じ再現コマンドが出す CSV の形は変わって
+> いる**。読み替えは以下:
+>
+> - `daily_series.csv` は alpha 単独ではなく **(variant, 日) ごとに 1 行**を
+>   出す。`variant` 列を追加したので、本ドキュメントの §2 に対応するのは
+>   `variant == ugh_v2_alpha` の行。値は当時と一致する。
+>   追加列は `pre_expansion_close_change_bp` とその 3 成分のうち当時無かった
+>   `conviction_factor` / `conviction`、および e_star の項である
+>   `fire_probability` / `u_score` / `alignment` (`e_star` と
+>   `trailing_mean_abs_change_bp` は当時からある)。
+> - `ablation.csv` に **`axis` 列**が付いた。本ドキュメント §4 が記述するのは
+>   `axis == statistic` の行で、その 18 行は当時と完全一致する。新たに
+>   `axis == estar_term` (compute_e_raw / compute_gravity_bias が実際に受け取る
+>   項の isolation) と `axis == signal_feature` (それらの上流) が加わる。
+>   ランク付けは軸ごとに独立で、`summary.json` の
+>   `rate_limiting_candidate_by_variant_and_reference` は従来どおり statistic 軸
+>   のみを指す。
+> - 日付窓はすべて CLI 引数になった。既定値は本ドキュメントの窓を再現する。
+> - `neutral` 参照は項ごとに定義される。符号付き量は 0.0 のままだが、
+>   `alignment` は乗法の単位元 1.0、`fire_probability` は無情報事前確率 0.5 を
+>   使う (0.0 は「全面的不一致」を意味し e_raw を毎日ゼロにする退化介入になる)。
+>   statistic 軸の参照値は 0.0 のままで、本ドキュメントの結果に影響しない。
+
 ## 0. TL;DR
 
 **`fundamental_score` の SMA20 飽和仮説は、e_star の「最初の持続的正転」

@@ -181,45 +181,64 @@ def _make_default_ugh_request(snapshot_ref: str):  # type: ignore[return]
     )
 
 
-def _has_published_evaluation(history_dir: str, outcome_id: str) -> bool:
-    """Return ``True`` iff *history_dir* holds a published evaluation for *outcome_id*.
+def _csv_column_values(path: str, column: str) -> list[str] | None:
+    """Return *column* from every row of the CSV at *path*, or ``None`` if unreadable."""
+    try:
+        with open(path, newline="", encoding="utf-8") as fh:
+            return [row.get(column, "") for row in csv.DictReader(fh)]
+    except OSError:
+        return None
 
-    ``forecast.csv`` is required alongside the outcome/evaluation pair because
-    ``collect_evaluated_forecast_rows`` only reads a directory that has it.
 
-    The path alone cannot establish which outcome the archived files describe:
-    forecast batch IDs omit the schema version while outcome IDs include it, so
-    a directory can hold a complete set for a *different* outcome of the same
-    window (a schema bump without a protocol bump).  Treating that as current
-    would skip publishing the real one forever, so the archived ``outcome_id``
-    is read rather than inferred from the directory name.
+def _has_published_evaluation(
+    history_dir: str,
+    outcome_id: str,
+    forecast_ids: frozenset[str],
+    forecast_dirs: tuple[str, ...] = (),
+) -> bool:
+    """Return ``True`` iff *outcome_id*'s evaluation is fully published.
+
+    Three things have to hold, and each has been observed to fail on its own:
+
+    1. ``outcome.csv`` in *history_dir* names *outcome_id*.  The path cannot
+       establish this: forecast batch IDs omit the schema version while outcome
+       IDs include it, so a directory can hold a complete set describing a
+       different outcome of the same window.
+    2. ``evaluation.csv`` there carries a full day of rows for that outcome.
+       ``publish_csv_to_history_only`` copies outcome, evaluation and forecast
+       in sequence, so an interrupted publish can leave a current outcome
+       beside the previous evaluations.
+    3. The evaluated batch's forecast rows are archived, in *history_dir* or in
+       one of *forecast_dirs* (the window's own origin directory).
+       ``collect_evaluated_forecast_rows`` joins by ``forecast_id`` across all
+       batches, so evaluations whose forecasts were never written -- exports
+       disabled on the day the forecast was generated -- stay invisible to the
+       weekly and monthly analytics.  A directory owned by a *different* batch
+       has a ``forecast.csv`` of its own, which says nothing about this window.
+
+    An unreadable archive is not proof of publication; re-publishing is
+    idempotent, so anything unreadable counts as unpublished.
     """
     outcome_path = os.path.join(history_dir, "outcome.csv")
     evaluation_path = os.path.join(history_dir, "evaluation.csv")
-    if not (
-        os.path.isfile(outcome_path)
-        and os.path.isfile(evaluation_path)
-        and os.path.isfile(os.path.join(history_dir, "forecast.csv"))
-    ):
+    if not (os.path.isfile(outcome_path) and os.path.isfile(evaluation_path)):
         return False
-    try:
-        with open(outcome_path, newline="", encoding="utf-8") as fh:
-            if not any(row.get("outcome_id") == outcome_id for row in csv.DictReader(fh)):
-                return False
-        # publish_csv_to_history_only copies outcome, evaluation and forecast in
-        # sequence, so an interrupted publish can leave a current outcome.csv
-        # beside the previous evaluation.csv.  Checking the outcome alone would
-        # read that as complete and skip the repair forever, so require the
-        # evaluations to be present, for this outcome, and a full day's worth.
-        with open(evaluation_path, newline="", encoding="utf-8") as fh:
-            matching = sum(
-                1 for row in csv.DictReader(fh) if row.get("outcome_id") == outcome_id
-            )
-    except OSError:
-        # An unreadable archive is not proof of publication; re-publishing is
-        # idempotent, so fall back to "not published".
+
+    outcome_ids = _csv_column_values(outcome_path, "outcome_id")
+    if outcome_ids is None or outcome_id not in outcome_ids:
         return False
-    return matching == EXPECTED_DAILY_BATCH_SIZE
+
+    evaluated = _csv_column_values(evaluation_path, "outcome_id")
+    if evaluated is None or evaluated.count(outcome_id) != EXPECTED_DAILY_BATCH_SIZE:
+        return False
+
+    for candidate in (history_dir, *forecast_dirs):
+        archived = _csv_column_values(
+            os.path.join(candidate, "forecast.csv"), "forecast_id"
+        )
+        if archived is not None and forecast_ids <= set(archived):
+            return True
+    return False
 
 
 def _has_complete_forecast_batch(
@@ -548,9 +567,23 @@ def run_fx_daily_protocol_once(
                     cu_normal_batch_id = make_forecast_batch_id(
                         config.pair, window.window_end_jst, config.protocol_version
                     )
+                    cu_forecast_ids = frozenset(
+                        f.forecast_id for f in cu_batch.forecasts
+                    )
+                    # Where this window's own forecast rows were archived on
+                    # the day they were generated.
+                    cu_origin_dir = os.path.join(
+                        config.csv_output_dir,
+                        "history",
+                        window.window_start_jst.strftime("%Y%m%d"),
+                        cu_batch_id,
+                    )
                     cu_history_complete = any(
                         _has_published_evaluation(
-                            os.path.join(cu_history_root, batch_dir), cu_outcome_id
+                            os.path.join(cu_history_root, batch_dir),
+                            cu_outcome_id,
+                            cu_forecast_ids,
+                            (cu_origin_dir,),
                         )
                         for batch_dir in (cu_batch_id, cu_normal_batch_id)
                     )

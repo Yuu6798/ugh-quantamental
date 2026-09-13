@@ -183,6 +183,30 @@ ABLATION_ESTAR_TERMS: tuple[str, ...] = (
 #: Terms above that are engine intermediates, not SignalFeatures fields.
 _ESTAR_INTERMEDIATE_TERMS: frozenset[str] = frozenset({"u_score", "alignment"})
 
+#: SignalFeatures fields read by compute_e_raw, and by compute_gravity_bias.
+_E_RAW_SIGNAL_TERMS: frozenset[str] = frozenset(
+    {"technical_score", "price_implied_score", "fire_probability"}
+)
+_GRAVITY_SIGNAL_TERMS: frozenset[str] = frozenset(
+    {"grv_lock", "regime_fit", "narrative_dispersion"}
+)
+
+#: The "neutral" reference is per term, because these terms are not all signed
+#: quantities whose no-contribution value is zero:
+#:
+#:  - ``alignment`` multiplies the whole directional product and lives in
+#:    [0, 1]; zero means total disagreement and forces e_raw to 0 on every
+#:    day, which mechanically ranks it as the rate limiter instead of
+#:    measuring what carried the transition. Its identity is 1.0, which is
+#:    also what compute_alignment returns when no pair carries weight.
+#:  - ``fire_probability`` is a probability; its no-information value is 0.5.
+#:
+#: Everything else contributes additively and is genuinely neutral at 0.0.
+NEUTRAL_TERM_REFERENCES: dict[str, float] = {
+    "alignment": 1.0,
+    "fire_probability": 0.5,
+}
+
 #: ``SignalFeatures`` fields that are upstream of the terms above rather than
 #: terms themselves. ``fundamental_score`` and ``technical_score`` both feed
 #: ``compute_u``, and ``technical_score`` additionally appears directly in
@@ -471,15 +495,26 @@ def _estar_term_value(replay: DayReplay, name: str) -> float:
 
 
 def _replay_projection(req: Any, config: Any, term_override: dict[str, float] | None):
-    """Run the projection engine, optionally overriding u_score / alignment.
+    """Run the projection engine, optionally overriding one term of e_star.
 
-    ``run_projection_engine`` takes features, not the intermediates it derives
-    from them, so ``u_score`` and ``alignment`` cannot be substituted through
-    its signature. With no override this delegates to the engine outright; with
-    one it recomposes the same published engine functions in the same order,
-    then asserts that recomposition reproduces the engine exactly on the
-    unablated path, so a future change to the engine's composition fails here
-    instead of silently producing a different analysis.
+    ``run_projection_engine`` takes features, not the terms it derives from
+    them, so an e_star term cannot be substituted through its signature. With
+    no override this delegates to the engine outright.
+
+    With one, the same published engine functions are recomposed in the same
+    order and the override is applied **at the point each term is consumed**,
+    never on the request:
+
+    * ``u_score`` and ``alignment`` replace the engine's own intermediates;
+    * ``technical_score`` / ``price_implied_score`` / ``fire_probability``
+      replace the values ``compute_e_raw`` reads, while ``compute_u`` still
+      sees the original features -- otherwise overriding ``technical_score``
+      would move ``u_score`` too and the result would not isolate one term;
+    * the three gravity terms replace what ``compute_gravity_bias`` reads.
+
+    The unablated recomposition is checked against the engine on every call, so
+    a change to the engine's composition fails here rather than quietly
+    producing a different analysis.
     """
     from ugh_quantamental.engine.projection import (
         compute_alignment,
@@ -506,23 +541,42 @@ def _replay_projection(req: Any, config: Any, term_override: dict[str, float] | 
         return engine_result
 
     qf, sf, cfg = proj.question_features, proj.signal_features, config
+
+    # compute_u always reads the ORIGINAL features: the direction terms are
+    # overridden only where compute_e_raw consumes them.
     u_score = term_override.get("u_score", compute_u(qf, sf, cfg))
     alignment = term_override.get(
         "alignment", compute_alignment(proj.alignment_inputs, cfg)
     )
-    e_raw = compute_e_raw(u_score, sf, alignment, cfg)
-    gravity_bias = compute_gravity_bias(sf, cfg)
+
+    e_raw_fields = {
+        name: value
+        for name, value in term_override.items()
+        if name in _E_RAW_SIGNAL_TERMS
+    }
+    sf_for_e_raw = sf.model_copy(update=e_raw_fields) if e_raw_fields else sf
+
+    gravity_fields = {
+        name: value
+        for name, value in term_override.items()
+        if name in _GRAVITY_SIGNAL_TERMS
+    }
+    sf_for_gravity = sf.model_copy(update=gravity_fields) if gravity_fields else sf
+
+    e_raw = compute_e_raw(u_score, sf_for_e_raw, alignment, cfg)
+    gravity_bias = compute_gravity_bias(sf_for_gravity, cfg)
     e_star = compute_e_star(e_raw, gravity_bias)
     mismatch_px = compute_mismatch_px(e_star, sf)
     mismatch_sem = compute_mismatch_sem(qf, sf)
     conviction = compute_conviction(sf, alignment, mismatch_px, mismatch_sem)
 
     # Same inputs as the engine except for the override: the un-overridden
-    # terms must reproduce it, or this recomposition has drifted.
-    check_u = compute_u(qf, sf, cfg)
-    check_alignment = compute_alignment(proj.alignment_inputs, cfg)
+    # path must reproduce it, or this recomposition has drifted.
     check_e_star = compute_e_star(
-        compute_e_raw(check_u, sf, check_alignment, cfg), gravity_bias
+        compute_e_raw(
+            compute_u(qf, sf, cfg), sf, compute_alignment(proj.alignment_inputs, cfg), cfg
+        ),
+        compute_gravity_bias(sf, cfg),
     )
     if abs(check_e_star - engine_result.e_star) > 1e-12:
         raise RuntimeError(
@@ -716,6 +770,8 @@ def run_analysis(
                     "technical_score": replay.technical_score,
                     "price_implied_score": replay.price_implied_score,
                     "fire_probability": replay.fire_probability,
+                    "u_score": replay.u_score,
+                    "alignment": replay.alignment,
                     "e_raw": replay.e_raw,
                     "gravity_bias": replay.gravity_bias,
                     "e_star": replay.e_star,
@@ -743,6 +799,8 @@ def run_analysis(
         "technical_score",
         "price_implied_score",
         "fire_probability",
+        "u_score",
+        "alignment",
         "e_raw",
         "gravity_bias",
         "e_star",
@@ -896,7 +954,10 @@ def run_analysis(
         for axis, names, ref_means in ablation_axes:
             for stat_name in names:
                 for ref_kind in REFERENCE_KINDS:
-                    ref_value = 0.0 if ref_kind == "neutral" else ref_means[stat_name]
+                    if ref_kind == "neutral":
+                        ref_value = NEUTRAL_TERM_REFERENCES.get(stat_name, 0.0)
+                    else:
+                        ref_value = ref_means[stat_name]
                     override = {stat_name: ref_value}
                     series: list[tuple[str, float]] = []
                     for day in search_days:
@@ -912,19 +973,15 @@ def run_analysis(
                                 override if axis == "statistic" else None
                             ),
                             signal_feature_override=(
-                                override
-                                if axis == "signal_feature"
-                                or (
-                                    axis == "estar_term"
-                                    and stat_name not in _ESTAR_INTERMEDIATE_TERMS
-                                )
-                                else None
+                                override if axis == "signal_feature" else None
                             ),
+                            # Every estar_term override goes through the
+                            # recomposition, which applies it where the term is
+                            # consumed. Routing the SignalFeatures-backed ones
+                            # through the request instead would let compute_u
+                            # read them too.
                             estar_term_override=(
-                                override
-                                if axis == "estar_term"
-                                and stat_name in _ESTAR_INTERMEDIATE_TERMS
-                                else None
+                                override if axis == "estar_term" else None
                             ),
                         )
                         series.append((day.isoformat(), replay.e_star))

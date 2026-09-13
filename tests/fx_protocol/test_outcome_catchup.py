@@ -760,6 +760,60 @@ class TestOutcomeCatchupEndToEnd:
         finally:
             session.close()
 
+    def test_unarchived_forecast_rows_are_republished(self) -> None:
+        """Evaluations whose forecasts were never archived must not read as done.
+
+        collect_evaluated_forecast_rows joins by forecast_id across batches, so
+        an evaluation whose forecast rows are absent from history is invisible
+        to weekly and monthly analytics.  The END-date directory has a
+        forecast.csv of its own -- that day's batch -- which says nothing about
+        this window, so existence alone must not end the repair.
+        """
+        session = self._make_session()
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                cfg = FxDailyAutomationConfig(
+                    run_outcome_evaluation=True,
+                    run_forecast_generation=True,
+                    write_csv_exports=True,
+                    csv_output_dir=tmpdir,
+                )
+                self._run(session, 20, cfg)
+                session.commit()
+                _, first = self._run(session, 22, cfg)
+                session.commit()
+                assert len(first.catchup_windows) == 1
+                cu = first.catchup_windows[0]
+
+                history_dir = os.path.join(
+                    tmpdir,
+                    "history",
+                    cu.window_end_jst.strftime("%Y%m%d"),
+                    cu.forecast_batch_id,
+                )
+                origin_dir = os.path.join(
+                    tmpdir,
+                    "history",
+                    cu.window_start_jst.strftime("%Y%m%d"),
+                    cu.forecast_batch_id,
+                )
+                forecast_path = os.path.join(history_dir, "forecast.csv")
+                assert os.path.isfile(forecast_path)
+                # Lose every archived copy of this window's forecast rows, as
+                # if exports had been off the day they were generated.
+                os.remove(forecast_path)
+                origin_forecast = os.path.join(origin_dir, "forecast.csv")
+                if os.path.isfile(origin_forecast):
+                    os.remove(origin_forecast)
+
+                _, retry = self._run(session, 22, cfg)
+                session.commit()
+                assert len(retry.catchup_windows) == 1
+                assert retry.catchup_windows[0].outcome_id == cu.outcome_id
+                assert os.path.isfile(forecast_path)
+        finally:
+            session.close()
+
     def test_catchup_recovers_two_day_gap_with_default_bound(self) -> None:
         """Two consecutive missing days (D2, D3): D4 recovers D1 at distance 2."""
         session = self._make_session()
