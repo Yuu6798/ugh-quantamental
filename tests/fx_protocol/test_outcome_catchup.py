@@ -1158,12 +1158,17 @@ class TestHasPublishedEvaluation:
             directory, self.OUTCOME_ID, self.FORECAST_IDS
         )
 
-    def _full_evaluations(self) -> str:
-        """One evaluation row per forecast in the batch, as production writes."""
-        rows = "".join(
-            f"{self.OUTCOME_ID},{fid}\n" for fid in sorted(self.FORECAST_IDS)
-        )
-        return f"outcome_id,forecast_id\n{rows}"
+    def _full_evaluations(self, *, truncate_last: bool = False) -> str:
+        """One evaluation row per forecast in the batch, as production writes.
+
+        A third column stands in for the many real ones after the IDs, so the
+        truncation case below is representable: the IDs survive and everything
+        after them is lost.
+        """
+        fids = sorted(self.FORECAST_IDS)
+        rows = "".join(f"{self.OUTCOME_ID},{fid},true\n" for fid in fids[:-1])
+        last = f"{self.OUTCOME_ID},{fids[-1]}" + ("\n" if truncate_last else ",true\n")
+        return f"outcome_id,forecast_id,direction_hit\n{rows}{last}"
 
     def test_complete_archive_is_published(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -1180,6 +1185,29 @@ class TestHasPublishedEvaluation:
         """
         with tempfile.TemporaryDirectory() as tmpdir:
             self._write(tmpdir, self._full_evaluations() + 'x,"unterminated')
+            assert self._call(tmpdir) is False
+
+    def test_row_truncated_after_the_ids_is_not_published(self) -> None:
+        """A row cut short is padded with None, which strict parsing allows.
+
+        The surviving columns are exactly the IDs every other check looks at,
+        so the archive passes them all; the lost columns come back as None and
+        break _parse_evaluation_row on the first field it coerces, taking the
+        scoreboard rebuild down with it.
+        """
+        with tempfile.TemporaryDirectory() as tmpdir:
+            self._write(tmpdir, self._full_evaluations(truncate_last=True))
+            assert self._call(tmpdir) is False
+
+    def test_row_with_extra_fields_is_not_published(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            body = self._full_evaluations().rstrip("\n")
+            fid = sorted(self.FORECAST_IDS)[-1]
+            self._write(
+                tmpdir,
+                body[: body.rindex("\n") + 1]
+                + f"{self.OUTCOME_ID},{fid},true,extra\n",
+            )
             assert self._call(tmpdir) is False
 
     def test_short_evaluation_set_is_not_published(self) -> None:

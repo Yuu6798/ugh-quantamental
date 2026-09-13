@@ -187,17 +187,29 @@ def _read_csv_rows(path: str) -> list[dict[str, str]] | None:
     ``strict=True`` so an archive truncated inside a quoted field raises
     instead of yielding a silently shortened value: the default parser accepts
     an unterminated quote at EOF, which is exactly what an interrupted copy
-    leaves behind.
+    leaves behind.  A row that is structurally short or long does not raise
+    even then, so those are rejected explicitly.
     """
     try:
         with open(path, newline="", encoding="utf-8") as fh:
-            return list(csv.DictReader(fh, strict=True))
+            rows = list(csv.DictReader(fh, strict=True))
     except (OSError, UnicodeDecodeError, csv.Error):
         # None of these is proof of publication, and re-publishing is
         # idempotent.  Letting one escape would reach the catch-up loop's broad
         # handler, which skips the candidate before the publication-repair
         # branch -- leaving the corrupt archive in place on every retry.
         return None
+
+    # A row cut short keeps its leading columns and has the rest padded with
+    # None; one with extra fields collects them under the None restkey. Neither
+    # raises, so strict parsing alone does not catch a copy interrupted partway
+    # through a row -- and the leading columns are exactly the IDs the caller
+    # checks, so such a row would pass every content check and then break
+    # _parse_evaluation_row on the first field it coerces.
+    for row in rows:
+        if None in row or None in row.values():
+            return None
+    return rows
 
 
 def _has_published_evaluation(
