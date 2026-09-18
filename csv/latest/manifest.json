@@ -1,8 +1,8 @@
 {
-  "as_of_jst": "2026-09-17T08:00:00+09:00",
-  "generated_at_utc": "2026-09-17T15:35:12Z",
-  "forecast_batch_id": "fb_USDJPY_20260917T080000_v1_71a7d2e658eb9f93",
-  "outcome_id": "oc_USDJPY_20260916T080000_20260917T080000_v1_2e5997aca7fd16e6",
+  "as_of_jst": "2026-09-18T08:00:00+09:00",
+  "generated_at_utc": "2026-09-18T09:54:58Z",
+  "forecast_batch_id": "fb_USDJPY_20260918T080000_v1_b8e8575473495a00",
+  "outcome_id": "oc_USDJPY_20260917T080000_20260918T080000_v1_883523bc54d48ae0",
   "evaluation_count": 7,
   "forecast_csv_path": "latest/forecast.csv",
   "outcome_csv_path": "latest/outcome.csv",
