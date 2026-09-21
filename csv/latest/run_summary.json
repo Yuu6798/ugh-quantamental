@@ -9,7 +9,7 @@
   },
   "forecast_batch_id": "fb_USDJPY_20260921T080000_v1_9dfc9e8e2725816c",
   "outcome_id": "oc_USDJPY_20260918T080000_20260921T080000_v1_245957e699b9deb5",
-  "forecast_created": true,
+  "forecast_created": false,
   "outcome_recorded": true,
   "evaluation_count": 7,
   "csv_paths": {
@@ -20,6 +20,6 @@
   "manifest_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/latest/manifest.json",
   "snapshot_lag_business_days": 0,
   "used_fallback_adjustment": false,
-  "run_status": "ok",
-  "generated_at_utc": "2026-09-21T10:52:33Z"
+  "run_status": "idempotent_skip",
+  "generated_at_utc": "2026-09-21T14:19:35Z"
 }
