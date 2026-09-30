@@ -374,3 +374,4 @@ as_of_jst,generated_at_utc,provider_name,newest_completed_window_end_jst,snapsho
 2026-09-29T08:00:00+09:00,2026-09-29T11:28:45Z,yahoo_finance,2026-09-29T08:00:00+09:00,0,False,ok,
 2026-09-29T08:00:00+09:00,2026-09-29T14:09:01Z,alpha_vantage,2026-09-29T08:00:00+09:00,0,False,idempotent_skip,
 2026-09-29T08:00:00+09:00,2026-09-29T16:55:48Z,alpha_vantage,2026-09-29T08:00:00+09:00,1,True,idempotent_skip,
+2026-09-30T08:00:00+09:00,2026-09-30T11:14:25Z,alpha_vantage,2026-09-30T08:00:00+09:00,0,False,ok,
