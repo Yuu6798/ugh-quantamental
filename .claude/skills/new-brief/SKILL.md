@@ -67,8 +67,12 @@ The same rule covers three things that are not symbols but fail the same way
 - **Flag identifiers and exception messages.** A brief that tells the
   implementer to assert on a flag id (`provider_quality_issue`), a log line,
   or a raised message must quote the string from its producer. Grep the
-  emitter (`fx_protocol/reporting.py`, `automation.py`, the script) — a
-  plausible name that does not exist (`provider_lag_issue`) costs a round.
+  whole repository for the literal (`grep -rn "<flag>" src/ scripts/`) and
+  read the hit that **appends** it, not one that merely mentions it:
+  `provider_quality_issue` is emitted by `fx_protocol/monthly_review.py`,
+  while `automation.py` only names it in a comment. A plausible name that
+  does not exist (`provider_lag_issue`) costs a round; so does citing the
+  wrong file as the emitter, which this bullet itself did in its first draft.
 - **Existing guard and test-fixture behaviour.** Before requiring "the run
   must fail on X", grep whether a guard already raises on X and what its
   tests fixture (`tests/fx_protocol/test_automation.py`,
