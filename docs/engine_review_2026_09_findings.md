@@ -7,7 +7,8 @@
   (`docs/reports/fx_weekly_report_202609*.md`)
 - 月次 artifact: 10/1 01:30 UTC の `fx-analysis-pipeline.yml` 実行前に、同一コードで scratchpad に
   再生成した (`FX_PIPELINE_MODE=monthly FX_REPORT_DATE=20261001 python scripts/run_fx_analysis_pipeline.py`)。
-  正式 artifact が push されたら数値を照合すること (`csv/analytics/monthly/202610/`)
+  正式 artifact (`csv/analytics/monthly/202610/`、commit `81cfcbf`、10/1 07:29 UTC 発火) と
+  Axis 1〜6 の全数値を照合済 — 一致 (2026-10-01)
 - 前月レビュー: `docs/engine_review_2026_08_findings.md`、`docs/analysis/estar_lag_2026_08.md`
 - 手順: `docs/specs/fx_monthly_governance_v1.md` §8 の 10 step を順守 (§1〜§7 が step 1〜7、§8 が step 8〜10)
 
@@ -404,5 +405,6 @@ Version Decision Record: `engine_version` v2.6 → v2.7、freeze 10/1〜10/30、
   本番と一致を確認済。
 - counterfactual は magnitude 経路の変更が方向入力に影響しないことを前提にしている (v2.5 の設計不変量
   「sign/FLAT は expansion 前に確定」に依存)。B/D の FLAT 変化は係数の置換による。
-- 月次 artifact は正式 run 前の再生成値。正式 artifact と差があれば本書を訂正する。
+- 月次 artifact の数値は正式 run 前に同一コードで再生成した値で起草し、正式 artifact (commit `81cfcbf`) と
+  Axis 1〜6 で照合して一致を確認済 (冒頭の注記を参照)。
 - 冗長入力の機序 (§4) は replay の実値と日別分解に基づくが、代替設計の効果は未測定 (CC-M01)。
