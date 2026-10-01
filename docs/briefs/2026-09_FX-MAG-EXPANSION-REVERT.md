@@ -72,8 +72,9 @@ bit-identical): 平均誤差 −1.33bp (30.90 → 29.57、α)、中央値 −2.6
 - 乗数の式は `forecasting.py` `_volatility_expansion_multiplier`: `1.0 + (config.volatility_expansion_max - 1.0) * activation`。
   max=1.0 で activation に関係なく 1.0。
 - findings §5.1 の mode C は「乗数を 1.0 に強制」で、本 brief の default 変更と数値的に同値
-  (script の `expansion=False` 分岐)。実装後、`python scripts/replay_magnitude_counterfactual.py` の
-  mode A (default) が旧 mode C と一致することが最終確認になる。
+  (script の `expansion=False` 分岐)。実装後の最終確認は、`python scripts/replay_magnitude_counterfactual.py`
+  で **mode C が v2.7 default の本番 forecast と一致** し (v2.7 期間は version map 経由で validate される)、
+  **mode A が v2.6 counterfactual (+7.41) のまま** であること。A は 1.8 固定なので default 変更で動かない。
 - v2.7 の最初の週報は 10/9 (10/5〜10/9 週)。`.claude/skills/fx-weekly-report/SKILL.md` に v2.7 開始日の
   注記は不要 (version は forecast 行に記録される) だが、月次の `engine_versions_in_window` が 2 値になる
   10 月は stratify の確認を 11 月月次に残す。
