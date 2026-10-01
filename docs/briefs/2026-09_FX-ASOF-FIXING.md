@@ -34,9 +34,14 @@ Step 7 の `requested_as_of_jst` 基準の lag=0) を通す。**完備してい�
       火曜 00:30 JST 着地** の fixture で追加)
 - [ ] 繰り越し後に provider が 1 日古い窓を返した場合、Step 2 の既存の後退拒否 (`ValueError`
       「Refusing to move the as_of backwards」) が同じく働く test
-- [ ] fixing 前かつ前営業日 batch 不完備の run が、provider の 1 日 fallback 経路で従来どおり
+- [ ] fixing 前かつ前営業日 batch **不在**の run が、provider の 1 日 fallback 経路で従来どおり
       `as_of_jst` を 1 日戻して forecast を作る (= 現行の救済挙動が不変) test。既存
       `test_one_day_lag_adjusts_as_of_jst` 系の fixture を流用
+- [ ] fixing 前かつ前営業日 batch が**部分的** (行数 ≠ `EXPECTED_DAILY_BATCH_SIZE`) の run は、
+      繰り越さず fallback 経路に落ちたうえで `run_daily_forecast_workflow` の既存ガード
+      (`forecasting.py` 「partial forecast batch exists」の `ValueError`) で従来どおり fail する test。
+      本 brief の「不完備 = 繰り越さない」は不在と部分の両方を含むが、部分 batch を救済して forecast を
+      作る挙動にしてはならない (破損ガードの弱体化)
 - [ ] 通常時刻 (14:23 / 16:23 / 20:23 JST = cron 05:23 / 07:23 / 11:23 UTC 定刻) の run は
       `now_utc >= as_of_jst` なので判定に入らず挙動不変 — 既存 test が通ることで確認
 - [ ] `docs/specs/fx_daily_automation_v1.md` の Step 1 記述「Determine canonical `as_of_jst` (08:00 JST
@@ -71,7 +76,7 @@ Step 7 の `requested_as_of_jst` 基準の lag=0) を通す。**完備してい�
 - Branch name: `codex/fx-asof-fixing-carry-over`
 - PR title: `fix(fx): carry a pre-fixing run over to the previous business day`
 - Expected files changed: 4 (automation.py / test_automation.py / spec / skill 注記)
-- Required tests: 上記 3 本 (lag=0 記録、後退拒否、不完備時の従来挙動)
+- Required tests: 上記 4 本 (lag=0 記録、後退拒否、不在 batch の従来救済、部分 batch の従来 fail)
 
 ## Done When
 - All acceptance criteria are checked

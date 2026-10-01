@@ -160,7 +160,14 @@ def run(
     # evaluated by the next run) is pending, not missing; it is reported but
     # cannot be replayed.  A replayed day, on the other hand, must have a
     # persisted forecast for every variant or the validation is incomplete.
-    persisted_days = {day_str for (day_str, _variant) in persisted}
+    persisted_days = {day_str for (day_str, _kind) in persisted}
+    # engine_version is stamped on every row of a batch, baselines included, so
+    # a batch is identified as modelled from all its rows -- a modelled batch
+    # that lost every variant row must fail, not pass as a legacy day.
+    versions_by_day: dict[str, set[str]] = {}
+    for (day_str, _kind), ref in persisted.items():
+        versions_by_day.setdefault(day_str, set()).add(ref[2])
+    modelled_versions = set(EXPANSION_MAX_BY_ENGINE_VERSION)
     unvalidated: set[str] = set()
     pending_days = sorted(
         {
@@ -178,16 +185,10 @@ def run(
             # No snapshot: fine for a day with no persisted batch (holiday) or
             # a pending / unmodelled day, but a modelled persisted forecast with
             # an outcome and no snapshot is a gap in the archive, not a skip.
-            modelled_missing = [
-                v
-                for v in VARIANTS
-                if (day_str, v) in persisted
-                and persisted[(day_str, v)][2] in EXPANSION_MAX_BY_ENGINE_VERSION
-            ]
-            if modelled_missing and day_str in realized:
+            if versions_by_day.get(day_str, set()) & modelled_versions and day_str in realized:
                 raise RuntimeError(
-                    f"{day_str}: persisted {modelled_missing} forecasts have an outcome but no "
-                    "input_snapshot.json; the modelled day cannot be replayed"
+                    f"{day_str}: a persisted batch of a modelled engine_version has an outcome "
+                    "but no input_snapshot.json; the modelled day cannot be replayed"
                 )
             continue
         if day_str not in realized:
@@ -208,14 +209,15 @@ def run(
                 "rows for a day it replays"
             )
         day_refs = {v: persisted[(day_str, v)] for v in VARIANTS if (day_str, v) in persisted}
-        modelled = {v for v, ref in day_refs.items() if ref[2] in EXPANSION_MAX_BY_ENGINE_VERSION}
-        if modelled and modelled != set(VARIANTS):
-            missing = sorted(set(VARIANTS) - modelled)
-            raise RuntimeError(
-                f"{day_str}: persisted batch has a modelled engine_version but lacks {missing}; "
-                "refusing to validate a partial day"
-            )
-        validate_day = bool(modelled)
+        validate_day = bool(versions_by_day[day_str] & modelled_versions)
+        if validate_day:
+            covered = {v for v, ref in day_refs.items() if ref[2] in modelled_versions}
+            if covered != set(VARIANTS):
+                missing = sorted(set(VARIANTS) - covered)
+                raise RuntimeError(
+                    f"{day_str}: persisted batch has a modelled engine_version but lacks "
+                    f"{missing}; refusing to validate a partial day"
+                )
         if not validate_day:
             # Pre-variant batch (single ``ugh`` row) or a version whose ceiling
             # this script does not model: replayed, not validated.
