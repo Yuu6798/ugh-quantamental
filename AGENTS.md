@@ -154,6 +154,8 @@ planning doc 側に吸収させた結果、後続の実装 PR は少ない round
 |---|---|
 | brief 起草前に `_index.md` + 直近 3 dated entries + STATUS.md を読む | memory log skip → 過去 session trap 再発生 |
 | brief で名指す path / 関数 / ORM column / CSV column を実装で grep 確認 (`/new-brief` §1a) | 思い込みで symbol を書く → compile-pass / runtime-fail 系 trap |
+| brief は必ず `/new-brief` 経由で起草・改訂する。flag 識別子・例外メッセージ・既存ガードの挙動 (「部分 batch は既に raise する」等) も §1a の grep 対象 | format を手書きして gate を飛ばす → PR #133 の 9 rounds 中 4 件 (存在しない flag 名、既存ガードと矛盾する test 要求、誤った replay mode への最終確認) |
+| analysis script の出力を promotion evidence に使うなら、検証件数を**外側から固定**する (`--expected-validated N` 型) と、欠落・部分 batch・snapshot 欠損で fail させる | 「nonzero なら OK」→ archive の欠けが黙って件数を減らし証拠を歪める (PR #133 の 9 rounds 中 6 件) |
 | CSV schema / metric 定義 / `engine_version` bump cadence を変えたら brief 全体を grep sync | axes-mismatch を放置 → PR #104 型の多 round chase |
 | ORM column 変更時は Alembic migration を必ずペア | migration 漏れ → schema drift |
 | review 5+ round → PR merge 後に「曖昧だった spec」を docs / tests に encode | round 内修正のみで完了 → trail が消失して再参照されない |
