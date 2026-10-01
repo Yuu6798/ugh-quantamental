@@ -54,3 +54,8 @@
 ## 2026-09-13 (PR #131 merge sweep overflow)
 
 - **PR #125 / 2026-08 briefs 4 本の一括実装** (2026-08-31) - GOV-FLAT-AWARE (excl-flat 列 + 同一 cohort delta 判定移行) / OUTCOME-CATCHUP (有界遡及 FX_OUTCOME_CATCHUP_DAYS=5、savepoint 隔離、window-END dir 発行、publication repair) / ESTAR-LAG (`scripts/analyze_estar_lag.py` + `docs/analysis/estar_lag_2026_08.md` — **SMA20 仮説棄却、momentum_5d が律速**) / PRICE-ALERT (`run_fx_price_alert.py` + workflow、stdlib-only、真 bp 単位、22:00 JST gap 監視、Issue 通知)。Claude 完結実装 (Sonnet worktree agent 4 並列 → cherry-pick 統合 → self-review 1 回で 10+ 件修正)。Codex 2 rounds 全採用 (evaluation_id / forecast_id dedupe、snapshot lookup 全 dir 探索 ほか)。ユーザー側 auto-fix runner と並走し衝突ゼロで統合。
+
+## 2026-10-01 (PR #132 sweep overflow)
+
+- **PR #127 / daily-protocol cron の :23 移動** (2026-09-03) - ops-only。GitHub Actions の毎時 0 分 schedule が 8/28 (欠測) / 8/31 / 9/1 (手動 dispatch で救済) と 3 営業日連続で遅延・欠落したため、daily cron 3 本を :23 へ、監視側 price-alert cron を :37 へ移動。`FX_LAST_RETRY` の cron 文字列一致も同期 (見落とすと最終 retry の fail-hard が静かに外れる)。self-review で spec の猶予算術誤り (20:23+2h≠22:00) を訂正し、旧時刻の記述 6 箇所を同期、daily script のコメントは時刻非依存化。Codex 2 rounds (round 1 = 2 件、いずれも self-review で先回り済み / round 2 = 指摘なし)。境界宣言 (round 11 以降は critical bug / 実コード破壊 / 将来汚染のみ) を PR に掲示、発動前に収束。
+
