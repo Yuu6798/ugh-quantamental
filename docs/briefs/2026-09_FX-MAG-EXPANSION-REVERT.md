@@ -1,8 +1,8 @@
 # Task Brief: FX-MAG-EXPANSION-REVERT - v2.5 ボラ拡張項の無効化 (engine v2.7)
 
-> **ユーザー承認が前提。** 2026-09 月次レビュー (`docs/engine_review_2026_09_findings.md` §5・§8) の
+> **2026-10-01 ユーザー承認済。** 2026-09 月次レビュー (`docs/engine_review_2026_09_findings.md` §5・§8) の
 > `version_promotion_candidate`。governance spec (`docs/specs/fx_monthly_governance_v1.md` §3 末尾・§6)
-> により logic 変更は人の判断を要する。承認前に着手しない。
+> により logic 変更は人の判断を要し、その判断は得られている。
 
 ## Phase
 2026-09 月次レビュー §8.1 (`docs/engine_review_2026_09_findings.md`)。engine_version v2.6 → **v2.7**。
@@ -45,12 +45,12 @@ bit-identical): 平均誤差 −1.33bp (30.90 → 29.57、α)、中央値 −2.6
       default 1.0 で無効化した事実、理由 (findings §5.1 の数値を引用)、式と不変量は維持、
       再有効化は config で可能、`engine_version` v2.6 → v2.7 と 3 箇所 sync。§5.1.3 本文の
       「Defaults: `volatility_expansion_max = 1.8`」は v2.5〜v2.6 の値として残し、v2.7 の default を併記
-- [ ] `scripts/replay_magnitude_counterfactual.py` の無介入 check は `engine_version == "v2.6"` の
-      persisted forecast に対して行っている。v2.7 運用開始後も **v2.6 期間の check が壊れないこと**
-      (default が変わると mode A の replay は v2.7 相当になり、v2.6 期間の persisted 値と一致しなくなる)。
-      対応: 無介入 check を「persisted の `engine_version` が v2.6 なら `volatility_expansion_max=1.8`、
-      v2.7 なら default」で config を切り替えて行う (variant config に version 別の override を渡す)。
-      これにより 10 月の A/B (findings M3) が同 script で取れる
+- [ ] `scripts/replay_magnitude_counterfactual.py`: mode A は `REPLAY_EXPANSION_MAX = 1.8` に**固定済**
+      (default 変更後も「v2.6 ならどう予測したか」を返し、C に畳まれない — 10 月の rollback 判定は
+      この A と v2.7 実績の比較)。persisted forecast の検証は `EXPANSION_MAX_BY_ENGINE_VERSION`
+      で version 別の上限を使うので、**`"v2.7": 1.0` を追加**する。それ以外は変えない。
+      実装後に 2026-04-01〜実装日で実行し、v2.6 期間 164 件 + v2.7 期間の全件が検証されること
+      (件数不足は script が fail する)
 - [ ] `ruff check .` / `pytest -q` pass
 
 ## Scope

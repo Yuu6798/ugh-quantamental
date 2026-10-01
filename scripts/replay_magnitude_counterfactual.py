@@ -5,9 +5,10 @@ paths and signal scales (2026-09 monthly review, ``docs/engine_review_2026_09_fi
 Read-only, deterministic, no network calls.  Every day is rebuilt from the
 persisted snapshot through the unmodified ``compute_snapshot_statistics`` ->
 ``build_ugh_request_from_snapshot`` -> projection path, the same way
-``analyze_estar_lag.py`` does; the unablated row reproduces the persisted
-forecast (direction and ``expected_close_change_bp``) bit-for-bit for every
-v2.6 day, and the script fails if it does not.
+``analyze_estar_lag.py`` does; every persisted UGH forecast in the window
+(direction and ``expected_close_change_bp``) is reproduced bit-for-bit under
+its own ``engine_version``'s expansion ceiling, and the script fails if any
+is missing or differs.
 
 Two axes, each independent of the other:
 
@@ -15,8 +16,10 @@ Two axes, each independent of the other:
 inputs are untouched, so the direction/FLAT decision changes only where the
 conviction factor is replaced (modes ``B`` / ``D``):
 
-* ``A`` current v2.6: ``e_star * trailing_mean_abs_close_change_bp *
-  (0.5 + 0.5 * conviction)``, then the v2.5 volatility-expansion multiplier.
+* ``A`` v2.6: ``e_star * trailing_mean_abs_close_change_bp *
+  (0.5 + 0.5 * conviction)``, then the v2.5 volatility-expansion multiplier
+  with its v2.6 ceiling (``REPLAY_EXPANSION_MAX = 1.8``, pinned so a later
+  default change cannot fold A onto C).
 * ``B`` conviction decoupled: the factor is the constant 0.75 (the midpoint
   of its ``[0.5, 1.0]`` range); expansion kept.
 * ``C`` expansion off: conviction factor kept, multiplier forced to ``1.0``
@@ -62,6 +65,16 @@ from analyze_estar_lag import (  # noqa: E402
 VARIANTS = ("ugh_v2_alpha", "ugh_v2_beta", "ugh_v2_gamma", "ugh_v2_delta")
 MAGNITUDE_MODES = ("A", "B", "C", "D")
 DECOUPLED_CONVICTION_FACTOR = 0.75
+#: Mode A is the v2.6 counterfactual and stays pinned to the v2.6 expansion
+#: ceiling whatever ``ProjectionConfig`` defaults to later.  Once a
+#: production version lowers the default, mode A keeps answering "what would
+#: v2.6 have forecast", which is what the monthly rollback check compares
+#: against -- it must not silently collapse onto mode C.
+REPLAY_EXPANSION_MAX = 1.8
+#: ``volatility_expansion_max`` in force for each persisted ``engine_version``;
+#: the unablated validation replays a persisted row under its own version's
+#: ceiling.  Add an entry when a version changes the ceiling.
+EXPANSION_MAX_BY_ENGINE_VERSION = {"v2.6": 1.8}
 
 
 @dataclass(frozen=True)
@@ -127,7 +140,9 @@ def _forecast_bp(req, res, cfg, trailing: float, *, conviction_factor: float, ex
     return direction.value, bp
 
 
-def run(fxdata_dir: str, start: date, end: date, scales: list[int]) -> tuple[list[Row], int]:
+def run(
+    fxdata_dir: str, start: date, end: date, scales: list[int]
+) -> tuple[list[Row], int, list[str], list[str]]:
     from ugh_quantamental.fx_protocol.market_ugh_builder import (
         build_ugh_request_from_snapshot,
         compute_snapshot_statistics,
@@ -135,9 +150,27 @@ def run(fxdata_dir: str, start: date, end: date, scales: list[int]) -> tuple[lis
 
     realized = _load_realized(fxdata_dir)
     persisted = _load_persisted(fxdata_dir)
-    configs = {v: _variant_config(v) for v in VARIANTS}
+    configs = {
+        v: _variant_config(v).model_copy(update={"volatility_expansion_max": REPLAY_EXPANSION_MAX})
+        for v in VARIANTS
+    }
     rows: list[Row] = []
     checked = 0
+    # A persisted forecast whose window has no outcome yet (the newest day,
+    # evaluated by the next run) is pending, not missing; it is reported but
+    # cannot be replayed.  A replayed day, on the other hand, must have a
+    # persisted forecast for every variant or the validation is incomplete.
+    persisted_days = {day_str for (day_str, _variant) in persisted}
+    unvalidated: set[str] = set()
+    pending_days = sorted(
+        {
+            day_str
+            for (day_str, variant), ref in persisted.items()
+            if variant in VARIANTS
+            and start.isoformat() <= day_str <= end.isoformat()
+            and day_str not in realized
+        }
+    )
     for day in business_days(start, end):
         day_str = day.isoformat()
         path = find_snapshot_path(fxdata_dir, day)
@@ -166,12 +199,40 @@ def run(fxdata_dir: str, start: date, end: date, scales: list[int]) -> tuple[lis
                 )
                 if mode == "A":
                     ref = persisted.get((day_str, variant))
-                    if ref is not None and ref[2] == "v2.6":
+                    if ref is None:
+                        if day_str not in persisted_days:
+                            raise RuntimeError(
+                                f"no persisted forecast batch on {day_str}: the checkout is "
+                                "missing forecast rows for a day it replays"
+                            )
+                        # The batch exists but predates the parallel variants
+                        # (single ``ugh`` row): replayed, not validated.
+                        unvalidated.add(day_str)
+                    elif ref[2] not in EXPANSION_MAX_BY_ENGINE_VERSION:
+                        # Known batch, but a version whose ceiling this script
+                        # does not model: replayed, not validated.
+                        unvalidated.add(day_str)
+                    else:
+                        # Validate under the ceiling the persisted version ran with,
+                        # independently of the pinned mode-A counterfactual.
+                        ref_cfg = cfg.model_copy(
+                            update={
+                                "volatility_expansion_max": EXPANSION_MAX_BY_ENGINE_VERSION[ref[2]]
+                            }
+                        )
+                        ref_direction, ref_bp = _forecast_bp(
+                            req,
+                            res,
+                            ref_cfg,
+                            trailing,
+                            conviction_factor=0.5 + 0.5 * res.conviction,
+                            expansion=True,
+                        )
                         checked += 1
-                        if ref[0] != direction or abs(ref[1] - bp) > 1e-6:
+                        if ref[0] != ref_direction or abs(ref[1] - ref_bp) > 1e-6:
                             raise RuntimeError(
                                 f"replay drifted from the persisted forecast on {day_str} "
-                                f"{variant}: {ref[:2]} vs ({direction}, {bp})"
+                                f"{variant}: {ref[:2]} vs ({ref_direction}, {ref_bp})"
                             )
                 rows.append(
                     Row(
@@ -222,7 +283,12 @@ def run(fxdata_dir: str, start: date, end: date, scales: list[int]) -> tuple[lis
                         sf.fundamental_score,
                     )
                 )
-    return rows, checked
+    if checked == 0:
+        raise RuntimeError(
+            f"no persisted forecast with a known engine_version ceiling was replayed in "
+            f"{start}..{end}; refusing to emit counterfactual outputs without a validation baseline"
+        )
+    return rows, checked, pending_days, sorted(unvalidated)
 
 
 def summarize(rows: list[Row]) -> list[dict[str, object]]:
@@ -295,7 +361,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     start, end = date.fromisoformat(args.start), date.fromisoformat(args.end)
-    rows, checked = run(args.fxdata_dir, start, end, args.scales)
+    rows, checked, pending_days, unvalidated = run(args.fxdata_dir, start, end, args.scales)
     os.makedirs(args.out_dir, exist_ok=True)
 
     daily = [

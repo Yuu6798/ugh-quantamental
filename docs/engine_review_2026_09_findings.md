@@ -17,8 +17,8 @@
 で +148bp を占め、残り 16 日はネットで UGH が勝っている。** 3 日とも conviction 0.75〜0.95 の大きな
 順張りが翌日の反転に遭った日で、8 月の最悪日 (8/10、conviction 0.94) と同型である (§4)。
 機序は 2 段: (a) ショック後は `fundamental_score` (spot vs SMA20)・`technical_score` (SMA5 vs SMA20)・
-`price_implied_score` (前日変化) が**同符号で飽和**し、3 入力が機械的に一致 → alignment ≈ 1 → conviction
-0.94〜0.98 → magnitude 係数が上限、(b) そこに **v2.5 のボラ拡張項が ×1.2〜1.7 を掛けて**賭けを最大化
+`price_implied_score` (前日変化) が**同符号に揃う** (SMA 系 2 項は飽和、price_implied は 9/14 のみ飽和、
+9/10 −0.76・9/25 +0.65) → alignment 0.91〜1.0 → conviction 0.75〜0.98 → magnitude 係数が上限近く、(b) そこに **v2.5 のボラ拡張項が ×1.2〜1.7 を掛けて**賭けを最大化
 していた。
 
 **replay (4〜9 月 120 営業日 × 4 variant、無介入系列は本番 forecast 164 件と bit-identical) で、
@@ -196,7 +196,7 @@ ablation (primary の shift、営業日。負 = 前倒し):
   SMA 系 2 項の −1 と同符号に揃った)、9/16 窓 +75bp では −0.138 → −0.134 (price_implied +1 を
   SMA 系 2 項の −1 が打ち消す)。**符号が揃う方向にだけ大きく動く** = 冗長な入力の多数決。
 
-## 4. 9 月の支配的欠陥: 飽和入力の多数決が最大 conviction を生み、反転日に最大の賭けになる
+## 4. 9 月の支配的欠陥: 同符号に揃った冗長入力が高 conviction を生み、反転日に最大の賭けになる
 
 ### 事実 (評価レコード、α、9/1〜9/29 の 21 評価日)
 
@@ -229,10 +229,10 @@ governance 窓 (9/3〜9/30、19 日) の合計 +140.9bp (= 7.41 × 19) のうち
 | 9/25 | +1.0 (飽和) | +0.77 | +0.65 | 0.91 | 0.75 | ×1.23 |
 
 (乗数は `expected_close_change_bp / pre_expansion_close_change_bp`。8/10 は ×1.56、9/8 は ×1.73。) **3 入力は独立ではない**: 2 つは
-SMA20 からのスプレッド、1 つは前日変化で、ショック後は機械的に同符号で飽和する。engine の alignment は
-「3 つの異なる根拠が一致した」と読んで conviction を 0.94〜0.98 に上げ、magnitude 係数 (0.5 + 0.5 ×
-conviction) が上限に達し、さらに v2.5 の `_volatility_expansion_multiplier` (catalyst・urgency・
-fire_probability の平均が高い = まさに大変動直後) が ×1.2〜1.7 を掛ける。**同じ情報を 3 回数えて確信を
+SMA20 からのスプレッド、1 つは前日変化で、ショック後は機械的に同符号に揃う (SMA 系 2 項は clamp で飽和、
+price_implied は 3 日中 1 日が飽和)。engine の alignment は「3 つの異なる根拠が一致した」と読んで conviction を
+0.75〜0.98 に上げ、magnitude 係数 (0.5 + 0.5 × conviction) が上限近くに達し、さらに v2.5 の `_volatility_expansion_multiplier` (catalyst・urgency・
+fire_probability の平均が高い = まさに大変動直後) が ×1.2〜1.7 を掛ける。**相関した情報を 3 回数えて確信を
 作り、その確信で賭けを最大化し、拡張項でさらに増やす** — これが 8/10 (conviction 0.94、−39bp → 実現
 +98.9bp、8 月の代表的失敗) を含む Aug–Sep の最悪 4 日すべてに共通する。
 
@@ -246,9 +246,9 @@ fire_probability の平均が高い = まさに大変動直後) が ×1.2〜1.7 
 | 8 月 | 3/5 (+19.4) | **0/1 (+39.0)** |
 | 9 月 | **0/1 (+46.5)** | **2/4 (+89.5)** |
 
-7 月レビュー §6「conviction ≥ 0.7 で 86%」は平時 (4〜7 月) の性質で、ショック後の飽和局面では
-成立しない。conviction を reliability として使う下流 (売買レイヤー planning、queue) は**飽和日の
-conviction を割り引く条件**を前提に置くこと。
+7 月レビュー §6「conviction ≥ 0.7 で 86%」は平時 (4〜7 月) の性質で、ショック後に入力が同符号に揃う
+局面では成立しない。conviction を reliability として使う下流 (売買レイヤー planning、queue) は
+**SMA 系 2 項が飽和している日の conviction を割り引く条件**を前提に置くこと。
 
 ## 5. counterfactual replay: magnitude 経路と signal スケール (`scripts/replay_magnitude_counterfactual.py`)
 
@@ -327,8 +327,8 @@ C は最悪日の損失を 1/3〜1/4 削るが**消しはしない** — 残り�
 - k=50 では最悪 3 日 (8/10・9/10・9/14) の予測値が**一切変わらない** (スプレッド −2.7% は 2% でも飽和)。
   k=25 でも conviction 0.74〜0.77 で同方向。
 - つまりスケール変更の「改善」は賭けの縮小 (平均 |予測| 12.0 → 8.5bp) で、7 月 §5.6 が退けた
-  「定数 6bp が最良」と同種の L1 縮小効果。**方向ロジックの改善ではないため採用しない。** 飽和・冗長性
-  そのものへの対処 (alignment が飽和入力の一致を根拠として数えない等) は別の設計論点として logic audit に
+  「定数 6bp が最良」と同種の L1 縮小効果。**方向ロジックの改善ではないため採用しない。** 冗長性
+  そのものへの対処 (alignment が相関入力の一致を独立の根拠として数えない等) は別の設計論点として logic audit に
   残す (CC-M01)。
 
 ## 6. 運用 (Axis 5 の詳細と修正方針)
@@ -366,7 +366,7 @@ C は最悪日の損失を 1/3〜1/4 削るが**消しはしない** — 残り�
 | リスクの文書化 | §5.1〜5.2: 方向が正しい大変動日の過小が広がる (α 18 日 / +41bp)。9 月の中央値 +3bp。range_hit は無関係 (v2.6 でレンジは e_star 非依存) |
 | 1 layer / 1 変更 | `engine_version` のみ。`volatility_expansion_max` default 1.8 → 1.0 (コードは不変、§5.1.3 の式で乗数 ≡ 1.0) |
 
-**実施はユーザー承認後** (governance 出力は自動生成、logic 変更は人の判断 — spec §3 末尾)。承認時の
+**2026-10-01 ユーザー承認済** (governance 出力は自動生成、logic 変更は人の判断 — spec §3 末尾)。
 Version Decision Record: `engine_version` v2.6 → v2.7、freeze 10/1〜10/30、**rollback trigger =
 10 月の replay (本 script、A vs C) で v2.7 の平均誤差が v2.6 replay を 1.0bp 以上上回る、または
 `inspect_magnitude_mapping` が v2.7 で発火し v2.6 replay では発火しない**。→ brief
@@ -378,7 +378,7 @@ Version Decision Record: `engine_version` v2.6 → v2.7、freeze 10/1〜10/30、
 |---|---|---|---|---|
 | CC-001 (自動) | → version_promotion_candidate | magnitude/close-error mapping | 実体は v2.5 拡張項 (§5) | accepted → brief |
 | CC-002 (自動) | logic_audit | state-to-magnitude mapping | 高ボラ月の絶対閾値アーティファクト (§7) | deferred (10 月 artifact で再判定) |
-| CC-M01 | logic_audit | 飽和入力の冗長性と alignment/conviction の多数決 (§4) | 最悪 4 日の共通機序。設計案は未検証、counterfactual から | proposed |
+| CC-M01 | logic_audit | 同符号に揃う冗長入力 (SMA 系 2 項の飽和 + 前日変化) と alignment/conviction の多数決 (§4) | 最悪 4 日の共通機序。設計案は未検証、counterfactual から | proposed |
 | CC-M02 | logic_audit | 絶対 bp 閾値の相対化 (§7) | 9 月 RW 52bp vs 8 月 25bp | proposed |
 | CC-M03 | logic_audit | Axis 4 `disconfirmer_explained` 集計の欠落 | spec と artifact の不一致 | proposed |
 | CC-M04 | data_provider_remediation | 偽 provider lag の記録 (§6) | 28.8%、閾値 30% | accepted → brief FX-ASOF-FIXING |
@@ -389,10 +389,10 @@ Version Decision Record: `engine_version` v2.6 → v2.7、freeze 10/1〜10/30、
 
 | # | 項目 | 種別 | 状態 |
 |---|---|---|---|
-| M1 | FX-MAG-EXPANSION-REVERT (`volatility_expansion_max` 1.0、v2.7) | engine | brief 発行、**ユーザー承認待ち** |
-| M2 | FX-ASOF-FIXING (fixing 前着地の繰り越し) | automation | brief 発行 |
+| M1 | FX-MAG-EXPANSION-REVERT (`volatility_expansion_max` 1.0、v2.7) | engine | brief 発行、10/1 承認、Codex へ |
+| M2 | FX-ASOF-FIXING (fixing 前着地の繰り越し) | automation | brief 発行、10/1 承認、Codex へ |
 | M3 | 10 月の A/B 検証 (本 script で v2.6 replay vs v2.7 実績) | 分析 | 11 月月次で実施 |
-| M4 | CC-M01 飽和/冗長性の設計 counterfactual | 分析 | 10 月中に設計、11 月月次で判断 |
+| M4 | CC-M01 冗長入力の設計 counterfactual | 分析 | 10 月中に設計、11 月月次で判断 |
 | M5 | レンジ幅較正 brief (queue 1) | engine | 据え置き。9 月 89.5%、外した 2 日は設計上のテール |
 | M6 | CC-M02 / CC-M03 (測定器) | 集計層 | 10 月 artifact を見て判断 |
 
@@ -403,4 +403,4 @@ Version Decision Record: `engine_version` v2.6 → v2.7、freeze 10/1〜10/30、
 - counterfactual は magnitude 経路の変更が方向入力に影響しないことを前提にしている (v2.5 の設計不変量
   「sign/FLAT は expansion 前に確定」に依存)。B/D の FLAT 変化は係数の置換による。
 - 月次 artifact は正式 run 前の再生成値。正式 artifact と差があれば本書を訂正する。
-- 飽和・冗長性の機序 (§4) は replay の実値と日別分解に基づくが、代替設計の効果は未測定 (CC-M01)。
+- 冗長入力の機序 (§4) は replay の実値と日別分解に基づくが、代替設計の効果は未測定 (CC-M01)。
