@@ -55,6 +55,15 @@ This split was already in use before being formalized: PR #104 ran the full
 Claude-design → Codex-review loop (13 rounds). Solo Claude work and small fixes
 need not round-trip, but anything ≈ 1 day or larger should go through a brief.
 
+**A brief is drafted or revised only through `/new-brief`**, never by writing the
+Task Brief format directly. The skill's §1a grounding gate (grep every path,
+function, flag identifier, exception message, and test-fixture behaviour the
+brief names) is the step that gets skipped when the format is hand-written: the
+2026-09 briefs (PR #133) spent 4 of 9 review rounds on exactly that —
+`provider_lag_issue` (never emitted; the flag is `provider_quality_issue`), a
+"partial batch" case the existing guard already rejects, and a final check
+aimed at the wrong replay mode.
+
 ## Required reading (tiered)
 
 Read up to the tier that matches your task scope, to keep startup attention

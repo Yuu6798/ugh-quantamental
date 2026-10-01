@@ -61,6 +61,38 @@ relative — the source package lives under `src/ugh_quantamental/`):
 - `alembic/versions/` — current migration head before any ORM column change
 - `docs/specs/` — the formal v1 spec for the milestone being touched
 
+The same rule covers three things that are not symbols but fail the same way
+(PR #133: 4 of 9 review rounds were ungrepped claims of this kind):
+
+- **Flag identifiers and exception messages.** A brief that tells the
+  implementer to assert on a flag id (`provider_quality_issue`), a log line,
+  or a raised message must quote the string from its producer. Grep the
+  whole repository for the literal (`grep -rn "<flag>" src/ scripts/`) and
+  read the hit that **appends** it, not one that merely mentions it:
+  `provider_quality_issue` is emitted by `fx_protocol/monthly_review.py`,
+  while `automation.py` only names it in a comment. A plausible name that
+  does not exist (`provider_lag_issue`) costs a round; so does citing the
+  wrong file as the emitter, which this bullet itself did in its first draft.
+  This applies to identifiers that already exist. A string the brief
+  **introduces** has no producer to quote: mark it `(new)` where it first
+  appears, ground it in the spec section that defines it, and never present
+  it in the same voice as an existing one.
+- **Existing guard and test-fixture behaviour.** Before requiring "the run
+  must fail on X", grep whether a guard already raises on X and what its
+  tests fixture (`tests/fx_protocol/test_automation.py`,
+  `test_forecasting.py`, …). Demanding a new failure the code already
+  produces, or a fixture the validators reject (window-count minimums), is
+  a contradiction the implementer has to argue back.
+- **Promotion-evidence validated counts.** When a replay or analysis script
+  is cited as evidence, state the expected number of validated **forecast
+  records** in the unit the script actually counts — one per persisted
+  variant row, so `replay_magnitude_counterfactual.py` validates 164 records
+  over 41 modelled days, not 41 — and require the script to pin it from
+  outside (`--expected-validated N`) and
+  to fail on a missing batch, partial variant coverage, or a missing
+  snapshot. Check which mode the pin applies to before writing the Done
+  When against it (mode A pinned → check mode C).
+
 ### 1b. Invariant scope
 A brief MUST NOT require a change that violates a core architecture invariant
 (`CLAUDE.md` § Architecture invariants). If the work genuinely needs to, that
