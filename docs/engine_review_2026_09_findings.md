@@ -35,7 +35,7 @@ queue 2 の「9/7 FLAT の成分分解」は完了: FLAT は epsilon でも trai
 e_star 転換の律速は 2 か月連続で `momentum_5d` (= SMA5−SMA20 スプレッド、5 日リターンではない)、
 SMA20 飽和仮説は再度棄却 (§3)。運用では、月〜木の最終 retry が JST 翌日に着地して `provider_health.csv`
 に **偽の lag=1 / fallback=True が 17 行 (28.8%、flag 閾値 30%、判定は `>`)** 積まれており、同種の run が
-あと 2 本 (19/61 = 31.1%) で `provider_lag_issue` が誤発火する距離にある (§6、brief FX-ASOF-FIXING)。
+あと 2 本 (19/61 = 31.1%) で `provider_quality_issue` が誤発火する距離にある (§6、brief FX-ASOF-FIXING)。
 
 ## 1. 6 軸診断 (step 2〜7)
 
@@ -128,7 +128,7 @@ lag を測るため lag=0 — 同じ週のデータに修正の有無が並ん�
 | `inspect_state_mapping` | **発火** (state proxy 73.7% だが magnitude 誤差 39.7bp > 30) | 高ボラ月では magnitude 誤差 (bp 絶対値) が自動的に閾値を越える。§7 |
 | `inspect_direction_logic` | 非発火 (excl FLAT で simple_technical を上回る) | 方向ロジック維持 |
 | `regime_/volatility_direction_collapse` | 非発火 | 8 月の崩落は解消 |
-| `provider_lag_issue` / `provider_fallback_issue` | 非発火 (28.8%、判定は > 30%) | **あと 2 run で偽陽性** (Axis 5) |
+| `provider_quality_issue` (lag / fallback は reason 文で区別) | 非発火 (28.8%、判定は > 30%) | **あと 2 run で偽陽性** (Axis 5) |
 | `missing_windows` / `low_annotation_coverage` / `insufficient_data` | 非発火 | — |
 
 ## 2. queue 2: 9/7 FLAT の成分分解 (完了)
@@ -334,7 +334,7 @@ C は最悪日の損失を 1/3〜1/4 削るが**消しはしない** — 残り�
 
 ## 6. 運用 (Axis 5 の詳細と修正方針)
 
-- **偽 lag/fallback 17 行 (28.8%)** — 機序は Axis 5 のとおり。`provider_lag_issue` / `provider_fallback_issue`
+- **偽 lag/fallback 17 行 (28.8%)** — 機序は Axis 5 のとおり。`provider_quality_issue` (lag / fallback は reason 文で区別)
   は `> 30%` で発火し (`generate_review_flags`、strict)、10 月に同種の遅延 run が 2 本増えれば (19/61)
   **偽陽性で `data_provider_remediation` に分類される**
   (優先度 1 で理論の判断を止める)。修正は PR #130 の繰り越し経路の一般化: Step 1 で「`current_as_of_jst`

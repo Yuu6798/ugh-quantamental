@@ -11,7 +11,7 @@ Step 1 の `current_as_of_jst(now_utc)` が「まだ 08:00 fixing の来てい�
 完了窓が 1 営業日前に見えるため、Step 2 の 1 日 fallback で正しい日に戻ったうえで `idempotent_skip`
 になる。動作は正しいが `provider_health.csv` に **偽の `snapshot_lag_business_days=1` /
 `used_fallback_adjustment=True`** が積まれる (9 月 17 行 / 59 run = 28.8%、月次 flag
-`provider_lag_issue` / `provider_fallback_issue` は `> 30%` で発火、同種の run があと 2 本 = 19/61 で誤発火)。これを **PR #130 の繰り越し
+`provider_quality_issue` (lag / fallback は reason 文で区別) は `> 30%` で発火、同種の run があと 2 本 = 19/61 で誤発火)。これを **PR #130 の繰り越し
 経路に乗せる**: run 開始時刻が `as_of_jst` (08:00 JST) より前なら、前営業日の forecast batch が完備して
 いる場合に限りその日へ繰り越し、`carried_over_from_non_business_day` と同じ下流 (Step 2 の後退拒否、
 Step 7 の `requested_as_of_jst` 基準の lag=0) を通す。**完備していない場合は従来どおり** (繰り越さず、
