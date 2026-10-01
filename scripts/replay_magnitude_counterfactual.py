@@ -174,7 +174,23 @@ def run(
     for day in business_days(start, end):
         day_str = day.isoformat()
         path = find_snapshot_path(fxdata_dir, day)
-        if path is None or day_str not in realized:
+        if path is None:
+            # No snapshot: fine for a day with no persisted batch (holiday) or
+            # a pending / unmodelled day, but a modelled persisted forecast with
+            # an outcome and no snapshot is a gap in the archive, not a skip.
+            modelled_missing = [
+                v
+                for v in VARIANTS
+                if (day_str, v) in persisted
+                and persisted[(day_str, v)][2] in EXPANSION_MAX_BY_ENGINE_VERSION
+            ]
+            if modelled_missing and day_str in realized:
+                raise RuntimeError(
+                    f"{day_str}: persisted {modelled_missing} forecasts have an outcome but no "
+                    "input_snapshot.json; the modelled day cannot be replayed"
+                )
+            continue
+        if day_str not in realized:
             continue
         snapshot = load_market_snapshot(path)
         base_stats = compute_snapshot_statistics(snapshot)
