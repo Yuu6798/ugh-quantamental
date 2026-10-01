@@ -398,9 +398,14 @@ def main(argv: list[str] | None = None) -> None:
             f"Magnitude / scale counterfactual summary ({name}: {start}..{end})",
             summary,
         )
-    print(
-        f"[OK] {len(rows)} rows; unablated replay checked against {checked} persisted v2.6 forecasts"
-    )
+    print(f"[OK] {len(rows)} rows; replay validated against {checked} persisted forecasts")
+    if pending_days:
+        print(f"  pending (no outcome yet, not replayed): {', '.join(pending_days)}")
+    if unvalidated:
+        print(
+            f"  replayed but not validated ({len(unvalidated)} days without a persisted variant "
+            f"row of a modelled engine_version): {unvalidated[0]}..{unvalidated[-1]}"
+        )
     print(f"  outputs: {args.out_dir}")
 
 
