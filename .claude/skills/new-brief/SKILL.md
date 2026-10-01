@@ -80,8 +80,11 @@ The same rule covers three things that are not symbols but fail the same way
   produces, or a fixture the validators reject (window-count minimums), is
   a contradiction the implementer has to argue back.
 - **Promotion-evidence validated counts.** When a replay or analysis script
-  is cited as evidence, state the expected number of validated days and
-  require the script to pin it from outside (`--expected-validated N`) and
+  is cited as evidence, state the expected number of validated **forecast
+  records** in the unit the script actually counts — one per persisted
+  variant row, so `replay_magnitude_counterfactual.py` validates 164 records
+  over 41 modelled days, not 41 — and require the script to pin it from
+  outside (`--expected-validated N`) and
   to fail on a missing batch, partial variant coverage, or a missing
   snapshot. Check which mode the pin applies to before writing the Done
   When against it (mode A pinned → check mode C).
