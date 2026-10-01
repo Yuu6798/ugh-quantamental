@@ -7,7 +7,8 @@
   (`docs/reports/fx_weekly_report_202609*.md`)
 - 月次 artifact: 10/1 01:30 UTC の `fx-analysis-pipeline.yml` 実行前に、同一コードで scratchpad に
   再生成した (`FX_PIPELINE_MODE=monthly FX_REPORT_DATE=20261001 python scripts/run_fx_analysis_pipeline.py`)。
-  正式 artifact が push されたら数値を照合すること (`csv/analytics/monthly/202610/`)
+  正式 artifact (`csv/analytics/monthly/202610/`、commit `81cfcbf`、10/1 07:29 UTC 発火) と
+  Axis 1〜6 の全数値を照合済 — 一致 (2026-10-01)
 - 前月レビュー: `docs/engine_review_2026_08_findings.md`、`docs/analysis/estar_lag_2026_08.md`
 - 手順: `docs/specs/fx_monthly_governance_v1.md` §8 の 10 step を順守 (§1〜§7 が step 1〜7、§8 が step 8〜10)
 
