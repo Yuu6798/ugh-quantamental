@@ -75,7 +75,7 @@ REPLAY_EXPANSION_MAX = 1.8
 #: ``volatility_expansion_max`` in force for each persisted ``engine_version``;
 #: the unablated validation replays a persisted row under its own version's
 #: ceiling.  Add an entry when a version changes the ceiling.
-EXPANSION_MAX_BY_ENGINE_VERSION = {"v2.6": 1.8}
+EXPANSION_MAX_BY_ENGINE_VERSION = {"v2.6": 1.8, "v2.7": 1.0}
 
 
 @dataclass(frozen=True)

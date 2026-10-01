@@ -100,6 +100,17 @@ def test_projection_config_flat_epsilon_defaults() -> None:
     assert config.direction_flat_epsilon_floor_bp == pytest.approx(3.0)
 
 
+def test_projection_config_volatility_expansion_defaults() -> None:
+    config = ProjectionConfig()
+
+    # v2.7 (FX-MAG-EXPANSION-REVERT): the expansion ceiling defaults to 1.0, which
+    # makes the v2.5 multiplier identically 1.0; the activation floor is kept so an
+    # explicit ceiling of 1.8 reproduces v2.5-v2.6 exactly.
+    assert config.volatility_expansion_max == pytest.approx(1.0)
+    assert config.volatility_expansion_activation_floor == pytest.approx(0.6)
+    assert ProjectionConfig(volatility_expansion_max=1.8).volatility_expansion_max == 1.8
+
+
 def test_projection_config_range_width_defaults() -> None:
     config = ProjectionConfig()
 

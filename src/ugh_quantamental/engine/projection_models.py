@@ -135,7 +135,12 @@ class ProjectionConfig(BaseModel):
     # volatility_expansion_activation_floor to 1 at full signal strength, so calm
     # days (low signals) keep magnitude unchanged. This is a separate factor from
     # conviction (= reliability scaler, §7/§8 Option B) to avoid re-coupling them.
-    volatility_expansion_max: FiniteFloat = Field(default=1.8, ge=1.0)
+    # v2.7 (2026-09 monthly review, FX-MAG-EXPANSION-REVERT): the default ceiling is
+    # 1.0, which makes the multiplier identically 1.0 and restores the v2.4
+    # magnitude. Over 2026-04..09 (120 business days x 4 variants) the v2.5
+    # expansion raised mean close error in every month and never changed a
+    # direction/FLAT call; set 1.8 explicitly to re-enable the v2.5 behaviour.
+    volatility_expansion_max: FiniteFloat = Field(default=1.0, ge=1.0)
     volatility_expansion_activation_floor: FiniteFloat = Field(
         default=0.6, ge=0.0, le=1.0
     )
