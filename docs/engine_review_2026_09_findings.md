@@ -17,8 +17,8 @@
 で +148bp を占め、残り 16 日はネットで UGH が勝っている。** 3 日とも conviction 0.75〜0.95 の大きな
 順張りが翌日の反転に遭った日で、8 月の最悪日 (8/10、conviction 0.94) と同型である (§4)。
 機序は 2 段: (a) ショック後は `fundamental_score` (spot vs SMA20)・`technical_score` (SMA5 vs SMA20)・
-`price_implied_score` (前日変化) が**同符号に揃う** (SMA 系 2 項は飽和、price_implied は 9/14 のみ飽和、
-9/10 −0.76・9/25 +0.65) → alignment 0.91〜1.0 → conviction 0.75〜0.98 → magnitude 係数が上限近く、(b) そこに **v2.5 のボラ拡張項が ×1.2〜1.7 を掛けて**賭けを最大化
+`price_implied_score` (前日変化) が**同符号に揃う** (fundamental は 3 日とも飽和、technical は 9/10・9/14 で飽和し
+9/25 は +0.77、price_implied は 9/14 のみ飽和で 9/10 −0.76・9/25 +0.65) → alignment 0.91〜1.0 → conviction 0.75〜0.98 → magnitude 係数が上限近く、(b) そこに **v2.5 のボラ拡張項が ×1.2〜1.7 を掛けて**賭けを最大化
 していた。
 
 **replay (4〜9 月 120 営業日 × 4 variant、無介入系列は本番 forecast 164 件と bit-identical) で、
@@ -229,8 +229,8 @@ governance 窓 (9/3〜9/30、19 日) の合計 +140.9bp (= 7.41 × 19) のうち
 | 9/25 | +1.0 (飽和) | +0.77 | +0.65 | 0.91 | 0.75 | ×1.23 |
 
 (乗数は `expected_close_change_bp / pre_expansion_close_change_bp`。8/10 は ×1.56、9/8 は ×1.73。) **3 入力は独立ではない**: 2 つは
-SMA20 からのスプレッド、1 つは前日変化で、ショック後は機械的に同符号に揃う (SMA 系 2 項は clamp で飽和、
-price_implied は 3 日中 1 日が飽和)。engine の alignment は「3 つの異なる根拠が一致した」と読んで conviction を
+SMA20 からのスプレッド、1 つは前日変化で、ショック後は機械的に同符号に揃う (fundamental は 3 日とも clamp で飽和、
+technical は 2 日、price_implied は 1 日が飽和 — 飽和の有無より**同符号に揃うこと**が共通条件)。engine の alignment は「3 つの異なる根拠が一致した」と読んで conviction を
 0.75〜0.98 に上げ、magnitude 係数 (0.5 + 0.5 × conviction) が上限近くに達し、さらに v2.5 の `_volatility_expansion_multiplier` (catalyst・urgency・
 fire_probability の平均が高い = まさに大変動直後) が ×1.2〜1.7 を掛ける。**相関した情報を 3 回数えて確信を
 作り、その確信で賭けを最大化し、拡張項でさらに増やす** — これが 8/10 (conviction 0.94、−39bp → 実現
@@ -248,7 +248,8 @@ fire_probability の平均が高い = まさに大変動直後) が ×1.2〜1.7 
 
 7 月レビュー §6「conviction ≥ 0.7 で 86%」は平時 (4〜7 月) の性質で、ショック後に入力が同符号に揃う
 局面では成立しない。conviction を reliability として使う下流 (売買レイヤー planning、queue) は
-**SMA 系 2 項が飽和している日の conviction を割り引く条件**を前提に置くこと。
+**3 つの方向入力が同符号に揃った日 (少なくとも fundamental が ±1 に飽和) の conviction を割り引く条件**を
+前提に置くこと — 9/25 は technical +0.77 なので「2 項とも飽和」を条件にすると最悪 4 日のうち 1 日が外れる。
 
 ## 5. counterfactual replay: magnitude 経路と signal スケール (`scripts/replay_magnitude_counterfactual.py`)
 
@@ -379,7 +380,7 @@ Version Decision Record: `engine_version` v2.6 → v2.7、freeze 10/1〜10/30、
 |---|---|---|---|---|
 | CC-001 (自動) | → version_promotion_candidate | magnitude/close-error mapping | 実体は v2.5 拡張項 (§5) | accepted → brief |
 | CC-002 (自動) | logic_audit | state-to-magnitude mapping | 高ボラ月の絶対閾値アーティファクト (§7) | deferred (10 月 artifact で再判定) |
-| CC-M01 | logic_audit | 同符号に揃う冗長入力 (SMA 系 2 項の飽和 + 前日変化) と alignment/conviction の多数決 (§4) | 最悪 4 日の共通機序。設計案は未検証、counterfactual から | proposed |
+| CC-M01 | logic_audit | 同符号に揃う冗長入力 (fundamental の飽和 + technical・前日変化の同符号) と alignment/conviction の多数決 (§4) | 最悪 4 日の共通機序。設計案は未検証、counterfactual から | proposed |
 | CC-M02 | logic_audit | 絶対 bp 閾値の相対化 (§7) | 9 月 RW 52bp vs 8 月 25bp | proposed |
 | CC-M03 | logic_audit | Axis 4 `disconfirmer_explained` 集計の欠落 | spec と artifact の不一致 | proposed |
 | CC-M04 | data_provider_remediation | 偽 provider lag の記録 (§6) | 28.8%、閾値 30% | accepted → brief FX-ASOF-FIXING |
