@@ -405,5 +405,6 @@ Version Decision Record: `engine_version` v2.6 → v2.7、freeze 10/1〜10/30、
   本番と一致を確認済。
 - counterfactual は magnitude 経路の変更が方向入力に影響しないことを前提にしている (v2.5 の設計不変量
   「sign/FLAT は expansion 前に確定」に依存)。B/D の FLAT 変化は係数の置換による。
-- 月次 artifact は正式 run 前の再生成値。正式 artifact と差があれば本書を訂正する。
+- 月次 artifact の数値は正式 run 前に同一コードで再生成した値で起草し、正式 artifact (commit `81cfcbf`) と
+  Axis 1〜6 で照合して一致を確認済 (冒頭の注記を参照)。
 - 冗長入力の機序 (§4) は replay の実値と日別分解に基づくが、代替設計の効果は未測定 (CC-M01)。
