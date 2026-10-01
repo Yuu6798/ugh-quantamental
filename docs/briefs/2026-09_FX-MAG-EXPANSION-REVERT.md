@@ -86,5 +86,6 @@ bit-identical): 平均誤差 −1.33bp (30.90 → 29.57、α)、中央値 −2.6
 
 ## Done When
 - All acceptance criteria are checked
-- Completion Summary に、`replay_magnitude_counterfactual.py` を 9 月窓で実行した mode A の
-  α `mean_error_delta_vs_random_walk_bp` (期待値 +3.19 前後、findings §5.1) を記載する
+- Completion Summary に、`replay_magnitude_counterfactual.py` を 9 月窓 (2026-09-03〜09-30) で実行した
+  **mode C** の α `mean_error_delta_vs_random_walk_bp` (期待値 +3.19、findings §5.1) と、同じ run で
+  mode A が +7.41 のまま (固定が効いている) であることを記載する

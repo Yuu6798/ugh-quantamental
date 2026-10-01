@@ -182,6 +182,29 @@ def run(
         trailing = float(base_stats["trailing_mean_abs_change_bp"])
         realized_bp = realized[day_str]
 
+        # Decide how this day is validated before replaying it.  A day whose
+        # batch carries any variant row of a modelled engine_version must carry
+        # all of them, so a checkout that lost one variant row fails instead of
+        # quietly lowering the validated count.
+        if day_str not in persisted_days:
+            raise RuntimeError(
+                f"no persisted forecast batch on {day_str}: the checkout is missing forecast "
+                "rows for a day it replays"
+            )
+        day_refs = {v: persisted[(day_str, v)] for v in VARIANTS if (day_str, v) in persisted}
+        modelled = {v for v, ref in day_refs.items() if ref[2] in EXPANSION_MAX_BY_ENGINE_VERSION}
+        if modelled and modelled != set(VARIANTS):
+            missing = sorted(set(VARIANTS) - modelled)
+            raise RuntimeError(
+                f"{day_str}: persisted batch has a modelled engine_version but lacks {missing}; "
+                "refusing to validate a partial day"
+            )
+        validate_day = bool(modelled)
+        if not validate_day:
+            # Pre-variant batch (single ``ugh`` row) or a version whose ceiling
+            # this script does not model: replayed, not validated.
+            unvalidated.add(day_str)
+
         # --- magnitude axis (unablated inputs) ---
         req = build_ugh_request_from_snapshot(snapshot, snapshot_ref=path, stats=base_stats)
         for variant in VARIANTS:
@@ -197,43 +220,27 @@ def run(
                 direction, bp = _forecast_bp(
                     req, res, cfg, trailing, conviction_factor=factor, expansion=mode in ("A", "B")
                 )
-                if mode == "A":
-                    ref = persisted.get((day_str, variant))
-                    if ref is None:
-                        if day_str not in persisted_days:
-                            raise RuntimeError(
-                                f"no persisted forecast batch on {day_str}: the checkout is "
-                                "missing forecast rows for a day it replays"
-                            )
-                        # The batch exists but predates the parallel variants
-                        # (single ``ugh`` row): replayed, not validated.
-                        unvalidated.add(day_str)
-                    elif ref[2] not in EXPANSION_MAX_BY_ENGINE_VERSION:
-                        # Known batch, but a version whose ceiling this script
-                        # does not model: replayed, not validated.
-                        unvalidated.add(day_str)
-                    else:
-                        # Validate under the ceiling the persisted version ran with,
-                        # independently of the pinned mode-A counterfactual.
-                        ref_cfg = cfg.model_copy(
-                            update={
-                                "volatility_expansion_max": EXPANSION_MAX_BY_ENGINE_VERSION[ref[2]]
-                            }
+                if mode == "A" and validate_day:
+                    # Validate under the ceiling the persisted version ran with,
+                    # independently of the pinned mode-A counterfactual.
+                    ref = day_refs[variant]
+                    ref_cfg = cfg.model_copy(
+                        update={"volatility_expansion_max": EXPANSION_MAX_BY_ENGINE_VERSION[ref[2]]}
+                    )
+                    ref_direction, ref_bp = _forecast_bp(
+                        req,
+                        res,
+                        ref_cfg,
+                        trailing,
+                        conviction_factor=0.5 + 0.5 * res.conviction,
+                        expansion=True,
+                    )
+                    checked += 1
+                    if ref[0] != ref_direction or abs(ref[1] - ref_bp) > 1e-6:
+                        raise RuntimeError(
+                            f"replay drifted from the persisted forecast on {day_str} "
+                            f"{variant}: {ref[:2]} vs ({ref_direction}, {ref_bp})"
                         )
-                        ref_direction, ref_bp = _forecast_bp(
-                            req,
-                            res,
-                            ref_cfg,
-                            trailing,
-                            conviction_factor=0.5 + 0.5 * res.conviction,
-                            expansion=True,
-                        )
-                        checked += 1
-                        if ref[0] != ref_direction or abs(ref[1] - ref_bp) > 1e-6:
-                            raise RuntimeError(
-                                f"replay drifted from the persisted forecast on {day_str} "
-                                f"{variant}: {ref[:2]} vs ({ref_direction}, {ref_bp})"
-                            )
                 rows.append(
                     Row(
                         "magnitude",
