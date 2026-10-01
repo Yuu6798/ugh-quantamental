@@ -73,6 +73,10 @@ The same rule covers three things that are not symbols but fail the same way
   while `automation.py` only names it in a comment. A plausible name that
   does not exist (`provider_lag_issue`) costs a round; so does citing the
   wrong file as the emitter, which this bullet itself did in its first draft.
+  This applies to identifiers that already exist. A string the brief
+  **introduces** has no producer to quote: mark it `(new)` where it first
+  appears, ground it in the spec section that defines it, and never present
+  it in the same voice as an existing one.
 - **Existing guard and test-fixture behaviour.** Before requiring "the run
   must fail on X", grep whether a guard already raises on X and what its
   tests fixture (`tests/fx_protocol/test_automation.py`,
