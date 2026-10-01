@@ -49,8 +49,9 @@ bit-identical): 平均誤差 −1.33bp (30.90 → 29.57、α)、中央値 −2.6
       (default 変更後も「v2.6 ならどう予測したか」を返し、C に畳まれない — 10 月の rollback 判定は
       この A と v2.7 実績の比較)。persisted forecast の検証は `EXPANSION_MAX_BY_ENGINE_VERSION`
       で version 別の上限を使うので、**`"v2.7": 1.0` を追加**する。それ以外は変えない。
-      実装後に 2026-04-01〜実装日で実行し、v2.6 期間 164 件 + v2.7 期間の全件が検証されること
-      (件数不足は script が fail する)
+      実装後に 2026-04-01〜実装日で `--expected-validated <164 + v2.7 期間の件数>` を付けて実行し、
+      v2.6 期間 164 件 + v2.7 期間の全件が検証されること (丸ごと欠けた日は archive から検出できないので、
+      件数は呼び出し側が固定する。不一致は script が fail する)
 - [ ] `ruff check .` / `pytest -q` pass
 
 ## Scope

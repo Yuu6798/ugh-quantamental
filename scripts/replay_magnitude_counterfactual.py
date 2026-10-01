@@ -38,7 +38,8 @@ Usage
 -----
 python scripts/replay_magnitude_counterfactual.py \\
     --fxdata-dir <fx-daily-data checkout>/csv --out-dir <out> \\
-    [--start 2026-04-01] [--end 2026-09-30] [--scales 100 50 33 25]
+    [--start 2026-04-01] [--end 2026-09-30] [--scales 100 50 33 25] \\
+    [--expected-validated 164]
 """
 
 from __future__ import annotations
@@ -142,7 +143,7 @@ def _forecast_bp(req, res, cfg, trailing: float, *, conviction_factor: float, ex
 
 def run(
     fxdata_dir: str, start: date, end: date, scales: list[int]
-) -> tuple[list[Row], int, list[str], list[str]]:
+) -> tuple[list[Row], int, list[str], list[str], list[str]]:
     from ugh_quantamental.fx_protocol.market_ugh_builder import (
         build_ugh_request_from_snapshot,
         compute_snapshot_statistics,
@@ -169,6 +170,10 @@ def run(
         versions_by_day.setdefault(day_str, set()).add(ref[2])
     modelled_versions = set(EXPANSION_MAX_BY_ENGINE_VERSION)
     unvalidated: set[str] = set()
+    # A business day with no persisted batch at all is invisible to every
+    # per-day guard above (nothing to inspect), so it is reported, and the
+    # caller can pin the validated count with --expected-validated.
+    no_batch_days: list[str] = []
     pending_days = sorted(
         {
             day_str
@@ -181,6 +186,8 @@ def run(
     for day in business_days(start, end):
         day_str = day.isoformat()
         path = find_snapshot_path(fxdata_dir, day)
+        if day_str not in persisted_days:
+            no_batch_days.append(day_str)
         if path is None:
             # No snapshot: fine for a day with no persisted batch (holiday) or
             # a pending / unmodelled day, but a modelled persisted forecast with
@@ -313,7 +320,7 @@ def run(
             f"no persisted forecast with a known engine_version ceiling was replayed in "
             f"{start}..{end}; refusing to emit counterfactual outputs without a validation baseline"
         )
-    return rows, checked, pending_days, sorted(unvalidated)
+    return rows, checked, pending_days, sorted(unvalidated), no_batch_days
 
 
 def summarize(rows: list[Row]) -> list[dict[str, object]]:
@@ -383,10 +390,29 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--start", default="2026-04-01")
     parser.add_argument("--end", default="2026-09-30")
     parser.add_argument("--scales", nargs="+", type=int, default=[100, 50, 33, 25])
+    parser.add_argument(
+        "--expected-validated",
+        type=int,
+        default=None,
+        help=(
+            "Exact number of persisted forecasts the replay must validate; the run fails on "
+            "any other count. An archive that lost a whole day (forecast.csv and snapshot) "
+            "leaves nothing for the per-day guards to inspect, so pin the count when the "
+            "output is used as promotion evidence (2026-04-01..2026-09-30: 164)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     start, end = date.fromisoformat(args.start), date.fromisoformat(args.end)
-    rows, checked, pending_days, unvalidated = run(args.fxdata_dir, start, end, args.scales)
+    rows, checked, pending_days, unvalidated, no_batch_days = run(
+        args.fxdata_dir, start, end, args.scales
+    )
+    if args.expected_validated is not None and checked != args.expected_validated:
+        raise SystemExit(
+            f"[ERROR] validated {checked} persisted forecasts, expected "
+            f"{args.expected_validated}; business days with no persisted batch: "
+            f"{', '.join(no_batch_days) or 'none'}"
+        )
     os.makedirs(args.out_dir, exist_ok=True)
 
     daily = [
@@ -424,6 +450,11 @@ def main(argv: list[str] | None = None) -> None:
             summary,
         )
     print(f"[OK] {len(rows)} rows; replay validated against {checked} persisted forecasts")
+    if no_batch_days:
+        print(
+            f"  business days with no persisted batch (holiday or lost day, not replayed): "
+            f"{', '.join(no_batch_days)}"
+        )
     if pending_days:
         print(f"  pending (no outcome yet, not replayed): {', '.join(pending_days)}")
     if unvalidated:
