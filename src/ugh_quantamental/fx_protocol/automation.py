@@ -280,9 +280,7 @@ def _has_published_evaluation(
        own, which says nothing about this window.
     """
     outcome_rows = _read_csv_rows(os.path.join(history_dir, "outcome.csv"))
-    if outcome_rows is None or not any(
-        row.get("outcome_id") == outcome_id for row in outcome_rows
-    ):
+    if outcome_rows is None or not any(row.get("outcome_id") == outcome_id for row in outcome_rows):
         return False
 
     evaluation_rows = _read_csv_rows(
@@ -329,12 +327,19 @@ def run_fx_daily_protocol_once(
     config: FxDailyAutomationConfig,
     provider: FxMarketDataProvider,
     session: "Session",
+    *,
+    now_utc: datetime | None = None,
 ) -> FxDailyAutomationResult:
     """Execute one full daily FX protocol run.
 
+    ``now_utc`` is the run's wall clock; it defaults to ``datetime.now(timezone.utc)``
+    and exists so tests can place a run before or after the 08:00 JST fixing.
+
     Steps
     -----
-    1. Determine canonical ``as_of_jst`` (08:00 JST today or previous business day).
+    1. Determine canonical ``as_of_jst`` (08:00 JST today). A run that lands on a
+       non-business day, or starts before today's 08:00 fixing, carries over to
+       the previous business day when that day's forecast batch is complete.
     2. Fetch one USDJPY snapshot from the provider.
     3. If ``config.run_forecast_generation``: build and run the forecast workflow
        (idempotent — rerunning the same window returns the existing batch).
@@ -363,9 +368,15 @@ def run_fx_daily_protocol_once(
     from ugh_quantamental.fx_protocol.outcomes import run_daily_outcome_evaluation_workflow
 
     # --- Step 1: canonical as_of_jst ---
-    now_utc = datetime.now(timezone.utc)
+    if now_utc is None:
+        now_utc = datetime.now(timezone.utc)
     as_of_jst = current_as_of_jst(now_utc)
-    carried_over_from_non_business_day = False
+    # Set when this run was carried over to the previous business day because
+    # that day's forecast batch is already complete -- either from a weekend
+    # landing or from a start before today's 08:00 JST fixing.  Step 2 refuses
+    # to slide such a run further back, and Step 7 measures provider lag against
+    # the day actually requested, so a rescued run never records false lag.
+    carried_over = False
     if not is_protocol_business_day(as_of_jst):
         # A scheduled attempt that starts late can cross midnight JST and land on
         # a weekend, even though the protocol day it belongs to is the business
@@ -384,29 +395,57 @@ def run_fx_daily_protocol_once(
         # day, so a Sunday landing also carries over to Friday.  That is the
         # intent: the batch-completeness check, not the size of the gap, is what
         # makes the carry-over safe.
-        carried_over = prev_as_of_jst(as_of_jst)
-        if _has_complete_forecast_batch(session, config, carried_over):
-            carried_over_from_non_business_day = True
+        previous_day = prev_as_of_jst(as_of_jst)
+        if _has_complete_forecast_batch(session, config, previous_day):
+            carried_over = True
             logger.warning(
                 "Run landed on %s JST, which is not a protocol business day; "
                 "carrying over to the previous business day %s, whose forecast "
                 "batch is already complete.",
                 as_of_jst.date().isoformat(),
-                carried_over.date().isoformat(),
+                previous_day.date().isoformat(),
             )
-            as_of_jst = carried_over
+            as_of_jst = previous_day
         else:
             raise ValueError(
                 f"Today ({as_of_jst.date()} JST) is not a protocol business day, "
-                f"and the previous business day ({carried_over.date()} JST) has no "
+                f"and the previous business day ({previous_day.date()} JST) has no "
                 "complete forecast batch to carry over. Run on Mon–Fri only."
             )
+    elif now_utc < as_of_jst:
+        # A delayed Mon-Thu final retry can cross midnight JST and start at
+        # 00:xx on the next business day, before that day's 08:00 fixing.  The
+        # protocol day it belongs to is the one that just ended.  Left alone,
+        # the provider's newest completed window looks one business day behind
+        # and the ordinary fallback in Step 2 walks as_of_jst back -- correctly,
+        # but recording a provider lag and a fallback adjustment that never
+        # happened (17 such rows in 2026-09, 28.8% of runs, against a 30%
+        # provider_quality_issue threshold).
+        #
+        # Carry over only when the previous business day's batch is complete,
+        # exactly like the weekend case above: every remaining step is then
+        # idempotent and the rescue cannot create a forecast after the fixing.
+        # An absent or partial batch falls through to Step 2 unchanged, so the
+        # existing fallback (and its partial-batch guard downstream) still
+        # governs that case.
+        previous_day = prev_as_of_jst(as_of_jst)
+        if _has_complete_forecast_batch(session, config, previous_day):
+            carried_over = True
+            logger.warning(
+                "Run started at %s, before the 08:00 JST fixing of %s; carrying "
+                "over to the previous business day %s, whose forecast batch is "
+                "already complete.",
+                now_utc.isoformat(),
+                as_of_jst.date().isoformat(),
+                previous_day.date().isoformat(),
+            )
+            as_of_jst = previous_day
 
     # --- Step 2: fetch snapshot ---
     # The as_of the provider is actually queried with.  Step 7 measures provider
     # lag against this, not against wall-clock "today": a run carried over from a
-    # weekend queries the previous business day and gets that day's current data,
-    # which is not provider lag.
+    # weekend or from before the fixing queries the previous business day and
+    # gets that day's current data, which is not provider lag.
     requested_as_of_jst = as_of_jst
     snapshot = provider.fetch_snapshot(as_of_jst)
 
@@ -425,7 +464,7 @@ def run_fx_daily_protocol_once(
         raise ValueError("Provider returned a snapshot with no completed windows.")
     newest_end = snapshot.completed_windows[-1].window_end_jst
     if newest_end != as_of_jst:
-        if carried_over_from_non_business_day:
+        if carried_over:
             # The carry-over only happens when as_of_jst's batch is already
             # complete, which means an earlier attempt did see a snapshot ending
             # at as_of_jst.  A provider that now reports an older window has
@@ -489,9 +528,7 @@ def run_fx_daily_protocol_once(
             protocol_version=config.protocol_version,
         )
         # Check idempotency: compute what the batch ID would be.
-        expected_batch_id = make_forecast_batch_id(
-            config.pair, as_of_jst, config.protocol_version
-        )
+        expected_batch_id = make_forecast_batch_id(config.pair, as_of_jst, config.protocol_version)
         from ugh_quantamental.persistence.repositories import FxForecastRepository
 
         existing = FxForecastRepository.load_fx_forecast_batch(session, expected_batch_id)
@@ -524,8 +561,7 @@ def run_fx_daily_protocol_once(
         prior_batch_id = make_forecast_batch_id(config.pair, prior_as_of, config.protocol_version)
         prior_batch = _FxFR.load_fx_forecast_batch(session, prior_batch_id)
         _prior_batch_ready = (
-            prior_batch is not None
-            and len(prior_batch.forecasts) == EXPECTED_DAILY_BATCH_SIZE
+            prior_batch is not None and len(prior_batch.forecasts) == EXPECTED_DAILY_BATCH_SIZE
         )
 
     if _prior_batch_ready:
@@ -610,9 +646,7 @@ def run_fx_daily_protocol_once(
                 cu_date_str = window.window_end_jst.strftime("%Y%m%d")
                 cu_history_complete = False
                 if config.write_csv_exports:
-                    cu_history_root = os.path.join(
-                        config.csv_output_dir, "history", cu_date_str
-                    )
+                    cu_history_root = os.path.join(config.csv_output_dir, "history", cu_date_str)
                     # Two directories under that date can already hold this
                     # window's evaluation, and either one means "published":
                     #
@@ -633,9 +667,7 @@ def run_fx_daily_protocol_once(
                     cu_normal_batch_id = make_forecast_batch_id(
                         config.pair, window.window_end_jst, config.protocol_version
                     )
-                    cu_forecast_ids = frozenset(
-                        f.forecast_id for f in cu_batch.forecasts
-                    )
+                    cu_forecast_ids = frozenset(f.forecast_id for f in cu_batch.forecasts)
                     # Where this window's own forecast rows were archived on
                     # the day they were generated.
                     cu_origin_dir = os.path.join(
@@ -654,9 +686,7 @@ def run_fx_daily_protocol_once(
                         for batch_dir in (cu_batch_id, cu_normal_batch_id)
                     )
 
-                if cu_existing_complete and (
-                    not config.write_csv_exports or cu_history_complete
-                ):
+                if cu_existing_complete and (not config.write_csv_exports or cu_history_complete):
                     # Fully recovered and already published — idempotent no-op.
                     continue
 
@@ -781,18 +811,14 @@ def run_fx_daily_protocol_once(
             )
 
         if outcome_id is not None:
-            outcome_rec = FxOutcomeEvaluationRepository.load_fx_outcome_record(
-                session, outcome_id
-            )
+            outcome_rec = FxOutcomeEvaluationRepository.load_fx_outcome_record(session, outcome_id)
             outcome_csv_path = export_daily_outcome_csv(
                 outcome_rec,
                 as_of_jst,
                 config.pair.value,
                 config.csv_output_dir,
             )
-            eval_batch = FxOutcomeEvaluationRepository.load_fx_evaluation_batch(
-                session, outcome_id
-            )
+            eval_batch = FxOutcomeEvaluationRepository.load_fx_evaluation_batch(session, outcome_id)
             evaluation_csv_path = export_daily_evaluation_csv(
                 eval_batch,
                 as_of_jst,
@@ -978,12 +1004,8 @@ def run_fx_daily_protocol_once(
             run_status=_run_status,
             notes="",
         )
-        health_file = os.path.join(
-            os.path.abspath(config.csv_output_dir), "provider_health.csv"
-        )
-        provider_health_path = append_csv_row(
-            health_file, health_row, PROVIDER_HEALTH_FIELDNAMES
-        )
+        health_file = os.path.join(os.path.abspath(config.csv_output_dir), "provider_health.csv")
+        provider_health_path = append_csv_row(health_file, health_row, PROVIDER_HEALTH_FIELDNAMES)
 
         # Publish observability artifacts to latest/ + history/
         publish_observability_to_layout(
@@ -1012,8 +1034,7 @@ def run_fx_daily_protocol_once(
             )
         except Exception:
             logger.warning(
-                "Annotation/analytics layer failed (non-fatal); "
-                "existing artifacts are unaffected.",
+                "Annotation/analytics layer failed (non-fatal); existing artifacts are unaffected.",
                 exc_info=True,
             )
 

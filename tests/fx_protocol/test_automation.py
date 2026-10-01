@@ -59,15 +59,17 @@ def _build_windows_dicts(n: int = 20) -> list[dict]:
         while end.isoweekday() in (6, 7):
             end += timedelta(days=1)
         end = end.replace(hour=8, minute=0, second=0, microsecond=0)
-        wins.append({
-            "window_start_jst": start.isoformat(),
-            "window_end_jst": end.isoformat(),
-            "open_price": 149.5,
-            "high_price": 151.5,
-            "low_price": 148.5,
-            "close_price": 150.5,
-            "event_tags": [],
-        })
+        wins.append(
+            {
+                "window_start_jst": start.isoformat(),
+                "window_end_jst": end.isoformat(),
+                "open_price": 149.5,
+                "high_price": 151.5,
+                "low_price": 148.5,
+                "close_price": 150.5,
+                "event_tags": [],
+            }
+        )
         start = end
         count += 1
     return wins
@@ -288,22 +290,26 @@ def _build_yf_payload(n_bars: int, as_of_jst: datetime) -> dict:
     n = len(timestamps)
     return {
         "chart": {
-            "result": [{
-                "timestamp": timestamps,
-                "meta": {
-                    "regularMarketPrice": 150.5,
-                    "currency": "JPY",
-                    "symbol": "USDJPY=X",
-                },
-                "indicators": {
-                    "quote": [{
-                        "open": [149.5] * n,
-                        "high": [151.5] * n,
-                        "low": [148.5] * n,
-                        "close": [150.5] * n,
-                    }],
-                },
-            }],
+            "result": [
+                {
+                    "timestamp": timestamps,
+                    "meta": {
+                        "regularMarketPrice": 150.5,
+                        "currency": "JPY",
+                        "symbol": "USDJPY=X",
+                    },
+                    "indicators": {
+                        "quote": [
+                            {
+                                "open": [149.5] * n,
+                                "high": [151.5] * n,
+                                "low": [148.5] * n,
+                                "close": [150.5] * n,
+                            }
+                        ],
+                    },
+                }
+            ],
             "error": None,
         },
     }
@@ -342,6 +348,7 @@ class TestYahooFinanceFxMarketDataProvider:
 
     def test_network_error_raises(self) -> None:
         import urllib.error
+
         provider = self._make_provider()
         with patch(
             "urllib.request.urlopen",
@@ -391,6 +398,7 @@ class TestYahooFinanceFxMarketDataProvider:
     def test_no_network_in_tests(self) -> None:
         """Confirm tests never hit the real network."""
         import urllib.error
+
         provider = self._make_provider()
         with patch(
             "urllib.request.urlopen",
@@ -459,6 +467,7 @@ class TestParseYahooSnapshot:
         """UTC midnight Monday 2026-03-09 → window_start = 2026-03-09 08:00 JST."""
         from ugh_quantamental.fx_protocol.data_sources import _yahoo_bar_to_window
         from zoneinfo import ZoneInfo
+
         _JST_local = ZoneInfo("Asia/Tokyo")
         # 2026-03-09 (Monday) 00:00 UTC
         ts = int(datetime(2026, 3, 9, 0, 0, 0, tzinfo=timezone.utc).timestamp())
@@ -549,12 +558,15 @@ class TestRunFxDailyProtocolOnce:
         )
 
         # Patch current_as_of_jst to return the snapshot's as_of_jst.
-        with patch(
-            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
-            return_value=snap.as_of_jst,
-        ), patch(
-            "ugh_quantamental.fx_protocol.automation.is_protocol_business_day",
-            return_value=True,
+        with (
+            patch(
+                "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+                return_value=snap.as_of_jst,
+            ),
+            patch(
+                "ugh_quantamental.fx_protocol.automation.is_protocol_business_day",
+                return_value=True,
+            ),
         ):
             result = run_fx_daily_protocol_once(cfg, provider, session)
 
@@ -575,12 +587,15 @@ class TestRunFxDailyProtocolOnce:
             run_forecast_generation=True,
         )
 
-        with patch(
-            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
-            return_value=snap.as_of_jst,
-        ), patch(
-            "ugh_quantamental.fx_protocol.automation.is_protocol_business_day",
-            return_value=True,
+        with (
+            patch(
+                "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+                return_value=snap.as_of_jst,
+            ),
+            patch(
+                "ugh_quantamental.fx_protocol.automation.is_protocol_business_day",
+                return_value=True,
+            ),
         ):
             r1 = run_fx_daily_protocol_once(cfg, provider, session)
             session.commit()
@@ -605,15 +620,19 @@ class TestRunFxDailyProtocolOnce:
             run_forecast_generation=True,
         )
 
-        with patch(
-            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
-            return_value=snap.as_of_jst,
-        ), patch(
-            "ugh_quantamental.fx_protocol.automation.is_protocol_business_day",
-            return_value=True,
-        ), patch(
-            "ugh_quantamental.fx_protocol.automation.previous_window_matches",
-            return_value=False,
+        with (
+            patch(
+                "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+                return_value=snap.as_of_jst,
+            ),
+            patch(
+                "ugh_quantamental.fx_protocol.automation.is_protocol_business_day",
+                return_value=True,
+            ),
+            patch(
+                "ugh_quantamental.fx_protocol.automation.previous_window_matches",
+                return_value=False,
+            ),
         ):
             result = run_fx_daily_protocol_once(cfg, provider, session)
 
@@ -630,12 +649,15 @@ class TestRunFxDailyProtocolOnce:
         session = self._make_session()
         cfg = FxDailyAutomationConfig()
 
-        with patch(
-            "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
-            return_value=snap.as_of_jst,
-        ), patch(
-            "ugh_quantamental.fx_protocol.automation.is_protocol_business_day",
-            return_value=False,
+        with (
+            patch(
+                "ugh_quantamental.fx_protocol.automation.current_as_of_jst",
+                return_value=snap.as_of_jst,
+            ),
+            patch(
+                "ugh_quantamental.fx_protocol.automation.is_protocol_business_day",
+                return_value=False,
+            ),
         ):
             with pytest.raises(ValueError, match="business day"):
                 run_fx_daily_protocol_once(cfg, provider, session)
@@ -663,9 +685,7 @@ class TestRunFxDailyProtocolOnce:
         )
 
     @pytest.mark.parametrize("days_past_friday", [1, 2])
-    def test_weekend_landing_carries_over_to_complete_friday(
-        self, days_past_friday: int
-    ) -> None:
+    def test_weekend_landing_carries_over_to_complete_friday(self, days_past_friday: int) -> None:
         """A late run that crosses midnight JST continues under the Friday as_of.
 
         This is the path that produces the weekly report: the Friday block in
@@ -716,9 +736,7 @@ class TestRunFxDailyProtocolOnce:
         from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
         from ugh_quantamental.persistence.repositories import FxForecastRepository
 
-        batch = FxForecastRepository.load_fx_forecast_batch(
-            session, carried.forecast_batch_id
-        )
+        batch = FxForecastRepository.load_fx_forecast_batch(session, carried.forecast_batch_id)
         assert len(batch.forecasts) == EXPECTED_DAILY_BATCH_SIZE
         session.close()
 
@@ -816,15 +834,11 @@ class TestRunFxDailyProtocolOnce:
 
             assert carried.as_of_jst == friday_as_of
 
-            with open(
-                os.path.join(tmpdir, "provider_health.csv"), newline=""
-            ) as fh:
+            with open(os.path.join(tmpdir, "provider_health.csv"), newline="") as fh:
                 rows = list(csv.DictReader(fh))
             assert rows, "provider_health.csv should have at least one row"
             assert all(r["snapshot_lag_business_days"] == "0" for r in rows)
-            assert all(
-                r["used_fallback_adjustment"].lower() == "false" for r in rows
-            )
+            assert all(r["used_fallback_adjustment"].lower() == "false" for r in rows)
         session.close()
 
     def test_weekend_landing_still_raises_without_a_complete_friday(self) -> None:
@@ -850,6 +864,162 @@ class TestRunFxDailyProtocolOnce:
         ):
             with pytest.raises(ValueError, match="no complete forecast batch"):
                 run_fx_daily_protocol_once(cfg, provider, session)
+        session.close()
+
+    def test_pre_fixing_landing_carries_over_to_complete_previous_day(self) -> None:
+        """A run that starts before today's 08:00 JST fixing carries over.
+
+        A delayed Mon-Thu final retry lands at 00:xx JST on the next business
+        day.  When the previous business day's batch is complete the run is
+        carried over to it, so the provider is queried for the day whose data
+        exists and provider_health.csv records lag 0 / no fallback -- not the
+        false lag=1 / fallback=True rows the ordinary one-day fallback left
+        behind (17 of 59 runs in 2026-09).
+        """
+        import csv
+        import os
+        import tempfile
+
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+        from ugh_quantamental.fx_protocol.calendar import next_as_of_jst
+
+        snap = self._make_snapshot_no_previous_window()
+        day_as_of = snap.as_of_jst
+        # 00:30 JST on the next business day: before that day's 08:00 fixing.
+        pre_fixing_now = next_as_of_jst(day_as_of) - timedelta(hours=7, minutes=30)
+        provider = self._make_provider(snap)
+        session = self._make_session()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cfg = FxDailyAutomationConfig(
+                run_outcome_evaluation=False,
+                run_forecast_generation=True,
+                write_csv_exports=True,
+                csv_output_dir=tmpdir,
+            )
+            # The day's own attempt (12:00 JST) persists a complete batch.
+            run_fx_daily_protocol_once(
+                cfg, provider, session, now_utc=day_as_of + timedelta(hours=4)
+            )
+            session.commit()
+
+            carried = run_fx_daily_protocol_once(cfg, provider, session, now_utc=pre_fixing_now)
+
+            assert carried.as_of_jst == day_as_of
+            assert carried.forecast_created is False
+            # The provider was asked for the carried-over day, never for "today".
+            provider.fetch_snapshot.assert_called_with(day_as_of)
+
+            with open(os.path.join(tmpdir, "provider_health.csv"), newline="") as fh:
+                rows = list(csv.DictReader(fh))
+            assert len(rows) == 2
+            assert all(r["snapshot_lag_business_days"] == "0" for r in rows)
+            assert all(r["used_fallback_adjustment"].lower() == "false" for r in rows)
+            assert rows[-1]["run_status"] == "idempotent_skip"
+        session.close()
+
+    def test_pre_fixing_carry_over_refuses_to_slide_back(self) -> None:
+        """After a pre-fixing carry-over a regressed provider must fail, not fall back."""
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+        from ugh_quantamental.fx_protocol.calendar import next_as_of_jst, prev_as_of_jst
+
+        # 21 windows so the stale variant below still meets the 20-window minimum.
+        fresh_wins = _build_windows_raw(21)
+        snap = FxProtocolMarketSnapshot(
+            pair=CurrencyPair.USDJPY,
+            as_of_jst=fresh_wins[-1].window_end_jst,
+            current_spot=150.0,
+            completed_windows=fresh_wins,
+            market_data_provenance=self._make_snapshot_no_previous_window().market_data_provenance,
+        )
+        day_as_of = snap.as_of_jst
+        pre_fixing_now = next_as_of_jst(day_as_of) - timedelta(hours=7, minutes=30)
+
+        # A snapshot one business day behind: newest window ends the day before.
+        stale_wins = _build_windows_raw(20)
+        stale = FxProtocolMarketSnapshot(
+            pair=CurrencyPair.USDJPY,
+            as_of_jst=stale_wins[-1].window_end_jst,
+            current_spot=150.0,
+            completed_windows=stale_wins,
+            market_data_provenance=snap.market_data_provenance,
+        )
+        assert stale.as_of_jst == prev_as_of_jst(day_as_of)
+
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig(
+            run_outcome_evaluation=False,
+            run_forecast_generation=True,
+        )
+        run_fx_daily_protocol_once(
+            cfg, self._make_provider(snap), session, now_utc=day_as_of + timedelta(hours=4)
+        )
+        session.commit()
+
+        with pytest.raises(ValueError, match="Refusing to move the as_of backwards"):
+            run_fx_daily_protocol_once(
+                cfg, self._make_provider(stale), session, now_utc=pre_fixing_now
+            )
+        session.close()
+
+    def test_pre_fixing_without_batch_keeps_the_fallback_rescue(self) -> None:
+        """No batch for the previous day: the run is not carried over.
+
+        The ordinary one-day provider fallback then does what it always did --
+        walks as_of_jst back and creates the missing forecast -- so the rescue
+        path for a day whose every attempt failed is unchanged.
+        """
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+        from ugh_quantamental.fx_protocol.calendar import next_as_of_jst
+
+        snap = self._make_snapshot_no_previous_window()
+        day_as_of = snap.as_of_jst
+        pre_fixing_now = next_as_of_jst(day_as_of) - timedelta(hours=7, minutes=30)
+
+        provider = MagicMock(spec=FxMarketDataProvider)
+        provider.fetch_snapshot.side_effect = [snap, snap]
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig(run_outcome_evaluation=False)
+
+        result = run_fx_daily_protocol_once(cfg, provider, session, now_utc=pre_fixing_now)
+
+        assert result.as_of_jst == day_as_of
+        assert result.forecast_created is True
+        # Initial fetch for "today" + the fallback re-fetch, exactly as before.
+        assert provider.fetch_snapshot.call_count == 2
+        session.close()
+
+    def test_pre_fixing_with_partial_batch_still_fails_on_the_partial_guard(self) -> None:
+        """A partial previous-day batch is not complete, so no carry-over happens;
+        the fallback path then hits the existing partial-batch guard and fails.
+        The corruption guard must not be weakened into a rescue."""
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+        from ugh_quantamental.fx_protocol.calendar import next_as_of_jst
+        from ugh_quantamental.persistence.models import FxForecastRecord
+
+        snap = self._make_snapshot_no_previous_window()
+        day_as_of = snap.as_of_jst
+        pre_fixing_now = next_as_of_jst(day_as_of) - timedelta(hours=7, minutes=30)
+        session = self._make_session()
+        cfg = FxDailyAutomationConfig(run_outcome_evaluation=False)
+
+        first = run_fx_daily_protocol_once(
+            cfg, self._make_provider(snap), session, now_utc=day_as_of + timedelta(hours=4)
+        )
+        assert first.forecast_created is True
+        # Drop one row: the batch now exists but is partial.
+        row = (
+            session.query(FxForecastRecord)
+            .filter(FxForecastRecord.forecast_batch_id == first.forecast_batch_id)
+            .first()
+        )
+        session.delete(row)
+        session.commit()
+
+        provider = MagicMock(spec=FxMarketDataProvider)
+        provider.fetch_snapshot.side_effect = [snap, snap]
+        with pytest.raises(ValueError, match="partial forecast batch exists"):
+            run_fx_daily_protocol_once(cfg, provider, session, now_utc=pre_fixing_now)
         session.close()
 
     def test_one_day_lag_adjusts_as_of_jst(self) -> None:
@@ -922,7 +1092,7 @@ class TestRunFxDailyProtocolOnce:
 
         # snap_day1: newest_end == adjusted_as_of (1 business day behind today).
         snap_day1 = self._make_snapshot_no_previous_window()
-        adjusted_as_of = snap_day1.as_of_jst      # day D
+        adjusted_as_of = snap_day1.as_of_jst  # day D
         today_as_of = next_as_of_jst(adjusted_as_of)  # day D+1
 
         # snap_still_stale: built from 21 windows (wins[1:] = 20 windows whose
@@ -1113,14 +1283,16 @@ def _build_windows_raw(n: int) -> tuple[FxCompletedWindow, ...]:
         while end.isoweekday() in (6, 7):
             end += timedelta(days=1)
         end = end.replace(hour=8, minute=0, second=0, microsecond=0)
-        windows.append(FxCompletedWindow(
-            window_start_jst=start,
-            window_end_jst=end,
-            open_price=149.5,
-            high_price=151.5,
-            low_price=148.5,
-            close_price=150.5,
-        ))
+        windows.append(
+            FxCompletedWindow(
+                window_start_jst=start,
+                window_end_jst=end,
+                open_price=149.5,
+                high_price=151.5,
+                low_price=148.5,
+                close_price=150.5,
+            )
+        )
         start = end
         count += 1
     return tuple(windows)

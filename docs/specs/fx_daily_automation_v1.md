@@ -255,7 +255,16 @@ One closed forecast window recovered by the outcome catch-up pass (§ Outcome ca
 
 Orchestration function in `automation.py`:
 
-1. Determine canonical `as_of_jst` (08:00 JST today or previous business day)
+1. Determine canonical `as_of_jst` (08:00 JST today). Two cases carry the run over to the
+   **previous business day, but only when that day's forecast batch is already complete**
+   (`_has_complete_forecast_batch`): (a) today is not a protocol business day (a delayed
+   Friday retry landing on Saturday JST — PR #130), or (b) the run starts **before today's
+   08:00 JST fixing** (a delayed Mon–Thu retry landing at 00:xx JST the next day —
+   FX-ASOF-FIXING). A carried-over run queries the provider for that previous day, so step
+   3's lag measurement and `provider_health.csv` record lag 0 / no fallback. In case (a)
+   an absent or partial batch raises (a genuine outage); in case (b) it falls through to
+   step 3's ordinary one-day fallback unchanged — an absent batch is still rescued, a
+   partial one still fails on the forecast workflow's partial-batch guard
 2. Fetch one USDJPY snapshot via `provider.fetch_snapshot(as_of_jst)`
 3. **Freshness guard** (orchestration layer): validate that the newest completed window in the snapshot is at most **1 business-day behind** `as_of_jst`; raises `ValueError` if the data is staler than that.  This check lives in `run_fx_daily_protocol_once`, not in the provider itself — direct callers of `fetch_snapshot` bypass this guard.
 4. Build `FullWorkflowRequest` (UGH inputs) from the snapshot via `build_ugh_request_from_snapshot`
