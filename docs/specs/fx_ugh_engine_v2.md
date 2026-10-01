@@ -289,6 +289,39 @@ scaler, §7 / §8 Option B) to avoid re-coupling the two roles. Two invariants:
 `engine_version` bumps `v2.4 → v2.5` (synced across `automation_models.py`,
 `fx-daily-protocol.yml`, and `scripts/run_fx_daily_protocol.py`).
 
+#### 5.1.3.1 v2.7: the expansion is disabled by default
+
+The 2026-09 monthly review (`docs/engine_review_2026_09_findings.md` §5,
+brief FX-MAG-EXPANSION-REVERT) replayed 2026-04-01..09-30 (120 business days
+× 4 variants) through the unmodified pipeline, reproducing all 164 persisted
+v2.6 forecasts bit-for-bit, and compared the v2.6 magnitude path with the same
+path under `volatility_expansion_max = 1.0`:
+
+- mean close error −1.33 bp (30.90 → 29.57, alpha), median −2.66 bp, and the
+  mean improved in every one of the six months;
+- direction and FLAT calls unchanged on every day (the expansion only scales
+  an already-classified non-FLAT magnitude, §5.1.3 invariant);
+- the September `inspect_magnitude_mapping` delta vs `baseline_random_walk`
+  fell from +7.41 to +3.19 bp (threshold 5.0).
+
+The multiplier fired on exactly the post-shock days where the three direction
+inputs were already saturated and conviction was at its ceiling, so it scaled
+the largest bets on the days they reversed (8/10, 9/10, 9/14, 9/25).
+
+v2.7 therefore sets the default `volatility_expansion_max` to **`1.0`**, which
+makes `multiplier ≡ 1.0` and restores the v2.4 magnitude
+`e_star × trailing_mean_abs_close_change_bp × (0.5 + 0.5 × conviction)`. The
+function, its activation floor, and the two invariants above are unchanged;
+passing `volatility_expansion_max=1.8` explicitly reproduces v2.5–v2.6. The
+"Defaults" line in §5.1.3 describes v2.5–v2.6.
+
+`engine_version` bumps `v2.6 → v2.7` (synced across `automation_models.py`,
+`fx-daily-protocol.yml`, and `scripts/run_fx_daily_protocol.py`). Rollback
+trigger: the October replay (`scripts/replay_magnitude_counterfactual.py`,
+mode A = v2.6 counterfactual pinned at 1.8) shows v2.7 mean close error more
+than 1.0 bp above the v2.6 counterfactual, or `inspect_magnitude_mapping`
+fires under v2.7 while the v2.6 counterfactual would not.
+
 ### 5.2 Parallel variant deployment
 
 v2 is deployed as **four parameter variants in parallel**, exposed as four
