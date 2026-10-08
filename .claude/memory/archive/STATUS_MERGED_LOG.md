@@ -76,3 +76,7 @@
 ## 2026-10-08 (PR #138 merge sweep overflow)
 
 - **PR #133 / 2026-09 月次レビュー + briefs 2 本 + replay script + 9/21–9/25 週報** (2026-10-01) - 9 月の RW 比 +141bp は 9/10・9/14・9/25 の 3 日 (+148bp) に集中、いずれも conviction 0.75〜0.95 の順張り反転。機序は同符号に揃う冗長入力 (fundamental 飽和) → alignment≈1 → conviction 上限 → v2.5 拡張 ×1.2〜1.7。queue 2 (9/7 FLAT 分解) 決着: price_implied と SMA 系の符号衝突で e_star≈0、閾値では救えない。signal スケール案は縮小効果のみで不採用。`scripts/replay_magnitude_counterfactual.py` (persisted 全件 validate、mode A は v2.6 固定、`--expected-validated`)。**Codex 9 rounds / 13 件全採用** — script の検証網羅性 6 件、brief が名指す symbol/flag 名/条件分岐の実在確認 4 件 (`/new-brief` §1a の grounding を skip した結果)、findings の表現 3 件。
+
+## 2026-10-08 (PR #139 merge sweep overflow)
+
+- **PR #134 / engine v2.7 — v2.5 ボラ拡張項の無効化** (2026-10-01) - Claude 実装、ユーザー承認 (10/1) 後。`volatility_expansion_max` default 1.8→1.0 (乗数 ≡ 1.0、v2.4 magnitude に復帰、式・不変量不変)、engine_version 3 箇所 sync、spec §5.1.3.1 (根拠 + rollback trigger)、v2.5 経路 test は 1.8 を明示。replay (4〜9 月 120 日 × 4 variant、164 件 bit-identical) で平均誤差 −1.33bp・中央値 −2.66bp・6 か月すべて改善・方向/FLAT 不変。Codex 0 件。
