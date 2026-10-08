@@ -106,7 +106,7 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
 | `execution_version` | `"x1"` |
 | `book_id` | §4 |
 | `as_of_jst`, `window_end_jst`, `forecast_batch_id` | 消費した batch (`ForecastRecord` と同値) |
-| `source_strategy_kind` | UGH 系は `ugh_v2_beta` 等、bench は空 |
+| `source_strategy_kind` | `ugh_x1` / `ugh_beta_unit` / `ugh_divergence` は `ugh_v2_beta`。`ugh_consensus` (単一の元戦略が無い) と bench 2 つは空 |
 | `side` | `1` / `-1` / `0` |
 | `size` | `[0.0, 1.0]`、`side == 0` なら `0.0` |
 | `skip_reason` | §4 の識別子、取引時は空 |
@@ -178,7 +178,8 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
 - 判断数、取引数、見送り内訳 (評価行の `skip_reason` 別)、live 取得率
 - 方向的中率 (取引日)、capture bp (`Σ side × realized bp`、単位サイズ)、size 加重の日次リターン
   (live 系列 = `size × (pnl_live_bp − cost_live_bp)`、bar 系列 = `size × (pnl_bar_bp − cost_bar_bp)`) の
-  平均・標準偏差・t 値を別々に
+  平均・標準偏差・t 値を別々に (母集団は取引行 `side != 0` のみ。見送り日は資産曲線に据え置きで入る
+  が mean / sd / t には入れない)
 - 損益 (円、live 系列と bar 系列)、最終資産、最大 DD、PF、コスト合計
 - ベンチマーク差: `ugh_x1` と `bench_gpt_m3` / `bench_long` の損益差と capture 差
 - 合格ゲート進捗 (§9)。ゲートの母集団は週次・月次の期間窓とは独立で、history 全体のうち
@@ -211,9 +212,10 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
   4. 同期間の `bench_gpt_m3` と `bench_long` の両方を損益で上回る
 - 現行 version の batch に 6 book 未満のもの (§8 の `incomplete_batches`)、または完全な `execution.csv`
   があるのに完全な `execution_evaluation.csv` が無い batch (`missing_evaluations`。期待コホートは判断
-  ファイルの棚卸しから導く。`window_end_jst` が集計時刻より後の pending 窓は除く) が 1 つでもあれば、
-  条件の現在値は出すがゲートは **blocked** (`passed = False`、`blocked_reasons` に
-  `incomplete_batches` / `missing_evaluations`)。欠けた archive を黙って短くした上で合格にはしない
+  ファイルの棚卸しから導く。`window_end_jst` が集計時刻より後の pending 窓は除く)、または
+  `execution.csv` はあるが完全でない dir (`incomplete_decision_batches`、version 不明なら現行版扱い) が
+  1 つでもあれば、条件の現在値は出すがゲートは **blocked** (`passed = False`、`blocked_reasons` に
+  `incomplete_batches` / `missing_evaluations` / `incomplete_decisions`)。欠けた archive を黙って短くした上で合格にはしない
   (昇格証拠は欠落・部分 batch で fail する、`AGENTS.md` §5)。修復は Step 4c の再スキャンか §10 の
   backfill で行い、修復できない欠落は data 側の問題として扱う (ゲートは外さない)。block の判定は
   現行 version の batch に限る (`incomplete_batches` / `missing_evaluations` は `execution_version` を

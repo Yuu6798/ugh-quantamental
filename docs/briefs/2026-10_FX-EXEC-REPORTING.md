@@ -23,7 +23,10 @@
       (batch id と欠けた book の一覧) として返す (集計にもゲートにも入れない)。さらに
       `history/*/*/execution.csv` を棚卸しし (`is_complete_decision_file` が True のもの)、同 dir に完全な
       `execution_evaluation.csv` が無い batch を `missing_evaluations` として返す (期待コホート = 判断
-      ファイルの存在。評価ファイルが丸ごと無い・header のみの batch もここで捕捉する)。走査規約は
+      ファイルの存在。評価ファイルが丸ごと無い・header のみの batch もここで捕捉する)。棚卸しで
+      `execution.csv` はあるが完全でない (header のみ・6 book 未満・読めない) dir は
+      `incomplete_decision_batches: tuple[str, ...]` (`history/{date}/{batch}` の相対 path) として返す
+      (version は読めないことがあるので現行版扱い)。走査規約は
       `labeled_observations.collect_evaluated_forecast_rows` と同じ。
 - [ ] `run_execution_report(csv_output_dir, *, start_as_of_jst, end_as_of_jst, generated_at_utc)
       -> dict[str, Any]` が純粋な集計 (ファイル読みのみ、書き込みなし) で、**期間窓内**の行について
@@ -33,8 +36,8 @@
       `skip_counts` (評価行の `skip_reason` 列の値別、取引行は含めない),
       `live_coverage_rate`, `direction_hit_rate`, `capture_bp` (`Σ side × (realized_close −
       realized_open) / realized_open × 1e4`、単位サイズ)、`signed_bp_live_mean/sd/t`
-      (`size × (pnl_live_bp − cost_live_bp)`、live 行のみ)、`signed_bp_bar_mean/sd/t`
-      (`size × (pnl_bar_bp − cost_bar_bp)`、全行)、`capture_bp` だけは単位サイズのまま、
+      (`size × (pnl_live_bp − cost_live_bp)`、**live かつ取引行 `side != 0`** のみ)、`signed_bp_bar_mean/sd/t`
+      (`size × (pnl_bar_bp − cost_bar_bp)`、全 entry_status の取引行)、`capture_bp` だけは単位サイズのまま、
       `pnl_jpy_live`, `pnl_jpy_bar`, `final_equity_jpy_live`, `final_equity_jpy_bar`,
       `max_drawdown_live`, `max_drawdown_bar`, `profit_factor_live`, `cost_jpy_total`。資産曲線は spec §5.2 の式 (初期 3,000,000 円、複利、
       `position_usd = equity × size / entry`) で、live 系列は `entry_status == live` の行のみ、
@@ -51,10 +54,11 @@
       DD は **`ugh_x1` の行だけ**から計算し (`trade_count` は `ugh_x1` の `side != 0` 行数)、ベンチマーク
       book は条件 4 の比較にだけ使う。t 値は `signed_bp_live` (= `size × (pnl_live_bp − cost_live_bp)`)
       から計算し、bar 系列はゲートに使わない。現行 `execution_version` に `incomplete_batches` または
-      `missing_evaluations` (`window_end_jst > generated_at_utc` の pending 窓は除く) が 1 つでもあれば
-      `gate.passed = False` かつ `gate.blocked_reasons` (new; `tuple[str, ...]`、値は
-      `"incomplete_batches"` / `"missing_evaluations"`、通常は空) に理由を入れる — 欠けた archive を
-      黙って短くして合格にはしない。
+      `missing_evaluations` (`window_end_jst > generated_at_utc` の pending 窓は除く) または
+      `incomplete_decision_batches` が 1 つでもあれば `gate.passed = False` かつ `gate.blocked_reasons`
+      (new; `tuple[str, ...]`、値は `"incomplete_batches"` / `"missing_evaluations"` /
+      `"incomplete_decisions"`、通常は空) に理由を入れる — 欠けた archive を黙って短くして合格には
+      しない。
 - [ ] `export_execution_report_artifacts(report, csv_output_dir, scope, date_str)` が
       `csv/analytics/execution/{scope}/{date_str}/execution_{scope}.md|.csv|.json` (scope は
       `weekly` / `monthly`) を書く。md は層 (version) ごとに book 別の表 1 つとベンチマーク差の表 1 つ、
@@ -107,7 +111,9 @@
 - 週窓の解決は `report_window.resolve_business_day_window` (weekly_reports_v2 が使うもの) を
   使う (金曜 block は `report_date = as_of + 1 日`)。
 - t 値は取引行 (`side != 0`) の `mean / (stdev / sqrt(n))` (`statistics.stdev`、n − 1。`pstdev` は
-  使わない)。live 系列は
+  使わない)。**母集団は report の `signed_bp_*_mean/sd/t` もゲートも同じ「取引行のみ」**: 見送り日
+  (side 0、リターン 0) は資産曲線では据え置きとして入るが、mean / sd / t / `trade_count` の母集団には
+  入れない。live 系列は
   `size × (pnl_live_bp − cost_live_bp)` (live 行のみ)、bar 系列は `size × (pnl_bar_bp − cost_bar_bp)`。
   `capture_bp` は単位サイズの方向の価値、signed bp は売買方針の実リターンと役割を分ける。`n < 3` または `stdev == 0` なら None。
   ゲートは live 系列のみ。
@@ -136,7 +142,10 @@
     (`execution_version != EXECUTION_VERSION`) の不完全 batch は現行版のゲートを block しないこと、完全な `execution.csv`
     だけがあり評価ファイルが無い (または header のみの) 過去窓で `missing_evaluations` に入り
     `"missing_evaluations" in blocked_reasons` になること、`window_end_jst` が `generated_at_utc` より
-    後の pending 窓はそこに入らないこと、`execution_version` が 2 つ混在する fixture で層が 2 つに
+    後の pending 窓はそこに入らないこと、header のみの `execution.csv` だけがある dir が
+    `incomplete_decision_batches` に入り `"incomplete_decisions" in blocked_reasons` になること、見送り
+    (side 0) の live 行を足しても `signed_bp_live_t` と `trade_count` が変わらないこと、
+    `execution_version` が 2 つ混在する fixture で層が 2 つに
     分かれ版を跨いで足されないこと、`trade_count` が `ugh_x1` の取引行数だけを数えること (他 book の
     取引は数えない)。
   - export: 3 形式が書かれること、`latest/execution_summary.json` が累積 report から書かれ、
