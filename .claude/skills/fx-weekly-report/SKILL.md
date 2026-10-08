@@ -246,6 +246,22 @@ Interpretation rules learned over the series — apply, don't re-derive:
   close error, not direction. Track the retreat/release timing vs what the
   market did next — the 7/3 (worked) vs 7/10 (didn't) pair is the reference.
 
+## 執行層 (仮想売買)
+
+`fx_execution_layer_v1.md` §8 の執行層 (6 book の仮想売買) は、weekly v2 と同じ金曜 block が
+`csv/analytics/execution/weekly/<saturday YYYYMMDD>/execution_weekly.md` (`fx-daily-data`。月曜
+pipeline の `<monday YYYYMMDD>` dir は前週分なので、ここでも title 行の窓を必ず確認) に書く。
+レポートには `## 戦略別サマリー` の直後に短い `## 執行層 (仮想売買)` 節を 1 つ置き、artifact の
+`### Books` 表から 6 book の当週行 (Decisions / Trades / Skips / Live cov / Hit rate / Capture /
+Live mean / P&L live / Max DD live) をそのまま写す — live 系列が正本、bar 系列は backfill を含む
+参考値で、どの数値も再計算しない。ゲート進捗は artifact の `## Acceptance gate` から 1 行
+`ゲート: <passed|blocked(reasons)> — trades N/100, calendar days D/182, t x.xx/2.0, DD x.x%/10%,
+vs GPT-M3/long` の形に写す: 先頭は `Passed: yes` なら `passed`、`no` なら `blocked(<Blocked reasons:
+の値>)` (`none` なら `blocked(criteria)`)、`trades` / `calendar days` は条件 1 の Current、`t` は
+条件 2、`DD` は条件 3、`vs GPT-M3/long` は条件 4 の Met (`yes` / `no`) で、閾値は定数のまま書く。
+ゲートは期間窓と独立な累積 live コホートなので週次の表とは母集団が違うことを一言添える。artifact が
+無い週は 運用ヘルス に欠落として記録し (weekly v2 と同じ失敗点 a〜d)、再計算で埋めない。
+
 ## 4b. リピート注文モニタ (live position watch)
 
 The user runs a Rakuten FX repeat-order grid, live since **2026-07-27**:

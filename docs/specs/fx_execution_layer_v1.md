@@ -1,7 +1,7 @@
 # FX Execution Layer v1 — UGH 売買エンジン (執行層) とベンチマーク観測スキーム
 
 Status: **Implemented (v1, FX-EXEC-LAYER — 判断の記録・評価・automation 配線; 集計・ゲート・backfill は
-FX-EXEC-REPORTING で実装予定)**
+FX-EXEC-REPORTING で実装済)**
 Owner: Claude (design) / Codex (implementation)
 Related: `fx_daily_automation_v1.md` (Step 構成)、`fx_daily_csv_exports_v1.md` (CSV 規約)、
 `fx_ugh_engine_v2.md` (予測エンジン)、`fx_monthly_governance_v1.md` (統治)、
@@ -175,27 +175,143 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
 
 ## 8. Aggregation (FX-EXEC-REPORTING)
 
-`execution_reporting.py` (new) が `history/*/*/execution_evaluation.csv` を `(forecast_batch_id,
-book_id)` で重複排除して読み、**6 book が揃わない batch は丸ごと除外** (件数と id を報告) した上で、
-`execution_version` ごとの層に分けて (版を跨いで足さない。`x2` 以降が混在する境界の週・月と累積
-サマリは版ごとに別の表になる) book ごとに次を出す:
+`execution_reporting.py` が集計・合格ゲート・artifact を担う。時計を読まず (`generated_at_utc` は
+呼び出し元が渡す)、`export_*` 以外は読み取り専用、network なし、SQLAlchemy 非依存。activation marker
+`EXECUTION_ACTIVATION_AS_OF` と除外集合 `EXECUTION_EXCLUDED_AS_OF` は呼び出し時に module 属性として
+参照する (テストが境界を patch できる)。
 
-- 判断数、取引数、見送り内訳 (評価行の `skip_reason` 別)、live 取得率
-- 方向的中率 (取引日)、capture bp (`Σ side × realized bp`、単位サイズ)、size 加重の日次リターン
-  (live 系列 = `size × (pnl_live_bp − cost_live_bp)`、bar 系列 = `size × (pnl_bar_bp − cost_bar_bp)`) の
-  平均・標準偏差・t 値を別々に (母集団は取引行 `side != 0` のみ。見送り日は資産曲線に据え置きで入る
-  が mean / sd / t には入れない)
-- 損益 (円、live 系列と bar 系列)、最終資産、最大 DD、PF、コスト合計
-- ベンチマーク差: `ugh_x1` と `bench_gpt_m3` / `bench_long` の損益差と capture 差
-- 合格ゲート進捗 (§9)。ゲートの母集団は週次・月次の期間窓とは独立で、history 全体のうち
-  `execution_version` が現行値かつ `entry_status == live` の完全 batch の累積コホート
+### 8.1 Collector
 
-出力先: `csv/analytics/execution/weekly/<YYYYMMDD>/execution_weekly.{md,csv,json}`
-(金曜最終 retry の weekly block と月曜の `run_fx_analysis_pipeline.py` weekly モード) と
-`csv/analytics/execution/monthly/<YYYYMM>/execution_monthly.{md,csv,json}` (monthly モード)。
-`latest/execution_summary.json` は期間窓の report からは書かず、history 全体を 1 つの窓として
-同じ集計を走らせた累積の book 別サマリ (ゲート進捗を含む) を置く。weekly / monthly の生成時に
-それぞれ更新するが、内容は呼び出し元の期間窓に依存しない。
+`collect_execution_evaluation_rows(history_dir, *, generated_at_utc) -> CollectedExecutionEvaluations`
+が `history/<date>/<batch>/` を sorted 走査 (`labeled_observations.collect_evaluated_forecast_rows`
+と同じ規約) して次を返す。`history_dir` が無ければ空の archive として扱う。
+
+- `rows`: `execution_evaluation.csv` (`load_execution_evaluations_csv` で読めないファイルは warning
+  で skip) の生の行を `(forecast_batch_id, book_id)` で重複排除 (先勝ち) したもののうち、**完全**
+  (6 book が揃う) かつ **重複でない** batch の行。`(as_of_jst, forecast_batch_id, book 順)` で整列。
+- `incomplete_batches` (`forecast_batch_id`, `execution_version`, `as_of_jst`, `missing_books`,
+  `inconsistent_fields`): 6 book が揃わない `forecast_batch_id`、または 6 行が `execution_version` /
+  `as_of_jst` / `outcome_id` / `realized_open` / `realized_close` で食い違う batch (版境界・部分コピー・
+  別 outcome の行の混入。`inconsistent_fields` に列名、先頭行の値に黙って丸めない。block / report の振り分けは最も遅い `as_of_jst` と、1 行でも現行版なら現行版で行う)。
+  集計にもゲートにも入れない。
+- `incomplete_decision_batches` (`history/{date}/{batch}` 相対 path): `execution.csv` はあるが完全で
+  ない dir。完全 = 6 book 1 行ずつが検証付きで読め、`forecast_batch_id` / `execution_version` /
+  `as_of_jst` / `window_end_jst` が 1 組 (header のみ、6 book 未満、読めない、batch id・版・窓の混在は
+  不完全。先頭行の値に丸めない)。
+- `missing_evaluations` (`forecast_batch_id`, `execution_version`, `as_of_jst`, `window_end_jst`):
+  完全な `execution.csv` で、同じ batch id **かつ同じ `execution_version` / `as_of_jst` /
+  `window_end_jst`** の完全な評価ファイル (6 行がその 4 つと、評価対象の outcome (`outcome_id` /
+  `realized_open` / `realized_close` / `evaluated_at_utc`) で一致するもの) が archive のどこにも無く、
+  `window_end_jst <= generated_at_utc` のもの。pending 窓は入れない。版や窓が違う評価ファイルは
+  別 batch の評価であって、この判断ファイルの評価にはならない。
+- `duplicate_batches` (日付): 同じ `(execution_version, as_of_jst の日付)` に完全 batch (判断
+  ファイルまたは評価 batch) が 2 つ以上ある日。その batch はすべて `rows` から外す (黙って片方を
+  選ばない)。
+- `missing_decisions` (`as_of_jst`, `forecast_batch_id`): 期待日のうち、**自分の日付 dir** に現行版
+  (`execution_version == EXECUTION_VERSION`) の完全な `execution.csv` が 1 つも無い日。
+  `forecast_batch_id` はその日の dir の `forecast.csv` に `as_of_jst` がその日の行があればその id、
+  無ければ None。forecast の有無で欠落かどうかは変わらない。
+- `missing_live` (日付): 期待日のうち、自分の日付 dir の現行版の完全な判断ファイルに `ugh_x1` の
+  `entry_status == live` の行が無い日 (ファイル無し・`backfill_bar`・`live_unavailable`・旧版のみ)。
+
+読めない `execution_evaluation.csv` (検証エラー・I/O エラー) は collector が warning を 1 行出すだけで、
+評価側の inventory には現れない。同 dir に完全な `execution.csv` があれば判断側の棚卸しが拾い、窓が閉じて
+いれば `missing_evaluations` (日付と版に応じて block または `archive_defects`) として見える。判断ファイル
+の無い activation 前の backfill batch は報告されず、単に bar 系列から抜ける。
+
+期待日 `expected_decision_days(generated_at_utc) -> (expected, excluded)`: `EXECUTION_ACTIVATION_AS_OF`
+から順に、protocol 営業日 (`calendar.is_protocol_business_day`) で窓が閉じた日
+(`next_as_of_jst(D) <= generated_at_utc`) を集め、`EXECUTION_EXCLUDED_AS_OF` に含まれる日は
+`excluded` 側に分ける。
+
+block と archive の振り分け: `is_gate_blocking_defect(as_of_jst, execution_version)` が True —
+日付 (dir の日付または行の `as_of_jst`) が `EXECUTION_ACTIVATION_AS_OF` 以降、かつ version が現行値
+または読めない (None、`incomplete_decision_batches` の場合。dir 名が日付でない dir も block 側) —
+の欠損だけが上の 6 つの inventory に入り、`blocked_reasons()` の母集団になる。それ以外 (activation
+前、他 version) は同じ 6 フィールドの `archive_defects` に入り、報告のみで block しない。
+`missing_decisions` / `missing_live` は期待日由来なので `archive_defects` 側は常に空。
+
+### 8.2 Report
+
+`run_execution_report(csv_output_dir, *, start_as_of_jst, end_as_of_jst, generated_at_utc) -> dict`
+(純粋な読み、書き込みなし)。窓は行の `as_of_jst` の **JST 日付**で比較し両端を含む。
+`None` はその端を無制限にし、両方 None で history 全体。返す dict (JSON 化可能):
+
+| キー | 内容 |
+|---|---|
+| `report_kind` | `"fx_execution"` |
+| `execution_version` | 現行 `EXECUTION_VERSION` |
+| `generated_at_utc` | 渡された値 (ISO 8601、UTC) |
+| `window` | `{start_as_of_jst, end_as_of_jst}` (JST 日付 `YYYY-MM-DD`、無制限なら null) |
+| `row_count`, `batch_count` | 窓内の評価行数と完全 batch 数 |
+| `history_row_count` | history 全体の (完全・非重複) 評価行数 |
+| `strata[version]` | 版ごとの層 (版を跨いで足さない): `execution_version`, `row_count`, `batch_count`, `first_as_of_jst`, `last_as_of_jst`, `books[book_id]` (§8.3), `benchmark_deltas` (§8.4) |
+| `gate` | §9 の合格ゲート (期間窓に依存しない) |
+| `inventory` | §8.1 の 6 inventory それぞれ `{count, items}` と、同形の `archive_defects` |
+
+### 8.3 Book metrics (`strata[version].books[book_id]` = `execution_{scope}.csv` の列)
+
+列順は `EXECUTION_REPORT_BOOK_FIELDNAMES`。CSV では None は空セル、`skip_counts` は
+`reason=count;reason=count` (理由名順。`|` は md の表セルを壊すので使わない)。「取引行」は `side != 0` の行、「live 行」は
+`entry_status == live` の行。
+
+| 列 | 定義 |
+|---|---|
+| `execution_version`, `book_id` | 層と book |
+| `decision_count` | 窓内の評価行数 (= 判断数) |
+| `trade_count` | 取引行数 |
+| `live_trade_count` | 取引行のうち live で `pnl_live_bp` / `cost_live_bp` が揃う行数 (live 系列の mean / sd / t の n) |
+| `skip_counts` | 見送り行 (`side == 0`) の `skip_reason` 別件数 |
+| `live_coverage_rate` | live 行数 / `decision_count` |
+| `direction_hit_rate` | 取引行のうち `hit` の割合 (取引なしなら None) |
+| `capture_bp` | `Σ side × (realized_close − realized_open) / realized_open × 1e4` (取引行、単位サイズ) |
+| `signed_bp_live_mean` / `_sd` / `_t` | `size × (pnl_live_bp − cost_live_bp)` (live の取引行のみ) の平均、標本標準偏差 (`statistics.stdev`、n − 1)、t 値 `mean / (sd / √n)`。**sd は n = 2 から出す** (n < 2 は None)。**t は n < 3 または sd == 0 なら None** (sd が出ていても t だけ None になる。テストで固定) |
+| `signed_bp_bar_mean` / `_sd` / `_t` | `size × (pnl_bar_bp − cost_bar_bp)` (全 entry_status の取引行) の同上 |
+| `pnl_jpy_live`, `pnl_jpy_bar` | 資産曲線の最終資産 − 初期資産 (円)。§5.2 の式 (初期 3,000,000 円、複利、`position_usd = equity × size / entry`、`pnl_jpy = side × position_usd × (exit − entry) − |side| × position_usd × 0.01`、exit = `realized_close`) を `as_of_jst` 昇順に畳む。live 系列は live 行のみ (entry = `entry_price_live`)、bar 系列は全行 (`backfill_bar` を含む、entry = `realized_open`)。見送り行は据え置き。取引行に正の entry が無ければ ValueError |
+| `final_equity_jpy_live`, `final_equity_jpy_bar` | 最終資産 (円) |
+| `max_drawdown_live`, `max_drawdown_bar` | `max_t (peak_t − equity_t) / peak_t` (0 以上 1 以下の正の大きさ) |
+| `profit_factor_live` | live 資産曲線の取引ごとの純損益 (コスト控除後) について `Σ 正 / |Σ 負|`。負の取引が無い (取引が無い) ときは None (`inf` は出さない) |
+| `cost_jpy_live`, `cost_jpy_bar` | 各系列の資産曲線で発生した円コスト合計 (`|side| × position_usd × 0.01`) |
+
+md の数値書式: 率は `_fmt_pct`、bp は `_fmt_bp` (`weekly_report_exports` と同じ)、円は 3 桁区切りの
+整数、t 値と PF は小数 2 桁、None は `-`。
+
+### 8.4 Benchmark deltas (`strata[version].benchmark_deltas[bench]`)
+
+`bench_gpt_m3` / `bench_long` それぞれについて `pnl_jpy_live_delta` (= `ugh_x1` の `pnl_jpy_live` −
+bench の `pnl_jpy_live`) と `capture_bp_delta` (= `capture_bp` の差)。どちらかの book が層に無ければ
+null。
+
+### 8.5 Artifacts
+
+- `export_execution_report_artifacts(report, csv_output_dir, scope, date_str) ->
+  {execution_{scope}_md, execution_{scope}_csv, execution_{scope}_json}` (絶対 path) が
+  `analytics/execution/{scope}/{date_str}/execution_{scope}.{md,csv,json}` を書く (`scope` は
+  `weekly` / `monthly`。path 区切りを含む scope は ValueError)。md は層ごとに
+  `## Stratum execution_version=<v>` (`### Books` 表、`### Benchmark deltas` 表)、
+  `## Acceptance gate` (コホート 1 行、4 条件の表、`Passed: yes|no`、`Blocked reasons: <list|none>`)、
+  `## Archive inventory (blocking)` と `### Archive defects` (inventory ごとの件数と items)、`## Notes`。
+  窓内に完全 batch が無ければ `No complete batches in the window.`。csv は §8.3 の book 行 (層 × book)。
+  json は report dict そのまま。`latest/` には触れない。
+- `export_execution_latest_summary(cumulative_report, csv_output_dir) -> path` が
+  `latest/execution_summary.json` を書く。引数は両端 None の report (history 全体) に限り、窓付きの
+  report は ValueError で拒否するので、latest の内容は直前に走った scope に依存しない。
+
+### 8.6 Callers
+
+| 呼び出し元 | 窓 | ラベル (dir 名) |
+|---|---|---|
+| `scripts/run_fx_daily_protocol.py` の金曜 weekly block (`FX_LAST_RETRY=1`、weekly v2 の `export_weekly_report_artifacts` と `[OK]` の後) — `generate_execution_weekly_artifacts(csv_output_dir, report_date_jst, generated_at_utc)` | `report_window.resolve_business_day_window(report_date, 5)`、`report_date = as_of_jst + 1 日` (土曜) → 月〜金 | `weekly/<report_date の YYYYMMDD>` (weekly v2 と同じ dir 名) |
+| `scripts/run_fx_analysis_pipeline.py` weekly モード (既存 weekly の直後) — `run_execution_report_step(csv_output_dir, "weekly", report_date_jst, FX_WEEK_DAYS, generated_at_utc)` | `resolve_business_day_window(FX_REPORT_DATE, FX_WEEK_DAYS)` | `weekly/<FX_REPORT_DATE>` |
+| 同 monthly モード (既存 monthly pipeline の直後) — `run_execution_report_step(..., "monthly", ..., FX_MONTH_DAYS, ...)` | `resolve_business_day_window(FX_REPORT_DATE, FX_MONTH_DAYS)` (monthly review と同じ月窓) | `monthly/<窓の最終日の YYYYMM>` (4/1 の run は `202603`) |
+
+いずれも scoped artifact を書いた直後に history 全体の report で `latest/execution_summary.json` を
+書き直す。失敗は non-fatal: 金曜 block は `[WARN] Execution report generation failed (non-fatal): ...`、
+pipeline は `[WARN] Execution <scope> report generation failed (non-fatal): ...` を出して続行する。
+金曜 block は weekly v2 の生成が成功した後にだけ走り、月曜の pipeline weekly モードが安全網になる
+(weekly v2 artifact と同じ)。daily script の結果表示 (`=== FX Daily Protocol Summary ===`) には
+`execution_decisions_recorded` / `execution_evaluations_recorded` / `execution_evaluation_windows`
+(件数) を 1 行ずつ出し、執行層の non-fatal 失敗が warning 以外からも (0 として) 見えるようにする。
 
 ## 9. Governance and acceptance gate
 
@@ -204,18 +320,20 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
 - 月次レビューは執行層の集計を**観測**し、`docs/engine_review_YYYY_MM_findings.md` に 1 節を
   設ける。途中でのパラメータ調整は禁止 (同じデータで選んだ変更は検証にならない)。
 - 合格ゲート (`ugh_x1` を実運用候補に進める条件、すべて live 系列。母集団は現行 `execution_version`
-  の累積コホートで、版を bump したらコホートもゼロから始まる。取引数・t 値・DD は **`ugh_x1` の行だけ**
-  から計算し、ベンチマーク book は条件 4 の比較にのみ使う):
+  の累積コホート = history 全体の `rows` (§8.1) のうち `execution_version == EXECUTION_VERSION` かつ
+  `entry_status == live` の行で、週次・月次の期間窓とは独立。版を bump したらコホートもゼロから始まる。
+  取引数・t 値・DD は **`ugh_x1` の行だけ**から計算し、ベンチマーク book は条件 4 の比較にのみ使う):
   1. `ugh_x1` の取引 (`side != 0`) 100 回以上かつ観測 6 か月以上。「6 か月」はコホートの
      `first_as_of_jst` から `last_as_of_jst` までの**暦日数** (`observation_calendar_days` =
      `(last − first).days`) が 182 以上 (定数 `GATE_MIN_CALENDAR_DAYS = 182`)。観測日数
      (`observation_days`、評価済み窓の数) は情報として出すが閾値には使わない
-  2. コスト控除後・size 加重の live 日次リターン (`size × (pnl_live_bp − cost_live_bp)`) の t 値 ≥ 2.0
-     (標本標準偏差 `stdev`、n − 1 で割る。`pstdev` は使わない)
+  2. コスト控除後・size 加重の live 日次リターン (`size × (pnl_live_bp − cost_live_bp)`、取引行のみ) の
+     t 値 ≥ 2.0 (標本標準偏差 `stdev`、n − 1 で割る。`pstdev` は使わない。n < 3 または sd = 0 なら
+     t は None で不充足)
   3. 最大 DD ≤ 10% (`max_drawdown_live` は正の大きさ `max_t (peak_t − equity_t) / peak_t`、0 以上 1 以下。
      判定は `≤ 0.10`: ちょうど 10.00% は合格、10.01% は不合格)
-  4. 同期間の `bench_gpt_m3` と `bench_long` の両方を損益で上回る
-- 現行 version の batch に 6 book 未満のもの (§8 の `incomplete_batches`)、または完全な `execution.csv`
+  4. 同コホートの `bench_gpt_m3` と `bench_long` の両方を live 損益 (`pnl_jpy_live`) で上回る (`>`)
+- 現行 version の batch に 6 book 未満のもの (§8.1 の `incomplete_batches`)、または完全な `execution.csv`
   があるのに完全な `execution_evaluation.csv` が無い batch (`missing_evaluations`。期待コホートは判断
   ファイルの棚卸しから導く。`window_end_jst` が集計時刻より後の pending 窓は除く)、または
   `execution.csv` はあるが完全でない dir (`incomplete_decision_batches`。version は読めないので dir の
@@ -236,26 +354,71 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
   (昇格証拠は欠落・部分 batch で fail する、`AGENTS.md` §5)。修復は Step 4c の再スキャンか §10 の
   backfill で行い、修復できない欠落は data 側の問題として扱う (ゲートは外さない)。block の判定は
   現行 version かつ **activation marker 以降** (`as_of_jst >= EXECUTION_ACTIVATION_AS_OF`) の batch /
-  日に限る: backfill は activation 前の過去 batch にも現行 version を付けるため、version だけで絞ると
-  bar 系列専用の過去欠損が forward の live ゲートを永久に block する。activation 前の欠損は
-  `archive_defects` として報告のみ (旧版の欠損も同じく block しない)。
+  日に限る (`is_gate_blocking_defect`、§8.1): backfill は activation 前の過去 batch にも現行 version を
+  付けるため、version だけで絞ると bar 系列専用の過去欠損が forward の live ゲートを永久に block する。
+  activation 前の欠損は `archive_defects` として報告のみ (旧版の欠損も同じく block しない)。
 - 不合格なら `x2` として設計し直し、観測を 1 からやり直す (期間を継ぎ足さない)。
 - ゲート通過後も実弾の判断は人が行う (本 spec の対象外)。
 
+### 9.1 `gate` のキー
+
+定数は `execution_reporting.py`: `GATE_MIN_TRADE_COUNT = 100`, `GATE_MIN_CALENDAR_DAYS = 182`,
+`GATE_MIN_T_STAT = 2.0`, `GATE_MAX_DRAWDOWN = 0.10`。`blocked_reasons` の値と順序は
+`GATE_BLOCKED_REASONS`。
+
+| キー | 内容 |
+|---|---|
+| `execution_version` | 現行版 (コホートの版) |
+| `cohort.first_as_of_jst`, `cohort.last_as_of_jst` | コホートの最初と最後の `as_of_jst` (ISO、JST。コホートが空なら null) |
+| `cohort.trade_count` | `ugh_x1` の取引行数 |
+| `cohort.observation_days` | 評価済み窓の数 (コホート内の `as_of_jst` の種類数) |
+| `cohort.observation_calendar_days` | `(last − first).days` (空なら null) |
+| `cohort.excluded_days`, `cohort.excluded_as_of_jst` | `EXECUTION_EXCLUDED_AS_OF` のうち期待範囲内の日数と日付 (常に表示) |
+| `cohort.signed_bp_live_mean`, `cohort.signed_bp_live_sd` | 条件 2 の系列の平均と標本標準偏差 |
+| `criteria.trades_and_duration` | `current {trade_count, observation_calendar_days}`, `threshold {trade_count: 100, observation_calendar_days: 182}`, `met` |
+| `criteria.t_stat_live` | `current` (t 値または null), `threshold: 2.0`, `met` (`>=`) |
+| `criteria.max_drawdown_live` | `current` (0〜1 または null), `threshold: 0.10`, `met` (`<=`) |
+| `criteria.beats_benchmarks` | `current` (`ugh_x1` の `pnl_jpy_live`), `threshold {bench_gpt_m3, bench_long}` (各 `pnl_jpy_live`、行が無ければ null), `met` (両方を `>` で上回る。null があれば不充足) |
+| `passed` | `blocked_reasons` が空かつ 4 条件すべて `met` |
+| `blocked_reasons` | inventory が空でない理由のリスト (`incomplete_batches`, `missing_evaluations`, `incomplete_decisions`, `missing_decisions`, `missing_live`, `duplicate_batches` の順。通常は空) |
+
 ## 10. Backfill
 
-保存済み予測 (2026-05-08 以降) について、`scripts/backfill_execution_history.py` (new) が
-`execution.csv` / `execution_evaluation.csv` を `entry_status = backfill_bar` で生成する
-(live なし、`pnl_live_bp` / `cost_live_bp` 空)。入力の結合は history 全体の横断 join で行う
-(評価と outcome は翌日の batch dir にあるため、`labeled_observations.collect_evaluated_forecast_rows`
-と同じく `forecast_id` でグローバルに引く)。方向は `forecast.csv` の `strategy_kind` /
-`forecast_direction`、outcome は `outcome.csv` の `outcome_id` / `window_start_jst` / `realized_open` /
-`realized_close`、snapshot はその batch 自身の `history/{as_of}/{forecast_batch_id}/input_snapshot.json`
-を直接解決する (日付だけで探さない。無ければその batch は skip)。2026-05-07 以前は予測が無いので対象外 (2026-10-08 の
-Jan〜Oct 再計算は分析であり、観測記録には入れない)。backfill 行は集計で bar 系列にのみ入り、
-ゲート判定 (live 系列) には入らない。完全な既存ファイルは上書きしない。`execution.csv` が完全で
-`execution_evaluation.csv` が無い (または不完全な) batch は前回の中断とみなし、既存の判断 6 行を
-読んで評価 6 行だけを生成する (再実行で修復される)。
+`scripts/backfill_execution_history.py --fxdata-dir <dir> [--dry-run]` が保存済み予測 (2026-05-08
+以降) について `execution.csv` / `execution_evaluation.csv` を `entry_status = backfill_bar` で生成する
+(live なし、`pnl_live_bp` / `cost_live_bp` 空)。`--fxdata-dir` は `fx-daily-data` の checkout root
+(`<dir>/csv/history`) または CSV root そのもの (`<dir>/history`; どちらも無ければ exit 1)。時計も
+network も使わず、再実行で byte 同一の出力になる。2026-05-07 以前は予測が無いので対象外 (2026-10-08 の
+Jan〜Oct 再計算は分析であり、観測記録には入れない)。
+
+入力の結合は history 全体の横断 join (評価と outcome は翌日の batch dir、または catch-up の END-dir に
+あるため): (1) `evaluation.csv` の行を `forecast_id`、`outcome.csv` の行を `outcome_id` でグローバルに
+索引する (後の dir が勝つ、`labeled_observations.collect_evaluated_forecast_rows` と同じ)、(2)
+`forecast.csv` の行を `forecast_batch_id` ごとに `forecast_id` で重複排除して集める (catch-up の END-dir
+コピーが 2 つ目の batch になることはない)。batch の正本 dir は行の `as_of_jst` から
+`history/{as_of:%Y%m%d}/{forecast_batch_id}/` で、snapshot はそこに直接解決する (日付だけで探さない)。
+forecast 行の無い `execution.csv` dir も unit に入れ、`missing_forecast` として報告する。unit は
+`(date, forecast_batch_id)` 順に処理する。
+
+| batch の状態 | 結果 (summary のカウンタ) |
+|---|---|
+| `execution.csv` と `execution_evaluation.csv` が両方完全で、両方の全行が dir の日付・batch id を持ち 1 つの (batch id, 版, 窓) を共有する | `already_complete`。何もしない (完全な既存ファイルは一切上書きしない)。どちらかの行が別 batch・版・窓なら `contradictory_archive` (`[WARN]`、触れずに次へ、summary 後に exit 1) |
+| 評価は完全だが判断が不完全 | `contradictory_archive` (archive の自己矛盾)。`[WARN]` を出してその batch には触れず、**次の batch に進む**。summary を出した後に exit 1 (手で直して再実行) |
+| その batch の forecast 行が archive のどこにも無い | `missing_forecast` (outcome を forecast_id 経由で引けないため、判断ファイルの有無によらず) |
+| `execution.csv` が完全、評価ファイルが無い・不完全 (前回の中断、日次 run の評価失敗) | 修復経路: 既存の判断 6 行を `load_execution_decisions_csv` で読み (行の日付・batch id が dir と食い違えば `contradictory_archive`: `[WARN]` + 触れずに次へ、summary 後に exit 1)、(b) の outcome だけで評価 6 行を書く → `written_evaluations_only`。forecast が 7 行揃っていなくても、snapshot が無くても進む |
+| それ以外 (判断ファイルが無い・不完全) | (a) `forecast.csv` が distinct な 7 kind 揃い、全行が同じ `as_of_jst` / `window_end_jst` で、`ugh_v2_alpha/beta/gamma/delta` と `baseline_simple_technical` の `forecast_direction` が読めなければ `partial_forecast`; (b) 評価行が指す outcome (`outcome_id` が 1 つに定まり、`window_start_jst` / `realized_open` / `realized_close` / `evaluated_at_utc` が読める) が無ければ `missing_outcome` (評価がまだ無い窓もここ); (c) その batch 自身の `input_snapshot.json` (`observability.load_input_snapshot`) が読めなければ `missing_snapshot`。3 つ揃えば `build_execution_decisions(forecast_directions, build_baseline_context(snapshot), completed closes, ..., entry_status="backfill_bar", live_entry=None, decided_at_utc=as_of_jst→UTC)` と `evaluate_execution_decisions` で判断 6 行と評価 6 行 → `written_decisions_and_evaluations` |
+
+`decided_at_utc` は `as_of_jst` を UTC に変換した値 (`forecast.csv` には `locked_at_utc` 列が無い)、
+`evaluated_at_utc` は batch の `evaluation.csv` 行の `evaluated_at_utc` の最大値。書き込みは実 exporter
+(`export_execution_csv` / `export_execution_evaluation_csv` → 一時 staging dir) と `publish_execution_csvs`
+(原子的コピー、完全な `execution.csv` は上書きしない) で行い、`latest/execution.csv` は publish 前の
+bytes に戻す (無かった場合は消す。latest は最新 live batch の鏡で、閉じた backfill 窓はそれになり得ない)
+ので、checkout には `history/` の archive ファイルだけが増える。`--dry-run` は同じ判断・評価をメモリ上で
+組み立てて件数と対象 path だけ出し、何も書かない。skip は `[SKIP] <date> <batch>: <理由>` を 1 行ずつ、
+summary (`print_summary`) はカウンタごとに 1 行 (`batches scanned`、written 2 種、skipped 4 種、archive
+files)。commit / push はしない (`fx-daily-data` の checkout を `git status` / `git diff` で確認して人が
+push)。backfill 行は集計で bar 系列にのみ入り、ゲート判定 (live 系列) には入らない。backfill で
+`missing_decisions` は解消するが `missing_live` は残る (§9)。
 
 ## 11. Module layout
 
