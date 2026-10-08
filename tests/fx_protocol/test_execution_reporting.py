@@ -1508,6 +1508,15 @@ class TestExport:
         assert report["gate"]["passed"] is False
 
 
+def test_skip_counts_cell_never_contains_a_table_pipe() -> None:
+    """Two skip reasons on one book render as ``a=n;b=m``: a ``|`` would split the md cell."""
+    rendered = reporting._fmt_skip_counts({"flat": 1, "agree_with_technical": 4})
+
+    assert rendered == "agree_with_technical=4;flat=1"
+    assert "|" not in rendered
+    assert reporting._fmt_skip_counts({}) == ""
+
+
 def test_module_importable_without_sqlalchemy() -> None:
     """The module must import when SQLAlchemy is absent (CLAUDE.md import isolation).
 

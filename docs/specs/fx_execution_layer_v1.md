@@ -245,7 +245,7 @@ block と archive の振り分け: `is_gate_blocking_defect(as_of_jst, execution
 ### 8.3 Book metrics (`strata[version].books[book_id]` = `execution_{scope}.csv` の列)
 
 列順は `EXECUTION_REPORT_BOOK_FIELDNAMES`。CSV では None は空セル、`skip_counts` は
-`reason=count|reason=count` (理由名順)。「取引行」は `side != 0` の行、「live 行」は
+`reason=count;reason=count` (理由名順。`|` は md の表セルを壊すので使わない)。「取引行」は `side != 0` の行、「live 行」は
 `entry_status == live` の行。
 
 | 列 | 定義 |

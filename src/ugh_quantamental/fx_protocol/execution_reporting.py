@@ -1046,7 +1046,8 @@ def _fmt_count(value: Any) -> str:
 
 
 def _fmt_skip_counts(skip_counts: dict[str, int]) -> str:
-    return "|".join(f"{reason}={count}" for reason, count in sorted(skip_counts.items()))
+    """``reason=count;reason=count`` in reason order (``;`` so the md table cell stays one cell)."""
+    return ";".join(f"{reason}={count}" for reason, count in sorted(skip_counts.items()))
 
 
 def _met(flag: bool) -> str:
