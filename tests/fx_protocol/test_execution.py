@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -15,6 +15,7 @@ from ugh_quantamental.fx_protocol.execution import (
     CONSENSUS_PARTIAL_SIZE,
     EXECUTION_INITIAL_EQUITY_JPY,
     EXECUTION_ROUND_TRIP_COST_JPY_PER_USD,
+    EXECUTION_ACTIVATION_AS_OF,
     EXECUTION_VERSION,
     MIN_COMPLETED_CLOSES,
     UGH_X1_SHOCK_MULTIPLIER,
@@ -266,6 +267,7 @@ def test_book_id_values_and_canonical_order() -> None:
 
 def test_execution_constants_are_pinned_and_exported() -> None:
     assert EXECUTION_VERSION == "x1"
+    assert EXECUTION_ACTIVATION_AS_OF == date(2026, 10, 8)
     assert EXECUTION_INITIAL_EQUITY_JPY == 3_000_000
     assert EXECUTION_ROUND_TRIP_COST_JPY_PER_USD == 0.01
     assert UGH_X1_TARGET_BP == 30.0
@@ -273,6 +275,7 @@ def test_execution_constants_are_pinned_and_exported() -> None:
     assert CONSENSUS_PARTIAL_SIZE == 0.5
     assert MIN_COMPLETED_CLOSES == 5
     assert set(execution_module.__all__) >= {
+        "EXECUTION_ACTIVATION_AS_OF",
         "EXECUTION_VERSION",
         "EXECUTION_INITIAL_EQUITY_JPY",
         "EXECUTION_ROUND_TRIP_COST_JPY_PER_USD",

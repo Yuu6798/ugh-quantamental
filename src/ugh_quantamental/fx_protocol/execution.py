@@ -16,7 +16,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 
 from ugh_quantamental.fx_protocol.execution_models import (
     EXECUTION_BOOK_ORDER,
@@ -39,6 +39,7 @@ __all__ = [
     "CONSENSUS_PARTIAL_SIZE",
     "EXECUTION_INITIAL_EQUITY_JPY",
     "EXECUTION_ROUND_TRIP_COST_JPY_PER_USD",
+    "EXECUTION_ACTIVATION_AS_OF",
     "EXECUTION_VERSION",
     "MIN_COMPLETED_CLOSES",
     "UGH_X1_SHOCK_MULTIPLIER",
@@ -53,6 +54,14 @@ __all__ = [
 
 #: Version tag written on every decision / evaluation row.
 EXECUTION_VERSION: str = "x1"
+
+#: First protocol business day on which the current ``EXECUTION_VERSION`` records
+#: decisions in production (spec §9 / §10).  A pinned activation marker: the
+#: reporting layer's missing-decision inventory starts here rather than at the
+#: first successfully published decision file, so an initial publish failure is
+#: not silently lost.  Update together with ``EXECUTION_VERSION`` on a bump.
+EXECUTION_ACTIVATION_AS_OF: date = date(2026, 10, 8)
+
 #: Starting equity of every book's equity curve (reporting layer, spec §5.2 / §8).
 EXECUTION_INITIAL_EQUITY_JPY: int = 3_000_000
 #: Round-trip transaction cost in JPY per USD of notional (≈ 0.67bp at 150).
