@@ -71,6 +71,10 @@
 - [ ] `scripts/run_fx_daily_protocol.py` の金曜 weekly block (`--- Weekly report (Friday auto-trigger) ---`
       の中、`export_weekly_report_artifacts` の後) で、同じ週窓について執行層の weekly artifact を
       生成する。失敗は `[WARN] Execution report generation failed (non-fatal)` (new) で握りつぶす。
+      同スクリプトの結果表示 (既存の `forecast_created` / `outcome_recorded` 等の print の並び) に
+      `execution_decisions_recorded` / `execution_evaluations_recorded` /
+      `execution_evaluation_windows` の件数を 1 行ずつ追加し、執行層の non-fatal 失敗が CI ログの
+      warning 以外からも見えるようにする (FX-EXEC-LAYER では scripts が OUT だったため、ここで行う)。
 - [ ] `scripts/run_fx_analysis_pipeline.py` の weekly / monthly モードで、既存の weekly / monthly の
       直後に執行層の weekly / monthly artifact を生成する (monthly は月窓全体、`FX_REPORT_DATE` と
       同じ窓解決を使う)。失敗は non-fatal。
