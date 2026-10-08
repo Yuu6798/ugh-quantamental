@@ -221,9 +221,13 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
   運用日。最初に publish に成功した日から推定しない — 初日の publish 失敗を見失うため) 以降で窓が閉じた
   日から、明示的に諦めた日 `execution.EXECUTION_EXCLUDED_AS_OF` (追加は §12 に理由を書く PR で行う) を
   引いたもの — に完全な `execution.csv` が 1 つも無い日 (`missing_decisions`。archive の forecast の有無には
-  依存しない: publish が壊れた日もプロトコルが走らなかった日も同じ欠落) が
+  依存しない: publish が壊れた日もプロトコルが走らなかった日も同じ欠落)、または期待日のうち `ugh_x1` の
+  判断が live でない日 (`missing_live`: ファイル無し・`backfill_bar`・`live_unavailable`。backfill では
+  消えず、`EXECUTION_EXCLUDED_AS_OF` への理由付き追加でのみ解消。除外日数は常に表示)、または同じ版・
+  同じ `as_of_jst` に完全 batch が 2 つ以上ある日 (`duplicate_batches`。黙って片方を選ばず両方除外) が
   1 つでもあれば、条件の現在値は出すがゲートは **blocked** (`passed = False`、`blocked_reasons` に
-  `incomplete_batches` / `missing_evaluations` / `incomplete_decisions` / `missing_decisions`)。欠けた archive を黙って短くした上で合格にはしない
+  `incomplete_batches` / `missing_evaluations` / `incomplete_decisions` / `missing_decisions` /
+  `missing_live` / `duplicate_batches`)。欠けた archive を黙って短くした上で合格にはしない
   (昇格証拠は欠落・部分 batch で fail する、`AGENTS.md` §5)。修復は Step 4c の再スキャンか §10 の
   backfill で行い、修復できない欠落は data 側の問題として扱う (ゲートは外さない)。block の判定は
   現行 version の batch に限る (`incomplete_batches` / `missing_evaluations` は `execution_version` を

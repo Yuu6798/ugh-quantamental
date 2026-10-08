@@ -35,10 +35,15 @@
       に行の `as_of_jst` が D の完全な判断ファイルが 1 つも無ければ `missing_decisions:
       tuple[MissingExecutionDecision, ...]` (`as_of_jst`、`forecast_batch_id` は forecast.csv が正本 dir に
       あればその id、無ければ None) として返す。forecast.csv の有無・内容には依存しない (publish が壊れた日
-      も、プロトコル自体が走らなかった日も同じく欠落)。窓が閉じた batch は live 判断を作らない設計なので、
-      backfill が `backfill_bar` で埋める (forecast が無い日は埋められないので、諦めるなら
-      `EXECUTION_EXCLUDED_AS_OF` に加える) までここに残る。走査規約は
-      `labeled_observations.collect_evaluated_forecast_rows` と同じ。
+      も、プロトコル自体が走らなかった日も同じく欠落)。backfill が `backfill_bar` で埋めれば
+      `missing_decisions` からは外れるが、live 観測としては戻らないので次の `missing_live` に残る。
+      さらに **live コホートを期待日で検証する**: 同じ期待日のうち `ugh_x1` の判断行が
+      `entry_status == live` でない日 (ファイル無し・`backfill_bar`・`live_unavailable` のいずれも) を
+      `missing_live: tuple[date, ...]` として返す。解消手段は `EXECUTION_EXCLUDED_AS_OF` への明示追加
+      (理由付き PR) だけで、backfill では消えない。同じ version・同じ `as_of_jst` に完全な判断 batch が
+      2 つ以上ある日 (protocol_version 変更などで `make_forecast_batch_id` が別 id を作る) は
+      `duplicate_batches: tuple[date, ...]` として返し、どちらも集計・コホートに入れない (黙って片方を
+      選ばない)。走査規約は `labeled_observations.collect_evaluated_forecast_rows` と同じ。
 - [ ] `run_execution_report(csv_output_dir, *, start_as_of_jst, end_as_of_jst, generated_at_utc)
       -> dict[str, Any]` が純粋な集計 (ファイル読みのみ、書き込みなし) で、**期間窓内**の行について
       (`start_as_of_jst` / `end_as_of_jst` は `datetime | None`、None はその端を無制限にする =
@@ -69,12 +74,13 @@
       book は条件 4 の比較にだけ使う。t 値は `signed_bp_live` (= `size × (pnl_live_bp − cost_live_bp)`)
       から計算し、bar 系列はゲートに使わない。現行 `execution_version` に `incomplete_batches` または
       `missing_evaluations` (`window_end_jst > generated_at_utc` の pending 窓は除く) または
-      `incomplete_decision_batches` または `missing_decisions` が 1 つでもあれば `gate.passed = False` かつ
-      `gate.blocked_reasons` (new; `tuple[str, ...]`、値は `"incomplete_batches"` /
-      `"missing_evaluations"` / `"incomplete_decisions"` / `"missing_decisions"`、通常は空) に理由を
-      入れる — 欠けた archive を黙って短くして合格にはしない。`missing_decisions` は backfill が
-      `backfill_bar` 行を書けば解消する (その batch は live コホートに入らず、`live_coverage_rate` に
-      失われた日として現れる)。
+      `incomplete_decision_batches` または `missing_decisions` または `missing_live` または
+      `duplicate_batches` が 1 つでもあれば `gate.passed = False` かつ `gate.blocked_reasons` (new;
+      `tuple[str, ...]`、値は `"incomplete_batches"` / `"missing_evaluations"` /
+      `"incomplete_decisions"` / `"missing_decisions"` / `"missing_live"` / `"duplicate_batches"`、
+      通常は空) に理由を入れる — 欠けた archive を黙って短くして合格にはしない。live 観測が失われた日
+      (`missing_live`) は `EXECUTION_EXCLUDED_AS_OF` に理由付きで加えるまで block が続き、除外した日数は
+      `gate.cohort.excluded_days` として常に表示する。
 - [ ] `export_execution_report_artifacts(report, csv_output_dir, scope, date_str)` が
       `csv/analytics/execution/{scope}/{date_str}/execution_{scope}.md|.csv|.json` (scope は
       `weekly` / `monthly`) を書く。md は層 (version) ごとに book 別の表 1 つとベンチマーク差の表 1 つ、
@@ -165,7 +171,11 @@
     後の pending 窓はそこに入らないこと、header のみの `execution.csv` だけがある dir が
     `incomplete_decision_batches` に入り `"incomplete_decisions" in blocked_reasons` になること、現行版の
     最初の判断 batch 以降で `forecast.csv` だけがあり `execution.csv` が無い過去窓が `missing_decisions`
-    に入り `"missing_decisions" in blocked_reasons` になり、backfill 後 (backfill_bar 行あり) は外れること、
+    に入り `"missing_decisions" in blocked_reasons` になり、backfill 後 (backfill_bar 行あり) は
+    `missing_decisions` からは外れるが `missing_live` に残って block が続き、その日を
+    `EXECUTION_EXCLUDED_AS_OF` に入れた (monkeypatch) ときだけ外れること、`live_unavailable` の日も
+    `missing_live` に入ること、同じ `as_of_jst` に完全 batch が 2 つある fixture で `duplicate_batches` に
+    入り両方が集計から外れ block されること、
     `profit_factor_live` が負の取引ゼロで None になること、見送り
     (side 0) の live 行を足しても `signed_bp_live_t` と `trade_count` が変わらないこと、
     `execution_version` が 2 つ混在する fixture で層が 2 つに
