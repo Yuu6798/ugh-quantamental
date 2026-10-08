@@ -354,6 +354,8 @@ def _record_execution_decisions(
     forecast_batch_id: str,
     as_of_jst: datetime,
     now_utc: datetime,
+    *,
+    forecast_created: bool,
 ) -> tuple[str | None, int]:
     """Automation Step 3b (with Steps 5b / 6b for decisions): record the six book decisions.
 
@@ -371,8 +373,13 @@ def _record_execution_decisions(
       window end is not an execution price, so the batch is left to the
       ``backfill_bar`` backfill (spec §3) and one warning is logged.
 
-    Otherwise the batch is reloaded from the DB, the live spot is fetched
-    exactly once (a ``FxDataFetchError`` degrades to ``entry_status =
+    Otherwise the batch is reloaded from the DB.  When this run did not create
+    the batch (``forecast_created`` False: the in-window recovery path), the
+    deterministic inputs come from the batch's archived
+    ``history/{date}/{batch}/input_snapshot.json`` (the forecast-time market
+    data, spec §3) rather than from this run's provider fetch, which may carry
+    revised bars; if that archive is missing the run snapshot is used and a
+    warning is logged.  Then the live spot is fetched exactly once (a ``FxDataFetchError`` degrades to ``entry_status =
     "live_unavailable"`` with a warning, never an exception), the decisions
     are built by the pure :func:`build_execution_decisions` with
     ``decided_at_utc = now_utc``, exported to the staging CSV and published to
@@ -385,6 +392,7 @@ def _record_execution_decisions(
         publish_execution_csvs,
         sync_latest_execution_csv,
     )
+    from ugh_quantamental.fx_protocol.observability import load_input_snapshot
     from ugh_quantamental.persistence.repositories import FxForecastRepository
 
     date_str = as_of_jst.strftime("%Y%m%d")
@@ -427,9 +435,21 @@ def _record_execution_decisions(
 
     # Deterministic inputs first (spec §4): the batch's directions, the
     # snapshot's baseline statistics and its completed closes (oldest -> newest).
+    # On the recovery path the snapshot is the archived forecast-time one.
+    inputs_snapshot = snapshot
+    if not forecast_created:
+        archived_snapshot = os.path.join(os.path.dirname(history_execution), "input_snapshot.json")
+        if os.path.isfile(archived_snapshot):
+            inputs_snapshot = load_input_snapshot(archived_snapshot)
+        else:
+            logger.warning(
+                "Execution layer: no archived input_snapshot.json for batch %s; recovering "
+                "decisions from this run's market snapshot.",
+                forecast_batch_id,
+            )
     forecast_directions = {f.strategy_kind: f.forecast_direction for f in batch.forecasts}
-    baseline_context = build_baseline_context(snapshot)
-    completed_closes = tuple(w.close_price for w in snapshot.completed_windows)
+    baseline_context = build_baseline_context(inputs_snapshot)
+    completed_closes = tuple(w.close_price for w in inputs_snapshot.completed_windows)
 
     # Live spot: exactly one fetch per judgment (spec §6).  A failed fetch is
     # recorded as ``live_unavailable``, never raised.
@@ -560,18 +580,24 @@ def _evaluate_execution_archive(
             staging_path = export_execution_evaluation_csv(
                 evaluations, first.as_of_jst, config.pair.value, config.csv_output_dir
             )
-            publish_execution_csvs(
+            published = publish_execution_csvs(
                 config.csv_output_dir,
                 first.as_of_jst.strftime("%Y%m%d"),
                 first.forecast_batch_id,
                 None,
                 staging_path,
             )
+            history_relative = published["history_execution_evaluation"]
+            assert history_relative is not None  # publish always writes the evaluation copy
             windows.append(
                 ExecutionEvaluationWindowResult(
                     forecast_batch_id=first.forecast_batch_id,
                     as_of_jst=first.as_of_jst,
-                    evaluation_csv_path=staging_path,
+                    # The immutable archive copy, not the date-only staging file
+                    # (which two batches sharing a date would overwrite).
+                    evaluation_csv_path=os.path.join(
+                        os.path.abspath(config.csv_output_dir), history_relative
+                    ),
                     evaluation_count=len(evaluations),
                 )
             )
@@ -825,7 +851,13 @@ def run_fx_daily_protocol_once(
     if config.write_csv_exports and config.run_execution_layer and forecast_batch_id is not None:
         try:
             execution_csv_path, execution_decisions_recorded = _record_execution_decisions(
-                session, config, snapshot, forecast_batch_id, as_of_jst, now_utc
+                session,
+                config,
+                snapshot,
+                forecast_batch_id,
+                as_of_jst,
+                now_utc,
+                forecast_created=forecast_created,
             )
         except Exception as exc:
             logger.warning(

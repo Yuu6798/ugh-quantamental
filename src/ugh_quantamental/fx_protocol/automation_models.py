@@ -73,6 +73,8 @@ class ExecutionEvaluationWindowResult(BaseModel):
 
     forecast_batch_id: str
     as_of_jst: datetime
+    # Absolute path of the archived history/{date}/{batch}/execution_evaluation.csv
+    # (immutable per batch; the date-only staging file is not unique per batch).
     evaluation_csv_path: str
     evaluation_count: int
 
@@ -117,5 +119,6 @@ class FxDailyAutomationResult(BaseModel):
     execution_decisions_recorded: int = 0
     execution_evaluations_recorded: int = 0
     # Every window the Step 4c scan evaluated this run, ascending by as_of_jst;
-    # execution_evaluation_csv_path is the newest of these (or None).
+    # execution_evaluation_csv_path is the newest window's archived evaluation
+    # file (or None).
     execution_evaluation_windows: tuple[ExecutionEvaluationWindowResult, ...] = ()

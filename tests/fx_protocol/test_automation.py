@@ -1507,6 +1507,57 @@ class TestExecutionLayerAutomation:
         finally:
             session.close()
 
+    # (b5) -----------------------------------------------------------------
+    def test_b5_recovery_uses_the_archived_input_snapshot(self, tmp_path, live_spot) -> None:
+        from ugh_quantamental.fx_protocol.execution_exports import load_execution_decisions_csv
+
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path)
+            snap, r1 = self._run(session, cfg, 20)
+            session.commit()
+            batch_dir = self._batch_dir(tmp_path, snap.as_of_jst, r1.forecast_batch_id)
+            assert (batch_dir / "input_snapshot.json").is_file()  # Step 7a archived it
+            original = load_execution_decisions_csv(str(batch_dir / "execution.csv"))
+            (batch_dir / "execution.csv").unlink()
+
+            # The retry's provider fetch carries a revised last bar: a different
+            # close changes previous_close_change_bp / trailing / momentum_3d.
+            last = snap.completed_windows[-1]
+            revised_last = last.model_copy(
+                update={
+                    "close_price": last.close_price + 0.8,
+                    "high_price": max(last.high_price, last.close_price + 0.8),
+                }
+            )
+            revised = snap.model_copy(
+                update={"completed_windows": snap.completed_windows[:-1] + (revised_last,)}
+            )
+            from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+
+            r2 = run_fx_daily_protocol_once(
+                cfg,
+                self._make_provider(revised),
+                session,
+                now_utc=self._run_clock(snap.as_of_jst, 12),
+            )
+            assert r2.forecast_created is False
+            assert r2.execution_decisions_recorded == _EXECUTION_BOOK_COUNT
+            recovered = load_execution_decisions_csv(str(batch_dir / "execution.csv"))
+            # Audit columns match the forecast-time snapshot, not the revised bar.
+            for before, after in zip(original, recovered, strict=True):
+                assert after.previous_close_change_bp == before.previous_close_change_bp
+                assert after.trailing_mean_abs_close_change_bp == (
+                    before.trailing_mean_abs_close_change_bp
+                )
+                assert after.momentum_3d == before.momentum_3d
+                assert after.side == before.side and after.size == before.size
+            # ...and the live entry is this run's.
+            assert recovered[0].entry_time_utc == live_spot.return_value[1]
+            assert live_spot.call_count == 2
+        finally:
+            session.close()
+
     # (c5) -----------------------------------------------------------------
     def test_c5_decision_file_in_a_foreign_directory_is_skipped(self, tmp_path, live_spot) -> None:
         import shutil
@@ -1637,10 +1688,13 @@ class TestExecutionLayerAutomation:
             )
             assert r2.execution_decisions_recorded == _EXECUTION_BOOK_COUNT  # bd[21]'s own
             assert r2.execution_evaluations_recorded == _EXECUTION_BOOK_COUNT
-            # Staging file is dated by the EVALUATED window's as_of, not today's.
+            # The result points at the immutable archive copy in the EVALUATED
+            # window's batch directory (the staging file is date-only, not unique).
             assert r2.execution_evaluation_csv_path == str(
-                tmp_path / "execution" / "USDJPY_20260202_execution_evaluation.csv"
+                self._batch_dir(tmp_path, snap1.as_of_jst, r1.forecast_batch_id)
+                / "execution_evaluation.csv"
             )
+            assert (tmp_path / "execution" / "USDJPY_20260202_execution_evaluation.csv").exists()
             # One structured entry per evaluated window (here exactly one).
             assert len(r2.execution_evaluation_windows) == 1
             window = r2.execution_evaluation_windows[0]
