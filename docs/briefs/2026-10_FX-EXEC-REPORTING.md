@@ -26,9 +26,9 @@
       ファイルの存在。評価ファイルが丸ごと無い・header のみの batch もここで捕捉する)。棚卸しで
       `execution.csv` はあるが完全でない (header のみ・6 book 未満・読めない) dir は
       `incomplete_decision_batches: tuple[str, ...]` (`history/{date}/{batch}` の相対 path) として返す
-      (version は読めないことがあるので現行版扱い)。さらに **forecast batch の棚卸し**: 現行版の最初の
-      判断 batch (`execution_version == EXECUTION_VERSION` の `execution.csv` のうち最小の `as_of_jst`)
-      以降の `history/*/*/forecast.csv` (7 行) のうち、同 dir に `execution.csv` が**丸ごと無い** batch を
+      (version は読めないことがあるので現行版扱い)。さらに **forecast batch の棚卸し**: `execution.EXECUTION_ACTIVATION_AS_OF`
+      (現行版の activation marker。最初に publish に成功した日ではなく、コードに固定した日付) 以降の
+      `history/*/*/forecast.csv` (7 行) のうち、同 dir に `execution.csv` が**丸ごと無い** batch を
       `missing_decisions: tuple[MissingExecutionDecision, ...]` (`forecast_batch_id`, `as_of_jst`) として
       返す (判断の publish が窓内に一度も成功しなかった日。窓が閉じた batch は live 判断を作らない設計
       なので、backfill が `backfill_bar` で埋めるまでここに残る。`window_end_jst > generated_at_utc`

@@ -30,7 +30,11 @@
 - [ ] `src/ugh_quantamental/fx_protocol/execution.py` (new) が定数
       `EXECUTION_VERSION = "x1"`、`EXECUTION_INITIAL_EQUITY_JPY = 3_000_000`、
       `EXECUTION_ROUND_TRIP_COST_JPY_PER_USD = 0.01`、`UGH_X1_TARGET_BP = 30.0`、
-      `UGH_X1_SHOCK_MULTIPLIER = 2.5`、`CONSENSUS_PARTIAL_SIZE = 0.5` を `__all__` 付きで公開する。
+      `UGH_X1_SHOCK_MULTIPLIER = 2.5`、`CONSENSUS_PARTIAL_SIZE = 0.5`、
+      `EXECUTION_ACTIVATION_AS_OF: date = date(2026, 10, 8)` (new; 現行版が本番で判断を記録し始める
+      最初の営業日。コードに固定した activation marker で、`x2` への bump 時は `EXECUTION_VERSION` と
+      一緒に更新する。merge がこの日を過ぎたら実装 PR 内で初回運用日に合わせる) を `__all__` 付きで
+      公開する。
 - [ ] `build_execution_decisions(*, forecast_directions: Mapping[StrategyKind, ForecastDirection],
       baseline_context, completed_closes, as_of_jst, window_end_jst, forecast_batch_id,
       entry_status: EntryStatus, live_entry: LiveEntry | None, decided_at_utc)
