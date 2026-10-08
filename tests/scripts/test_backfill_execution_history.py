@@ -17,7 +17,7 @@ import importlib.util
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -79,6 +79,7 @@ _PROTOCOL_VERSION = "v1"
 _SCHEMA_VERSION = "v1"
 
 # Protocol business days (2026-05-11 is a Monday; 05-15 Friday; 05-18 Monday).
+_D0 = datetime(2026, 5, 7, 8, 0, tzinfo=_JST)  # the day before the first persisted forecast
 _D1 = datetime(2026, 5, 11, 8, 0, tzinfo=_JST)  # complete triple
 _D2 = datetime(2026, 5, 12, 8, 0, tzinfo=_JST)  # partial forecast (6 rows)
 _D3 = datetime(2026, 5, 13, 8, 0, tzinfo=_JST)  # evaluated by outcome catch-up (end-date dir)
@@ -87,6 +88,7 @@ _D5 = datetime(2026, 5, 15, 8, 0, tzinfo=_JST)  # window not evaluated yet
 _D6 = datetime(2026, 5, 18, 8, 0, tzinfo=_JST)  # no input_snapshot.json
 _D7 = datetime(2026, 5, 19, 8, 0, tzinfo=_JST)  # hosts _D6's outcome only (no forecast of its own)
 _D8 = datetime(2026, 5, 20, 8, 0, tzinfo=_JST)  # execution.csv without any forecast rows
+_D9 = datetime(2026, 5, 21, 8, 0, tzinfo=_JST)  # forecast only in the catch-up end-date dir
 
 #: The seven strategies of a complete daily batch (``EXPECTED_DAILY_BATCH_SIZE``).
 _DAILY_KINDS: tuple[StrategyKind, ...] = (
@@ -111,6 +113,21 @@ _DIRECTIONS: dict[StrategyKind, ForecastDirection] = {
     StrategyKind.baseline_prev_day_direction: ForecastDirection.up,
     StrategyKind.baseline_simple_technical: ForecastDirection.down,
 }
+
+#: Every per-batch counter of ``BackfillSummary``; together they partition ``batches``.
+_COUNTERS: tuple[str, ...] = (
+    "written_decisions_and_evaluations",
+    "written_evaluations_only",
+    "already_complete",
+    "before_backfill_start",
+    "missing_forecast",
+    "partial_forecast",
+    "missing_outcome",
+    "unusable_outcome",
+    "missing_snapshot",
+    "unusable_inputs",
+    "contradictory_archive",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -270,6 +287,26 @@ def _write_decisions(batch_dir: Path, decisions: tuple[ExecutionDecision, ...]) 
     )
 
 
+def _truncate_last_row(path: Path, n_fields: int) -> None:
+    """Cut the last data row of a CSV to its first *n_fields* cells, like an interrupted copy."""
+    lines = path.read_text(encoding="utf-8").splitlines()
+    lines[-1] = ",".join(lines[-1].split(",")[:n_fields])
+    path.write_text("\r\n".join(lines), encoding="utf-8")
+
+
+def _edit_csv(path: Path, mutate: Callable[[list[dict[str, str]]], None]) -> None:
+    """Rewrite a CSV after applying *mutate* to its rows (header kept)."""
+    with path.open(newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        fieldnames = list(reader.fieldnames or ())
+        rows = list(reader)
+    mutate(rows)
+    with path.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 @dataclass(frozen=True)
 class _Layout:
     root: Path
@@ -399,15 +436,24 @@ def _run(layout: _Layout, *, dry_run: bool = False) -> tuple[backfill.BackfillSu
     return summary, lines
 
 
+def _counter_sum(summary: backfill.BackfillSummary) -> int:
+    return sum(getattr(summary, name) for name in _COUNTERS)
+
+
 def _assert_first_pass_counts(summary: backfill.BackfillSummary) -> None:
     assert summary.batches == _EXPECTED_BATCHES
     assert summary.written_decisions_and_evaluations == 2  # complete, catchup
     assert summary.written_evaluations_only == 1  # repair
     assert summary.already_complete == 0
+    assert summary.before_backfill_start == 0
     assert summary.missing_forecast == 1  # no_forecast
     assert summary.partial_forecast == 1  # partial
     assert summary.missing_outcome == 1  # pending
+    assert summary.unusable_outcome == 0
     assert summary.missing_snapshot == 1  # no_snapshot
+    assert summary.unusable_inputs == 0
+    assert summary.contradictory_archive == 0
+    assert _counter_sum(summary) == summary.batches
 
 
 # ---------------------------------------------------------------------------
@@ -526,6 +572,51 @@ def test_other_skip_reasons_are_counted_and_logged(tmp_path: Path) -> None:
     assert not (_batch_dir(layout.csv_root, _D7) / "execution.csv").exists()
 
 
+def test_batches_before_the_backfill_start_are_skipped(tmp_path: Path) -> None:
+    layout = _build_checkout(tmp_path)
+    own = _batch_dir(layout.csv_root, _D0)
+    _write_forecast(own, _D0)
+    _write_snapshot(own, _snapshot(_D0))
+    _write_outcome_and_evaluation(
+        _batch_dir(layout.csv_root, _window_end(_D0)),
+        _D0,
+        realized=(150.0, 150.3),
+        evaluated_at=_window_end(_D0).astimezone(_UTC) + timedelta(hours=1),
+    )
+
+    summary, lines = _run(layout)
+
+    assert backfill.BACKFILL_START_AS_OF == date(2026, 5, 8)
+    assert summary.batches == _EXPECTED_BATCHES + 1
+    assert summary.before_backfill_start == 1
+    assert summary.written_decisions_and_evaluations == 2
+    assert _counter_sum(summary) == summary.batches
+    assert not (own / "execution.csv").exists()
+    assert not (own / "execution_evaluation.csv").exists()
+    assert any(
+        line.startswith("[SKIP]") and _batch_id(_D0) in line and "before backfill start" in line
+        for line in lines
+    )
+
+
+def test_snapshot_is_resolved_by_batch_id_not_by_date(tmp_path: Path) -> None:
+    layout = _build_checkout(tmp_path)
+    # Another batch directory under the same date holds a snapshot; the batch's own does not.
+    other = _batch_dir(layout.csv_root, _D6, "fb_other_batch_same_date")
+    _write_snapshot(other, layout.snapshots["no_snapshot"])
+
+    summary, lines = _run(layout)
+
+    assert summary.missing_snapshot == 1
+    assert summary.batches == _EXPECTED_BATCHES  # a dir holding only a snapshot is not a batch
+    assert not (_batch_dir(layout.csv_root, _D6) / "execution.csv").exists()
+    assert not (other / "execution.csv").exists()
+    assert any(
+        line.startswith("[SKIP]") and _batch_id(_D6) in line and "missing snapshot" in line
+        for line in lines
+    )
+
+
 # ---------------------------------------------------------------------------
 # Cross-batch join: the catch-up END-date copy is the same batch
 # ---------------------------------------------------------------------------
@@ -546,6 +637,40 @@ def test_catchup_end_date_copy_is_not_a_second_batch(tmp_path: Path) -> None:
     evaluation_rows = _read_rows(start_dir / "execution_evaluation.csv")
     assert {row["outcome_id"] for row in evaluation_rows} == {layout.outcome_ids["catchup"]}
     assert {row["as_of_jst"] for row in evaluation_rows} == {_D3.isoformat()}
+
+
+def test_forecast_only_in_the_catchup_end_date_dir_uses_the_canonical_dir(tmp_path: Path) -> None:
+    layout = _build_checkout(tmp_path)
+    end_dir = _batch_dir(layout.csv_root, _window_end(_D9), _batch_id(_D9))
+    _write_forecast(end_dir, _D9)
+    outcome_id = _write_outcome_and_evaluation(
+        end_dir,
+        _D9,
+        realized=(150.2, 150.0),
+        evaluated_at=_window_end(_D9).astimezone(_UTC) + timedelta(hours=1),
+    )
+    canonical = _batch_dir(layout.csv_root, _D9)
+
+    first, _ = _run(layout)
+
+    assert first.batches == _EXPECTED_BATCHES + 1
+    assert first.missing_snapshot == 2  # no_snapshot + this batch
+    assert not canonical.exists()
+    assert not (end_dir / "execution.csv").exists()
+    assert not (end_dir / "execution_evaluation.csv").exists()
+
+    canonical.mkdir(parents=True)
+    _write_snapshot(canonical, _snapshot(_D9))
+    second, _ = _run(layout)
+
+    assert second.written_decisions_and_evaluations == 1
+    assert second.missing_snapshot == 1
+    assert is_complete_decision_file(str(canonical / "execution.csv"))
+    rows = _read_rows(canonical / "execution_evaluation.csv")
+    assert {row["outcome_id"] for row in rows} == {outcome_id}
+    assert {row["as_of_jst"] for row in rows} == {_D9.isoformat()}
+    assert not (end_dir / "execution.csv").exists()
+    assert not (end_dir / "execution_evaluation.csv").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -598,6 +723,89 @@ def test_header_only_decision_file_is_replaced(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Unusable rows never stop the pass
+# ---------------------------------------------------------------------------
+
+
+def test_truncated_rows_are_skipped_and_the_run_completes(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    layout = _build_checkout(tmp_path)
+    # The "complete" window's evaluation.csv (next day's batch dir) loses the tail of its last
+    # row; the "catchup" window's outcome.csv (END-date dir) loses its realized_close and later.
+    _truncate_last_row(_batch_dir(layout.csv_root, _D2) / "evaluation.csv", 3)
+    _truncate_last_row(_batch_dir(layout.csv_root, _D4, _batch_id(_D3)) / "outcome.csv", 5)
+
+    backfill.main(["--fxdata-dir", str(layout.root)])
+
+    out = capsys.readouterr().out
+    assert "[OK] backfill_execution_history" in out
+    assert "skipped (unusable outcome): 2" in out
+    assert "written (decisions + evaluations): 0" in out
+    assert "written (evaluations only): 1" in out
+    warn_lines = [line for line in out.splitlines() if line.startswith("[WARN]")]
+    assert any(_batch_id(_D1) in line and "unusable" in line for line in warn_lines)
+    assert any(_batch_id(_D3) in line and "unusable" in line for line in warn_lines)
+    for as_of in (_D1, _D3):
+        assert not (_batch_dir(layout.csv_root, as_of) / "execution.csv").exists()
+    assert is_complete_evaluation_file(
+        str(_batch_dir(layout.csv_root, _D4) / "execution_evaluation.csv")
+    )
+
+
+def test_evaluations_pointing_at_two_outcomes_are_unusable_outcome(tmp_path: Path) -> None:
+    layout = _build_checkout(tmp_path)
+
+    def fork(rows: list[dict[str, str]]) -> None:
+        rows[0]["outcome_id"] = "oc_some_other_window"
+
+    _edit_csv(_batch_dir(layout.csv_root, _D2) / "evaluation.csv", fork)
+
+    summary, lines = _run(layout)
+
+    assert summary.unusable_outcome == 1
+    assert summary.missing_outcome == 1  # the pending window keeps its own reason
+    assert summary.written_decisions_and_evaluations == 1
+    assert _counter_sum(summary) == summary.batches
+    assert any(
+        line.startswith("[SKIP]") and _batch_id(_D1) in line and "unusable outcome" in line
+        for line in lines
+    )
+    assert any(
+        line.startswith(f"[WARN] {_D1:%Y%m%d} {_batch_id(_D1)}:") and "2 outcomes" in line
+        for line in lines
+    )
+    assert not (_batch_dir(layout.csv_root, _D1) / "execution.csv").exists()
+
+
+def test_outcome_window_mismatch_is_counted_as_unusable_inputs(tmp_path: Path) -> None:
+    layout = _build_checkout(tmp_path)
+
+    def shift_window(rows: list[dict[str, str]]) -> None:
+        rows[0]["window_start_jst"] = _D2.isoformat()
+
+    _edit_csv(_batch_dir(layout.csv_root, _D2) / "outcome.csv", shift_window)
+
+    summary, lines = _run(layout)
+
+    assert summary.unusable_inputs == 1
+    assert summary.written_decisions_and_evaluations == 1  # catchup only
+    assert summary.written_evaluations_only == 1
+    assert _counter_sum(summary) == summary.batches
+    assert any(
+        line.startswith(f"[WARN] {_D1:%Y%m%d} {_batch_id(_D1)}: unusable inputs (")
+        for line in lines
+    )
+    assert any(
+        line.startswith("[SKIP]") and _batch_id(_D1) in line and "unusable inputs" in line
+        for line in lines
+    )
+    batch_dir = _batch_dir(layout.csv_root, _D1)
+    assert not (batch_dir / "execution.csv").exists()
+    assert not (batch_dir / "execution_evaluation.csv").exists()
+
+
+# ---------------------------------------------------------------------------
 # Idempotence, dry run, latest/
 # ---------------------------------------------------------------------------
 
@@ -618,6 +826,7 @@ def test_rerun_is_byte_identical_and_skips_complete_batches(tmp_path: Path) -> N
     assert second.files == ()
     assert (second.missing_forecast, second.partial_forecast) == (1, 1)
     assert (second.missing_outcome, second.missing_snapshot) == (1, 1)
+    assert _counter_sum(second) == second.batches
     assert not any("already complete" in line for line in lines)
 
 
@@ -638,16 +847,7 @@ def test_dry_run_writes_nothing_and_reports_the_same_counts(tmp_path: Path) -> N
     real, _ = _run(layout)
 
     assert real.files == dry.files
-    for attr in (
-        "batches",
-        "written_decisions_and_evaluations",
-        "written_evaluations_only",
-        "already_complete",
-        "missing_forecast",
-        "partial_forecast",
-        "missing_outcome",
-        "missing_snapshot",
-    ):
+    for attr in ("batches", *_COUNTERS):
         assert getattr(real, attr) == getattr(dry, attr), attr
 
 
@@ -670,12 +870,53 @@ def test_latest_execution_csv_is_left_as_found(tmp_path: Path, latest_present: b
         assert not latest_dir.exists()
 
 
+@pytest.mark.parametrize("latest_present", [True, False])
+def test_latest_execution_csv_is_restored_when_publish_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, latest_present: bool
+) -> None:
+    layout = _build_checkout(tmp_path)
+    latest_dir = layout.csv_root / "latest"
+    latest_file = latest_dir / "execution.csv"
+    original = b"the live batch the daily protocol recorded last\n"
+    if latest_present:
+        latest_dir.mkdir()
+        latest_file.write_bytes(original)
+    real_publish = backfill.publish_execution_csvs
+    observed: dict[str, bytes] = {}
+
+    def publish_then_fail(*args: object, **kwargs: object) -> None:
+        real_publish(*args, **kwargs)  # type: ignore[arg-type]
+        observed["latest_after_publish"] = latest_file.read_bytes()
+        raise OSError("simulated failure after the publish")
+
+    monkeypatch.setattr(backfill, "publish_execution_csvs", publish_then_fail)
+
+    with pytest.raises(OSError, match="simulated failure"):
+        _run(layout)
+
+    # The real publish did move latest/ onto the backfilled batch before failing ...
+    assert observed["latest_after_publish"] != original
+    assert observed["latest_after_publish"].startswith(b"execution_version,book_id,")
+    # ... and the guard put it back (or removed what did not exist before).
+    if latest_present:
+        assert latest_file.read_bytes() == original
+    else:
+        assert not latest_dir.exists()
+
+
 # ---------------------------------------------------------------------------
-# Archive contradictions stop the pass
+# Archive contradictions are counted, left untouched, and never stop the pass
 # ---------------------------------------------------------------------------
 
 
-def test_complete_evaluation_without_complete_decisions_aborts(tmp_path: Path) -> None:
+def _batch_files(csv_root: Path, as_of: datetime) -> dict[str, bytes]:
+    prefix = f"history/{as_of:%Y%m%d}/{_batch_id(as_of)}/"
+    return {path: data for path, data in _all_files(csv_root).items() if path.startswith(prefix)}
+
+
+def test_complete_evaluation_without_complete_decisions_is_counted_and_skipped(
+    tmp_path: Path,
+) -> None:
     layout = _build_checkout(tmp_path)
     batch_dir = _batch_dir(layout.csv_root, _D1)
     decisions = _decisions(
@@ -699,24 +940,83 @@ def test_complete_evaluation_without_complete_decisions_aborts(tmp_path: Path) -
         EXECUTION_EVALUATION_FIELDNAMES,
     )
     write_csv_rows(str(batch_dir / "execution.csv"), [], EXECUTION_FIELDNAMES)
-    before = _all_files(layout.csv_root)
+    before = _batch_files(layout.csv_root, _D1)
 
-    with pytest.raises(RuntimeError, match="contradicts itself"):
-        _run(layout)
+    summary, lines = _run(layout)
 
-    assert _all_files(layout.csv_root) == before
+    assert summary.contradictory_archive == 1
+    assert _batch_files(layout.csv_root, _D1) == before
+    assert any(
+        line.startswith(f"[WARN] {_D1:%Y%m%d} {_batch_id(_D1)}:") and "contradicts itself" in line
+        for line in lines
+    )
+    assert any(
+        line.startswith("[SKIP]") and _batch_id(_D1) in line and "contradictory archive" in line
+        for line in lines
+    )
+    # The rest of the archive is still processed.
+    assert summary.written_decisions_and_evaluations == 1  # catchup
+    assert summary.written_evaluations_only == 1  # repair
+    assert _counter_sum(summary) == summary.batches
 
 
-def test_decision_file_belonging_to_another_batch_aborts(tmp_path: Path) -> None:
+def test_decision_file_belonging_to_another_batch_is_counted_and_skipped(tmp_path: Path) -> None:
     layout = _build_checkout(tmp_path)
     foreign = _batch_dir(layout.csv_root, _D1) / "execution.csv"
-    foreign.write_bytes((_batch_dir(layout.csv_root, _D4) / "execution.csv").read_bytes())
-    before = _all_files(layout.csv_root)
+    foreign_bytes = (_batch_dir(layout.csv_root, _D4) / "execution.csv").read_bytes()
+    foreign.write_bytes(foreign_bytes)
 
-    with pytest.raises(RuntimeError, match="holds decisions for"):
-        _run(layout)
+    summary, lines = _run(layout)
 
-    assert _all_files(layout.csv_root) == before
+    assert summary.contradictory_archive == 1
+    assert foreign.read_bytes() == foreign_bytes
+    assert not (_batch_dir(layout.csv_root, _D1) / "execution_evaluation.csv").exists()
+    assert any(
+        line.startswith(f"[WARN] {_D1:%Y%m%d} {_batch_id(_D1)}:")
+        and "holds decisions for" in line
+        and _batch_id(_D4) in line
+        for line in lines
+    )
+    assert summary.written_decisions_and_evaluations == 1  # catchup
+    assert summary.written_evaluations_only == 1  # repair
+    assert _counter_sum(summary) == summary.batches
+
+
+def test_contradiction_on_a_later_unit_does_not_stop_the_pass(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    layout = _build_checkout(tmp_path)
+    # Processing order is (date, batch id): complete (05-11), partial (05-12), catchup (05-13),
+    # repair (05-14), ...  The foreign decision file sits on the third unit.
+    foreign = _batch_dir(layout.csv_root, _D3) / "execution.csv"
+    foreign_bytes = (_batch_dir(layout.csv_root, _D4) / "execution.csv").read_bytes()
+    foreign.write_bytes(foreign_bytes)
+
+    with pytest.raises(SystemExit) as excinfo:
+        backfill.main(["--fxdata-dir", str(layout.root)])
+
+    assert excinfo.value.code == 1
+    out = capsys.readouterr().out
+    # The earlier batch was written ...
+    assert is_complete_decision_file(str(_batch_dir(layout.csv_root, _D1) / "execution.csv"))
+    assert is_complete_evaluation_file(
+        str(_batch_dir(layout.csv_root, _D1) / "execution_evaluation.csv")
+    )
+    # ... the contradictory one was counted and left untouched ...
+    assert foreign.read_bytes() == foreign_bytes
+    assert not (_batch_dir(layout.csv_root, _D3) / "execution_evaluation.csv").exists()
+    # ... and the later batches were still processed.
+    assert is_complete_evaluation_file(
+        str(_batch_dir(layout.csv_root, _D4) / "execution_evaluation.csv")
+    )
+    assert "[OK] backfill_execution_history" in out
+    assert "written (decisions + evaluations): 1" in out
+    assert "written (evaluations only): 1" in out
+    assert "skipped (contradictory archive): 1" in out
+    assert "1 batch(es) hold a self-contradicting archive" in out
+    assert "Exit status 1." in out
+    assert "push it manually" in out
+    assert out.index("[WARN]") < out.index("[OK] backfill_execution_history")
 
 
 # ---------------------------------------------------------------------------
@@ -744,6 +1044,8 @@ def test_main_accepts_checkout_root_and_csv_root(
     assert "written (decisions + evaluations): 2" in out
     assert "written (evaluations only): 1" in out
     assert "skipped (partial forecast): 1" in out
+    assert "skipped (contradictory archive): 0" in out
+    assert "Exit status 1." not in out
     assert "push it manually" in out
     assert is_complete_decision_file(str(_batch_dir(layout.csv_root, _D1) / "execution.csv"))
 
