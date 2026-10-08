@@ -240,8 +240,9 @@ class ExecutionDecision(BaseModel):
 class ExecutionEvaluation(BaseModel):
     """One book's realized result for one forecast window (spec §5.2).
 
-    ``side``/``size``/``entry_status``/``entry_price_live`` are copied from the
-    :class:`ExecutionDecision`; ``realized_open``/``realized_close`` from the
+    ``side``/``size``/``skip_reason``/``entry_status``/``entry_price_live`` are
+    copied from the :class:`ExecutionDecision` (``skip_reason`` so the reporting
+    layer can build the skip breakdown from evaluation rows alone); ``realized_open``/``realized_close`` from the
     window's ``OutcomeRecord``. Exit is always ``realized_close``. The
     ``*_live`` columns are priced off ``entry_price_live`` (canonical series,
     ``None`` when no live spot was recorded); the ``*_bar`` columns off
@@ -262,6 +263,7 @@ class ExecutionEvaluation(BaseModel):
     # --- decision copy ---
     side: int
     size: float
+    skip_reason: SkipReason | None
     entry_status: EntryStatus
     entry_price_live: float | None
 
@@ -326,6 +328,8 @@ class ExecutionEvaluation(BaseModel):
     @model_validator(mode="after")
     def _validate_coupling(self) -> ExecutionEvaluation:
         _check_side_size_coupling(self.side, self.size)
+        if (self.skip_reason is not None) != (self.side == 0):
+            raise ValueError("skip_reason must be set exactly when side == 0")
         _check_entry_price_coupling(self.entry_status, self.entry_price_live)
         if (self.pnl_live_bp is None) != (self.entry_price_live is None):
             raise ValueError("pnl_live_bp must be None exactly when entry_price_live is None")

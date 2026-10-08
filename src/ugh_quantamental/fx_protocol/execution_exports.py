@@ -67,6 +67,7 @@ EXECUTION_EVALUATION_FIELDNAMES: tuple[str, ...] = (
     "outcome_id",
     "side",
     "size",
+    "skip_reason",
     "entry_status",
     "entry_price_live",
     "realized_open",
@@ -232,6 +233,7 @@ def evaluations_to_rows(evaluations: tuple[ExecutionEvaluation, ...]) -> list[di
             "outcome_id": ev.outcome_id,
             "side": ev.side,
             "size": ev.size,
+            "skip_reason": _blank(ev.skip_reason),
             "entry_status": ev.entry_status,
             "entry_price_live": _blank(ev.entry_price_live),
             "realized_open": ev.realized_open,
@@ -363,6 +365,7 @@ def _parse_evaluation_row(row: dict[str, str]) -> ExecutionEvaluation:
         outcome_id=row["outcome_id"],
         side=int(row["side"]),
         size=float(row["size"]),
+        skip_reason=_opt_str(row["skip_reason"]),  # validated against SkipReason by the model
         entry_status=row["entry_status"],  # validated against EntryStatus by the model
         entry_price_live=_opt_float(row["entry_price_live"]),
         realized_open=float(row["realized_open"]),

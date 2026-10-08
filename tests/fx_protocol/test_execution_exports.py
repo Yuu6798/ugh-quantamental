@@ -78,6 +78,7 @@ _EXPECTED_EVALUATION_FIELDNAMES = (
     "outcome_id",
     "side",
     "size",
+    "skip_reason",
     "entry_status",
     "entry_price_live",
     "realized_open",
@@ -177,6 +178,7 @@ def _evaluation(book_id: BookId, **overrides: object) -> ExecutionEvaluation:
         "outcome_id": _OUTCOME_ID,
         "side": 1,
         "size": 1.0,
+        "skip_reason": None,
         "entry_status": "live",
         "entry_price_live": 150.25,
         "realized_open": 150.1,
@@ -195,6 +197,7 @@ def _evaluation(book_id: BookId, **overrides: object) -> ExecutionEvaluation:
 _SKIPPED: dict[str, object] = {
     "side": 0,
     "size": 0.0,
+    "skip_reason": "no_consensus",
     "pnl_live_bp": 0.0,
     "pnl_bar_bp": 0.0,
     "cost_live_bp": 0.0,
@@ -209,7 +212,7 @@ def _evaluations() -> tuple[ExecutionEvaluation, ...]:
         _evaluation(BookId.ugh_x1, size=0.5),
         _evaluation(BookId.ugh_beta_unit),
         _evaluation(BookId.ugh_consensus, **_SKIPPED),
-        _evaluation(BookId.ugh_divergence, **_SKIPPED),
+        _evaluation(BookId.ugh_divergence, **{**_SKIPPED, "skip_reason": "agree_with_technical"}),
         _evaluation(BookId.bench_gpt_m3, side=-1, pnl_live_bp=-9.98, pnl_bar_bp=-19.99, hit=False),
         _evaluation(BookId.bench_long),
     )

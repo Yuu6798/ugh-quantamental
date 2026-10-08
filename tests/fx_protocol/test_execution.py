@@ -230,6 +230,7 @@ def _evaluation(**overrides: object) -> ExecutionEvaluation:
         outcome_id="oc_test_001",
         side=1,
         size=1.0,
+        skip_reason=None,
         entry_status="live",
         entry_price_live=150.0,
         realized_open=_UP_OPEN,
@@ -326,6 +327,7 @@ def test_evaluation_field_order_matches_spec() -> None:
         "outcome_id",
         "side",
         "size",
+        "skip_reason",
         "entry_status",
         "entry_price_live",
         "realized_open",
@@ -499,8 +501,26 @@ _NO_LIVE = dict(
     entry_status="live_unavailable", entry_price_live=None, pnl_live_bp=None, cost_live_bp=None
 )
 _SIDE_ZERO = dict(
-    side=0, size=0.0, pnl_live_bp=0.0, pnl_bar_bp=0.0, cost_live_bp=0.0, cost_bar_bp=0.0, hit=None
+    side=0,
+    size=0.0,
+    skip_reason="flat",
+    pnl_live_bp=0.0,
+    pnl_bar_bp=0.0,
+    cost_live_bp=0.0,
+    cost_bar_bp=0.0,
+    hit=None,
 )
+
+
+def test_evaluation_skip_reason_coupling() -> None:
+    with pytest.raises(ValidationError):
+        _evaluation(**{**_SIDE_ZERO, "skip_reason": None})
+    with pytest.raises(ValidationError):
+        _evaluation(skip_reason="flat")
+    with pytest.raises(ValidationError):
+        _evaluation(**{**_SIDE_ZERO, "skip_reason": "not_a_reason"})
+    assert _evaluation(**_SIDE_ZERO).skip_reason == "flat"
+    assert _evaluation().skip_reason is None
 
 
 def test_evaluation_pnl_live_coupling() -> None:
@@ -993,6 +1013,8 @@ def test_evaluation_side_zero_rows() -> None:
     skipped_live = _eval_by_book(_evaluate(decisions_live))[BookId.ugh_divergence]
     skipped_no_live = _eval_by_book(_evaluate(decisions_no_live))[BookId.ugh_divergence]
     assert (skipped_live.side, skipped_live.size) == (0, 0.0)
+    assert skipped_live.skip_reason == "agree_with_technical"
+    assert skipped_no_live.skip_reason == "agree_with_technical"
     assert skipped_live.entry_price_live == 150.0
     assert skipped_live.pnl_live_bp == 0.0
     assert skipped_live.pnl_bar_bp == 0.0

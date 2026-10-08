@@ -394,6 +394,7 @@ def _evaluate_one(
         outcome_id=outcome_id,
         side=side,
         size=decision.size,
+        skip_reason=decision.skip_reason,
         entry_status=decision.entry_status,
         entry_price_live=entry_price_live,
         realized_open=realized_open,
