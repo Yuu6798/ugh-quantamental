@@ -14,8 +14,9 @@
 - [ ] `src/ugh_quantamental/fx_protocol/execution_reporting.py` (new) に
       `collect_execution_evaluation_rows(history_dir) -> CollectedExecutionEvaluations` (new、frozen
       dataclass または Pydantic model: `rows: tuple[dict[str, str], ...]` と
-      `incomplete_batches: tuple[IncompleteExecutionBatch, ...]` (後者は `forecast_batch_id` と
-      `missing_books: tuple[str, ...]`) と `missing_evaluations: tuple[MissingExecutionEvaluation, ...]`
+      `incomplete_batches: tuple[IncompleteExecutionBatch, ...]` (後者は `forecast_batch_id`,
+      `execution_version` (存在する行から取る), `missing_books: tuple[str, ...]`) と
+      `missing_evaluations: tuple[MissingExecutionEvaluation, ...]`
       (`forecast_batch_id`, `execution_version`, `as_of_jst`, `window_end_jst`)) があり、
       `history/*/*/execution_evaluation.csv` を読んで `(forecast_batch_id, book_id)` で重複排除し、
       **6 book が揃わない `forecast_batch_id` は丸ごと除外**して `incomplete_batches`
@@ -80,9 +81,10 @@
       で**無い**場合は `entry_status = backfill_bar` の判断 6 行と評価 6 行を生成する
       (`build_execution_decisions` に `forecast_directions` の対応と `entry_status="backfill_bar"`,
       `live_entry=None` を渡す。`ForecastRecord` / `OutcomeRecord` は復元しない)。`execution.csv` が
-      完全で `execution_evaluation.csv` が完全でない batch (前回の中断) は、既存の判断 6 行を
-      `load_execution_decisions_csv` で読んで評価 6 行だけを生成する (判断は書き直さない)。揃わない
-      batch は理由別に件数を出して skip。完全な既存ファイルは一切上書きしない。`--dry-run` で
+      完全で `execution_evaluation.csv` が完全でない batch (前回の中断、または日次 run の評価失敗) は、
+      既存の判断 6 行を `load_execution_decisions_csv` で読んで評価 6 行だけを生成する (判断は
+      書き直さない)。**この修復経路に必要なのは判断ファイルと (b) の outcome だけ**で、(a) forecast と
+      (c) snapshot は判断を再構成するときにしか要求しない。揃わない batch は理由別に件数を出して skip。完全な既存ファイルは一切上書きしない。`--dry-run` で
       件数だけ出す。`fx-daily-data` には push しない (ローカル checkout に書き、push は人が行う)。
 - [ ] `docs/specs/fx_execution_layer_v1.md` §8〜§10 を実装に合わせて更新 (Status は
       `Implemented (v1)` のまま、集計の列定義を追記)。`.claude/skills/fx-weekly-report/SKILL.md` §4 に
@@ -130,7 +132,8 @@
     t 1.99 と 2.00、DD 10.00% (合格) と 10.01% (不合格)、ベンチマーク同額)、
     期間窓を狭めてもコホートが変わらないこと、`execution_version` が違う行と backfill 行が
     コホートに入らないこと、6 book 未満の batch が集計とコホートの両方から除外され、かつその存在で
-    `gate.passed` が False (`"incomplete_batches" in blocked_reasons`) になること、完全な `execution.csv`
+    `gate.passed` が False (`"incomplete_batches" in blocked_reasons`) になること、旧 version
+    (`execution_version != EXECUTION_VERSION`) の不完全 batch は現行版のゲートを block しないこと、完全な `execution.csv`
     だけがあり評価ファイルが無い (または header のみの) 過去窓で `missing_evaluations` に入り
     `"missing_evaluations" in blocked_reasons` になること、`window_end_jst` が `generated_at_utc` より
     後の pending 窓はそこに入らないこと、`execution_version` が 2 つ混在する fixture で層が 2 つに

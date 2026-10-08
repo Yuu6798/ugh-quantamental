@@ -215,7 +215,9 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
   条件の現在値は出すがゲートは **blocked** (`passed = False`、`blocked_reasons` に
   `incomplete_batches` / `missing_evaluations`)。欠けた archive を黙って短くした上で合格にはしない
   (昇格証拠は欠落・部分 batch で fail する、`AGENTS.md` §5)。修復は Step 4c の再スキャンか §10 の
-  backfill で行い、修復できない欠落は data 側の問題として扱う (ゲートは外さない)。
+  backfill で行い、修復できない欠落は data 側の問題として扱う (ゲートは外さない)。block の判定は
+  現行 version の batch に限る (`incomplete_batches` / `missing_evaluations` は `execution_version` を
+  持ち、旧版の欠損は現行版のゲートを block しない)。
 - 不合格なら `x2` として設計し直し、観測を 1 からやり直す (期間を継ぎ足さない)。
 - ゲート通過後も実弾の判断は人が行う (本 spec の対象外)。
 
