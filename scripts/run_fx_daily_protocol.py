@@ -37,6 +37,17 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime
+from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
+
+if TYPE_CHECKING:
+    from ugh_quantamental.fx_protocol.automation_models import FxDailyAutomationResult
+
+_JST = ZoneInfo("Asia/Tokyo")
+
+#: Business days in the execution-layer weekly window (Mon-Fri, as in the weekly v2 report).
+_EXECUTION_WEEK_DAYS = 5
 
 
 def _env(key: str, default: str = "") -> str:
@@ -46,6 +57,105 @@ def _env(key: str, default: str = "") -> str:
 def _fail(msg: str) -> None:
     print(f"[ERROR] {msg}", file=sys.stderr)
     sys.exit(1)
+
+
+def _as_of_jst(yyyymmdd: str) -> datetime:
+    """08:00 JST on a ``YYYYMMDD`` day: the ``as_of_jst`` of that day's forecast batch."""
+    return datetime.strptime(yyyymmdd, "%Y%m%d").replace(hour=8, tzinfo=_JST)
+
+
+def _jst_date_str(moment: datetime) -> str:
+    """``YYYYMMDD`` of *moment* on the JST calendar (naive values are taken as JST)."""
+    jst = moment.astimezone(_JST) if moment.tzinfo is not None else moment.replace(tzinfo=_JST)
+    return jst.strftime("%Y%m%d")
+
+
+def generate_execution_weekly_artifacts(
+    csv_output_dir: str,
+    report_date_jst: datetime,
+    generated_at_utc: datetime,
+) -> dict[str, str]:
+    """Write the execution-layer weekly artifact for the week before *report_date_jst*.
+
+    Spec ``fx_execution_layer_v1.md`` §8.  The window is the one the weekly v2
+    report uses, ``resolve_business_day_window(report_date_jst, 5)``: the five
+    Mon-Fri days before the report date, so the Friday block's
+    ``report_date = as_of_jst + 1 day`` (a Saturday) covers Mon-Fri.  The
+    artifact label is the report date's ``YYYYMMDD``, the directory name the
+    weekly v2 artifact uses.  Writes
+    ``analytics/execution/weekly/<YYYYMMDD>/execution_weekly.{md,csv,json}``
+    and then rewrites ``latest/execution_summary.json`` from the whole-history
+    report, so the latest summary never depends on the scope that ran last.
+
+    Reads ``history/`` only.  Raises on any failure; the caller decides whether
+    that is fatal.  Returns the artifact paths keyed as
+    ``export_execution_report_artifacts`` returns them, plus
+    ``execution_summary_json``.
+    """
+    from ugh_quantamental.fx_protocol.execution_reporting import (
+        export_execution_latest_summary,
+        export_execution_report_artifacts,
+        run_execution_report,
+    )
+    from ugh_quantamental.fx_protocol.report_window import resolve_business_day_window
+
+    week_start, week_end = resolve_business_day_window(report_date_jst, _EXECUTION_WEEK_DAYS)
+    weekly = run_execution_report(
+        csv_output_dir,
+        start_as_of_jst=_as_of_jst(week_start),
+        end_as_of_jst=_as_of_jst(week_end),
+        generated_at_utc=generated_at_utc,
+    )
+    paths = export_execution_report_artifacts(
+        weekly, csv_output_dir, "weekly", _jst_date_str(report_date_jst)
+    )
+    cumulative = run_execution_report(
+        csv_output_dir,
+        start_as_of_jst=None,
+        end_as_of_jst=None,
+        generated_at_utc=generated_at_utc,
+    )
+    paths["execution_summary_json"] = export_execution_latest_summary(cumulative, csv_output_dir)
+    return paths
+
+
+def _run_execution_weekly_non_fatal(
+    csv_output_dir: str,
+    report_date_jst: datetime,
+    generated_at_utc: datetime,
+) -> dict[str, str] | None:
+    """Friday-block wrapper: a failure prints ``[WARN] ... (non-fatal)`` and returns ``None``.
+
+    The execution artifact is additive to the weekly v2 report and must never
+    take it (or the run) down; the Monday analysis pipeline regenerates it.
+    """
+    print("--- Execution report (weekly) ---")
+    try:
+        paths = generate_execution_weekly_artifacts(
+            csv_output_dir, report_date_jst, generated_at_utc
+        )
+    except Exception as exc:
+        print(f"[WARN] Execution report generation failed (non-fatal): {exc}")
+        return None
+    print(f"  execution_md   : {paths['execution_weekly_md']}")
+    print(f"  latest_summary : {paths['execution_summary_json']}")
+    print("[OK] Execution weekly report generated.")
+    return paths
+
+
+def _print_execution_summary(automation_result: FxDailyAutomationResult) -> None:
+    """Print the execution-layer counters of one run, one line each (spec §7 result fields).
+
+    Zeros are normal on a retry (decisions already archived) and on a closed
+    window; on a run that should have recorded decisions they are the only
+    trace, besides the warning log, of a non-fatal execution-layer failure.
+    """
+    decisions = automation_result.execution_decisions_recorded
+    evaluations = automation_result.execution_evaluations_recorded
+    windows = len(automation_result.execution_evaluation_windows)
+    print(f"  execution_decisions_recorded   : {decisions}")
+    print(f"  execution_evaluations_recorded : {evaluations}")
+    print(f"  execution_evaluation_windows   : {windows}")
 
 
 def main() -> None:
@@ -82,9 +192,7 @@ def main() -> None:
     try:
         outcome_catchup_days = int(outcome_catchup_days_raw)
     except ValueError:
-        _fail(
-            f"FX_OUTCOME_CATCHUP_DAYS must be an integer, got {outcome_catchup_days_raw!r}."
-        )
+        _fail(f"FX_OUTCOME_CATCHUP_DAYS must be an integer, got {outcome_catchup_days_raw!r}.")
         return
     if outcome_catchup_days < 0:
         _fail("FX_OUTCOME_CATCHUP_DAYS must be >= 0.")
@@ -157,9 +265,13 @@ def main() -> None:
 
     result_alembic = subprocess.run(
         [
-            sys.executable, "-m", "alembic",
-            "-x", f"sqlalchemy.url={db_url}",
-            "upgrade", "head",
+            sys.executable,
+            "-m",
+            "alembic",
+            "-x",
+            f"sqlalchemy.url={db_url}",
+            "upgrade",
+            "head",
         ],
         capture_output=True,
         text=True,
@@ -232,6 +344,7 @@ def main() -> None:
     print(f"  outcome_id         : {automation_result.outcome_id}")
     print(f"  outcome_recorded   : {automation_result.outcome_recorded}")
     print(f"  evaluation_count   : {automation_result.evaluation_count}")
+    _print_execution_summary(automation_result)
     if automation_result.forecast_csv_path:
         print(f"  forecast_csv       : {automation_result.forecast_csv_path}")
     if automation_result.outcome_csv_path:
@@ -293,7 +406,10 @@ def main() -> None:
 
             # report_date = Saturday so _resolve_week_window covers Mon–Fri.
             _report_date = (automation_result.as_of_jst + timedelta(days=1)).replace(
-                hour=8, minute=0, second=0, microsecond=0,
+                hour=8,
+                minute=0,
+                second=0,
+                microsecond=0,
             )
             weekly_result = run_weekly_report_v2(
                 csv_output_dir,
@@ -308,6 +424,13 @@ def main() -> None:
             print(f"  week_window    : {_ww.get('start', '?')} - {_ww.get('end', '?')}")
             print(f"  observations   : {_obs}")
             print("[OK] Weekly report generated.")
+
+            # Execution layer (fx_execution_layer_v1.md §8): same week window and
+            # date label as the weekly v2 artifact above, in its own non-fatal
+            # guard so it can neither mask nor take down that report.
+            _run_execution_weekly_non_fatal(
+                csv_output_dir, _report_date, datetime.now(timezone.utc)
+            )
         except Exception as exc:
             print(f"[WARN] Weekly report generation failed (non-fatal): {exc}")
 

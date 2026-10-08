@@ -9,6 +9,10 @@ Modes:
     weekly  — Generate weekly report only (default on non-monthly runs)
     monthly — Generate all weekly reports for the month → monthly review → governance
 
+Both modes then write the execution-layer artifact for the same window
+(``analytics/execution/<weekly|monthly>/...`` and ``latest/execution_summary.json``,
+``docs/specs/fx_execution_layer_v1.md`` §8); that step is non-fatal.
+
 Environment variables:
     FX_CSV_OUTPUT_DIR       Root CSV output directory (default: ./data/csv)
     FX_PIPELINE_MODE        Pipeline mode: "weekly" or "monthly" (default: auto-detect)
@@ -24,6 +28,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -39,6 +44,130 @@ def _fail(msg: str) -> None:
     sys.exit(1)
 
 
+#: Execution-layer artifact scopes (``analytics/execution/<scope>/``), spec §8.
+EXECUTION_REPORT_SCOPES: tuple[str, ...] = ("weekly", "monthly")
+
+
+@dataclass(frozen=True)
+class ExecutionReportStepResult:
+    """What one execution-layer report step wrote: its window, label and artifact paths.
+
+    ``window_start`` / ``window_end`` are ``YYYYMMDD``; ``paths`` is keyed like
+    ``export_execution_report_artifacts`` returns them plus
+    ``execution_summary_json`` (the refreshed ``latest/execution_summary.json``).
+    """
+
+    scope: str
+    label: str
+    window_start: str
+    window_end: str
+    paths: dict[str, str]
+
+
+def _as_of_jst(date_str: str) -> datetime:
+    """08:00 JST on a ``YYYYMMDD`` day: the ``as_of_jst`` of that day's forecast batch."""
+    return datetime.strptime(date_str, "%Y%m%d").replace(hour=8, tzinfo=_JST)
+
+
+def resolve_execution_report_window(
+    scope: str,
+    report_date_jst: datetime,
+    business_day_count: int,
+) -> tuple[str, str, str]:
+    """Return ``(start_yyyymmdd, end_yyyymmdd, label)`` of the execution artifact for *scope*.
+
+    The window is resolved exactly like the weekly v2 / monthly review steps:
+    ``resolve_business_day_window(report_date_jst, business_day_count)``, the
+    *business_day_count* Mon-Fri days before the report date.  The label is
+    the report date's ``YYYYMMDD`` for ``weekly`` (the weekly v2 artifact's
+    directory name) and the ``YYYYMM`` of the window's last day for
+    ``monthly`` (the month the data belongs to, not the month the pipeline ran
+    in: a review date of April 1st labels March).
+    """
+    if scope not in EXECUTION_REPORT_SCOPES:
+        raise ValueError(
+            f"execution report scope must be one of {EXECUTION_REPORT_SCOPES}, got {scope!r}"
+        )
+    from ugh_quantamental.fx_protocol.report_window import resolve_business_day_window
+
+    start, end = resolve_business_day_window(report_date_jst, business_day_count)
+    if scope == "weekly":
+        if report_date_jst.tzinfo is not None:
+            label = report_date_jst.astimezone(_JST).strftime("%Y%m%d")
+        else:
+            label = report_date_jst.strftime("%Y%m%d")
+    else:
+        label = end[:6]
+    return start, end, label
+
+
+def run_execution_report_step(
+    csv_output_dir: str,
+    scope: str,
+    report_date_jst: datetime,
+    business_day_count: int,
+    generated_at_utc: datetime,
+) -> ExecutionReportStepResult:
+    """Write the execution-layer artifact for *scope* and refresh ``latest/execution_summary.json``.
+
+    Spec ``fx_execution_layer_v1.md`` §8: writes
+    ``analytics/execution/<scope>/<label>/execution_<scope>.{md,csv,json}`` for
+    the window of :func:`resolve_execution_report_window`, then the
+    whole-history report into ``latest/execution_summary.json`` so the latest
+    summary never depends on the scope that ran last.  Reads ``history/``
+    only.  Raises on any failure (see ``_run_execution_report_step_non_fatal``).
+    """
+    from ugh_quantamental.fx_protocol.execution_reporting import (
+        export_execution_latest_summary,
+        export_execution_report_artifacts,
+        run_execution_report,
+    )
+
+    start, end, label = resolve_execution_report_window(scope, report_date_jst, business_day_count)
+    scoped = run_execution_report(
+        csv_output_dir,
+        start_as_of_jst=_as_of_jst(start),
+        end_as_of_jst=_as_of_jst(end),
+        generated_at_utc=generated_at_utc,
+    )
+    paths = export_execution_report_artifacts(scoped, csv_output_dir, scope, label)
+    cumulative = run_execution_report(
+        csv_output_dir,
+        start_as_of_jst=None,
+        end_as_of_jst=None,
+        generated_at_utc=generated_at_utc,
+    )
+    paths["execution_summary_json"] = export_execution_latest_summary(cumulative, csv_output_dir)
+    return ExecutionReportStepResult(scope, label, start, end, paths)
+
+
+def _run_execution_report_step_non_fatal(
+    csv_output_dir: str,
+    scope: str,
+    report_date_jst: datetime,
+    business_day_count: int,
+    generated_at_utc: datetime,
+) -> ExecutionReportStepResult | None:
+    """Run :func:`run_execution_report_step`; a failure prints ``[WARN] ... (non-fatal)``.
+
+    The execution artifact is additive to the weekly / monthly pipeline and
+    must never fail it.  Returns ``None`` on failure.
+    """
+    print(f"\n--- Execution report ({scope}) ---")
+    try:
+        result = run_execution_report_step(
+            csv_output_dir, scope, report_date_jst, business_day_count, generated_at_utc
+        )
+    except Exception as exc:
+        print(f"[WARN] Execution {scope} report generation failed (non-fatal): {exc}")
+        return None
+    print(f"  window             : {result.window_start} - {result.window_end}")
+    print(f"  execution_md       : {result.paths[f'execution_{scope}_md']}")
+    print(f"  latest_summary     : {result.paths['execution_summary_json']}")
+    print(f"[OK] Execution {scope} report generated.")
+    return result
+
+
 def _resolve_weekly_dates_in_month(
     review_date_jst: datetime,
     business_day_count: int,
@@ -51,9 +180,9 @@ def _resolve_weekly_dates_in_month(
     """
     # Walk backwards from review_date to find the month window
     dates: list[datetime] = []
-    candidate = review_date_jst.replace(
-        hour=0, minute=0, second=0, microsecond=0
-    ) - timedelta(days=1)
+    candidate = review_date_jst.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
+        days=1
+    )
     while len(dates) < business_day_count:
         if candidate.isoweekday() in range(1, 6):
             dates.append(candidate)
@@ -116,9 +245,7 @@ def run_monthly_pipeline(
 
     # Step 1: Generate weekly reports for each week in the month
     print("\n=== Step 1: Weekly Reports ===")
-    weekly_report_dates = _resolve_weekly_dates_in_month(
-        review_date_jst, month_days, week_days
-    )
+    weekly_report_dates = _resolve_weekly_dates_in_month(review_date_jst, month_days, week_days)
     print(f"  Generating {len(weekly_report_dates)} weekly reports...")
 
     weekly_failures: list[str] = []
@@ -274,9 +401,7 @@ def main() -> None:
             _fail(f"FX_REPORT_DATE must be YYYYMMDD, got: {report_date_str!r}")
             return
     else:
-        report_date_jst = datetime.now(_JST).replace(
-            hour=8, minute=0, second=0, microsecond=0
-        )
+        report_date_jst = datetime.now(_JST).replace(hour=8, minute=0, second=0, microsecond=0)
 
     generated_at_utc = datetime.now(timezone.utc)
 
@@ -320,6 +445,9 @@ def main() -> None:
         print("\n=== Weekly Pipeline Summary ===")
         print(f"  observations       : {report.get('observation_count', 0)}")
         print(f"  coverage_rate      : {cov.get('annotation_coverage_rate', 0):.1%}")
+        _run_execution_report_step_non_fatal(
+            csv_output_dir, "weekly", report_date_jst, week_days, generated_at_utc
+        )
         print("\n[OK] Weekly pipeline completed successfully.")
 
     elif pipeline_mode == "monthly":
@@ -338,6 +466,9 @@ def main() -> None:
             _fail(f"Monthly pipeline failed: {exc}")
             return
 
+        _run_execution_report_step_non_fatal(
+            csv_output_dir, "monthly", report_date_jst, month_days, generated_at_utc
+        )
         print("\n[OK] Monthly pipeline completed successfully.")
 
 
