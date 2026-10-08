@@ -40,6 +40,7 @@ __all__ = [
     "EXECUTION_INITIAL_EQUITY_JPY",
     "EXECUTION_ROUND_TRIP_COST_JPY_PER_USD",
     "EXECUTION_ACTIVATION_AS_OF",
+    "EXECUTION_EXCLUDED_AS_OF",
     "EXECUTION_VERSION",
     "MIN_COMPLETED_CLOSES",
     "UGH_X1_SHOCK_MULTIPLIER",
@@ -61,6 +62,12 @@ EXECUTION_VERSION: str = "x1"
 #: first successfully published decision file, so an initial publish failure is
 #: not silently lost.  Update together with ``EXECUTION_VERSION`` on a bump.
 EXECUTION_ACTIVATION_AS_OF: date = date(2026, 10, 8)
+
+#: Protocol business days deliberately removed from the expected decision cohort
+#: (spec §9): a day on which no decision can ever be recorded or backfilled.
+#: Empty by default; an addition is a reviewed change that records its reason
+#: in spec §12.
+EXECUTION_EXCLUDED_AS_OF: frozenset[date] = frozenset()
 
 #: Starting equity of every book's equity curve (reporting layer, spec §5.2 / §8).
 EXECUTION_INITIAL_EQUITY_JPY: int = 3_000_000
