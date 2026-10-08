@@ -41,6 +41,10 @@ Per batch (spec §10):
   ``input_snapshot.json``; with all three, six decisions and six evaluations
   are written.  A batch missing any of them is skipped and counted by reason.
 
+An archived ``evaluation.csv`` / ``outcome.csv`` / ``forecast.csv`` that cannot be
+read at all (invalid UTF-8, a malformed quoted field, an I/O error) is logged
+with ``[WARN]`` and contributes no rows, so the batches that depend on it are
+skipped by reason while the rest of the pass continues.
 A batch whose rows cannot be used (truncated cells, evaluation rows pointing at
 two outcomes, an outcome window that does not match the batch, ...) is skipped
 with a ``[WARN]`` line and counted (``unusable_outcome`` / ``unusable_inputs``);
@@ -309,35 +313,51 @@ def _parse_price(value: object) -> float | None:
     return price if math.isfinite(price) and price > 0 else None
 
 
-def build_indexes(history_dir: str) -> _Indexes:
+def _read_csv_rows_or_warn(path: str, history_dir: str, log: Log) -> list[dict[str, str]]:
+    """``_read_csv_rows`` at the file boundary of the archive-wide scans.
+
+    A file that cannot be read (invalid UTF-8, a malformed quoted field, an I/O
+    error) is logged and contributes no rows, so one bad file costs the batches
+    that depend on it (``missing_outcome`` / ``missing_forecast``), not the pass.
+    """
+    try:
+        return _read_csv_rows(path)
+    except (OSError, ValueError, csv.Error) as exc:
+        rel = os.path.relpath(path, os.path.dirname(history_dir))
+        log(f"[WARN] {rel}: unreadable ({exc}); its rows are ignored")
+        return []
+
+
+def build_indexes(history_dir: str, log: Log = print) -> _Indexes:
     """Pass 1: index every ``evaluation.csv`` row by ``forecast_id`` and every ``outcome.csv``
     row by ``outcome_id`` across all batch directories (later directories win, as in the
-    collectors).
+    collectors).  An unreadable file is logged through *log* and skipped.
     """
     evaluations: dict[str, dict[str, str]] = {}
     outcomes: dict[str, dict[str, str]] = {}
     for _date_dir, _batch_dir, batch_path in _batch_dirs(history_dir):
         evaluation_csv = os.path.join(batch_path, "evaluation.csv")
         if os.path.isfile(evaluation_csv):
-            for row in _read_csv_rows(evaluation_csv):
+            for row in _read_csv_rows_or_warn(evaluation_csv, history_dir, log):
                 forecast_id = row.get("forecast_id", "")
                 if forecast_id:
                     evaluations[forecast_id] = row
         outcome_csv = os.path.join(batch_path, "outcome.csv")
         if os.path.isfile(outcome_csv):
-            for row in _read_csv_rows(outcome_csv):
+            for row in _read_csv_rows_or_warn(outcome_csv, history_dir, log):
                 outcome_id = row.get("outcome_id", "")
                 if outcome_id:
                     outcomes[outcome_id] = row
     return _Indexes(evaluations_by_forecast_id=evaluations, outcomes_by_outcome_id=outcomes)
 
 
-def collect_forecast_batches(history_dir: str) -> dict[str, _ForecastBatch]:
+def collect_forecast_batches(history_dir: str, log: Log = print) -> dict[str, _ForecastBatch]:
     """Pass 2: group every ``forecast.csv`` row by ``forecast_batch_id``, deduplicated by
     ``forecast_id`` so a catch-up copy of ``forecast.csv`` never becomes a second batch.
 
     A batch's ``as_of_jst`` / ``window_end_jst`` come from its own rows; rows
     whose timestamps do not parse cannot be placed in the archive and are ignored.
+    An unreadable ``forecast.csv`` is logged through *log* and skipped.
     """
     batches: dict[str, _ForecastBatch] = {}
     seen_forecast_ids: set[str] = set()
@@ -345,7 +365,7 @@ def collect_forecast_batches(history_dir: str) -> dict[str, _ForecastBatch]:
         forecast_csv = os.path.join(batch_path, "forecast.csv")
         if not os.path.isfile(forecast_csv):
             continue
-        for row in _read_csv_rows(forecast_csv):
+        for row in _read_csv_rows_or_warn(forecast_csv, history_dir, log):
             forecast_id = row.get("forecast_id", "")
             batch_id = row.get("forecast_batch_id", "")
             if not forecast_id or not batch_id or forecast_id in seen_forecast_ids:
@@ -390,7 +410,8 @@ def collect_units(history_dir: str, batches: dict[str, _ForecastBatch]) -> list[
 
 def _forecast_directions(batch: _ForecastBatch) -> dict[StrategyKind, ForecastDirection] | None:
     """The batch's ``strategy_kind -> forecast_direction`` map, or ``None`` when the batch is
-    not the complete daily set (``EXPECTED_DAILY_BATCH_SIZE`` rows holding every required kind).
+    not the complete daily set (``EXPECTED_DAILY_BATCH_SIZE`` rows of distinct kinds holding
+    every required kind; a duplicated kind means another kind is absent).
     """
     if len(batch.rows) != EXPECTED_DAILY_BATCH_SIZE:
         return None
@@ -402,6 +423,8 @@ def _forecast_directions(batch: _ForecastBatch) -> dict[StrategyKind, ForecastDi
         except ValueError:
             return None
         directions[kind] = direction
+    if len(directions) != EXPECTED_DAILY_BATCH_SIZE:
+        return None
     if any(kind not in directions for kind in _REQUIRED_STRATEGY_KINDS):
         return None
     return directions
@@ -706,8 +729,8 @@ def run_backfill(csv_output_dir: str, *, dry_run: bool, log: Log = print) -> Bac
     if not os.path.isdir(history_dir):
         raise FileNotFoundError(f"no history/ archive under {csv_output_dir}")
 
-    indexes = build_indexes(history_dir)
-    batches = collect_forecast_batches(history_dir)
+    indexes = build_indexes(history_dir, log=log)
+    batches = collect_forecast_batches(history_dir, log=log)
     units = collect_units(history_dir, batches)
 
     counts: Counter[str] = Counter()

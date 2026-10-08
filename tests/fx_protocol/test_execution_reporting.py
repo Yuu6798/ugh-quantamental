@@ -1273,6 +1273,41 @@ class TestArchiveRobustness:
         gate = _report(root, generated_at)["gate"]
         assert gate["blocked_reasons"] == ("missing_evaluations",)
 
+    @pytest.mark.parametrize("field", ["execution_version", "as_of_jst"])
+    def test_rows_disagreeing_on_batch_metadata_make_the_batch_incomplete(
+        self, tmp_path, monkeypatch, field: str
+    ) -> None:
+        """Six valid rows that disagree on the batch metadata (a version boundary, a partial
+        copy) are not reduced to the first row's values: the batch is incomplete and blocks."""
+        root = str(tmp_path / "csv")
+        days = _business_days(date(2026, 3, 2), date(2026, 3, 3))
+        _activate(monkeypatch, days[0])
+        _write_day(root, days[0], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
+        batch_dir = _write_day(root, days[1], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
+        path = os.path.join(batch_dir, "execution_evaluation.csv")
+        with open(path, newline="", encoding="utf-8") as fh:
+            reader = csv.DictReader(fh)
+            fieldnames = list(reader.fieldnames or ())
+            rows = list(reader)
+        rows[-1][field] = "x0" if field == "execution_version" else _as_of(days[0]).isoformat()
+        with open(path, "w", newline="", encoding="utf-8") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        generated_at = _after_close(days[1])
+        collected = _collect(root, generated_at)
+
+        assert [m.forecast_batch_id for m in collected.incomplete_batches] == [_batch_id(days[1])]
+        incomplete = collected.incomplete_batches[0]
+        assert incomplete.missing_books == ()
+        assert incomplete.inconsistent_fields == (field,)
+        assert incomplete.execution_version == "x1"  # routed by the current version
+        assert incomplete.as_of_jst == _as_of(days[1])  # routed by the latest day
+        assert {r["forecast_batch_id"] for r in collected.rows} == {_batch_id(days[0])}
+        gate = _report(root, generated_at)["gate"]
+        assert "incomplete_batches" in gate["blocked_reasons"]
+        assert gate["cohort"]["trade_count"] == 1  # the mixed batch's rows never reach the gate
+
     def test_naive_generated_at_is_treated_as_utc(
         self, aggregation_root: tuple[str, datetime]
     ) -> None:
@@ -1444,12 +1479,6 @@ class TestExport:
             export_execution_latest_summary(weekly, root)
         assert not os.path.exists(os.path.join(root, "latest", "execution_summary.json"))
 
-    def test_invalid_scope_rejected(self, aggregation_root: tuple[str, datetime]) -> None:
-        root, generated_at = aggregation_root
-        report = _report(root, generated_at)
-        with pytest.raises(ValueError, match="scope"):
-            export_execution_report_artifacts(report, root, "weekly/../x", "20260309")
-
     @pytest.mark.parametrize("date_str", ["20260309", "202603"])
     def test_valid_date_str_accepted(
         self, aggregation_root: tuple[str, datetime], date_str: str
@@ -1471,6 +1500,16 @@ class TestExport:
         report = _report(root, generated_at)
         with pytest.raises(ValueError, match="date_str"):
             export_execution_report_artifacts(report, root, "weekly", date_str)
+        assert not os.path.exists(os.path.join(root, "analytics"))  # nothing written anywhere
+
+    @pytest.mark.parametrize("scope", ["..", "", "daily", "weekly/x", "weekly/../x", "Weekly"])
+    def test_invalid_scope_rejected(
+        self, aggregation_root: tuple[str, datetime], scope: str
+    ) -> None:
+        root, generated_at = aggregation_root
+        report = _report(root, generated_at)
+        with pytest.raises(ValueError, match="scope"):
+            export_execution_report_artifacts(report, root, scope, "20260309")
         assert not os.path.exists(os.path.join(root, "analytics"))  # nothing written anywhere
 
     def test_two_strata_render_two_book_tables(self, tmp_path, monkeypatch) -> None:

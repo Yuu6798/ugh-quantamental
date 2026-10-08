@@ -121,8 +121,12 @@ _FORECAST_FILENAME: str = "forecast.csv"
 _DIR_DATE_FORMAT: str = "%Y%m%d"
 _BENCHMARK_BOOKS: tuple[BookId, ...] = (BookId.bench_gpt_m3, BookId.bench_long)
 _EXPECTED_BOOK_SET: frozenset[BookId] = frozenset(EXECUTION_BOOK_ORDER)
+#: Artifact scopes ``export_execution_report_artifacts`` accepts (``analytics/execution/<scope>/``).
+EXECUTION_REPORT_SCOPES: tuple[str, ...] = ("weekly", "monthly")
 #: ``date_str`` of an artifact directory: ``YYYYMMDD`` (weekly) or ``YYYYMM`` (monthly).
 _DATE_STR_PATTERN: re.Pattern[str] = re.compile(r"\d{6}|\d{8}")
+#: Row fields the six rows of one evaluation batch must agree on.
+_BATCH_METADATA_FIELDS: tuple[str, ...] = ("execution_version", "as_of_jst")
 #: Decimal places the gate compares at: float noise from the equity fold cannot flip an exact
 #: boundary case (a 10.00% drawdown, t = 2.00) while 10.01% / 1.99 keep their verdict.
 _GATE_DECIMALS: int = 9
@@ -134,7 +138,13 @@ _GATE_DECIMALS: int = 9
 
 
 class IncompleteExecutionBatch(BaseModel):
-    """A ``forecast_batch_id`` whose evaluation rows do not cover all six books (spec §8)."""
+    """A ``forecast_batch_id`` whose evaluation rows are not one usable six-book batch (spec §8).
+
+    Either books are missing (``missing_books``) or the rows disagree on the
+    batch metadata every row must share (``inconsistent_fields`` names
+    ``execution_version`` / ``as_of_jst``): a version-boundary or partially
+    copied batch is not silently reduced to its first row's metadata.
+    """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -142,6 +152,7 @@ class IncompleteExecutionBatch(BaseModel):
     execution_version: str
     as_of_jst: datetime
     missing_books: tuple[str, ...]
+    inconsistent_fields: tuple[str, ...] = ()
 
     @field_validator("as_of_jst")
     @classmethod
@@ -327,6 +338,16 @@ def _parse_dir_date(name: str) -> date | None:
 
 def _row_as_of_jst(row: dict[str, str]) -> datetime:
     return _to_jst(datetime.fromisoformat(row["as_of_jst"]))
+
+
+def _inconsistent_batch_fields(rows: Sequence[dict[str, str]]) -> tuple[str, ...]:
+    """The ``_BATCH_METADATA_FIELDS`` whose values differ across *rows* (one batch's rows)."""
+    inconsistent: list[str] = []
+    if len({row["execution_version"] for row in rows}) > 1:
+        inconsistent.append("execution_version")
+    if len({_row_as_of_jst(row) for row in rows}) > 1:
+        inconsistent.append("as_of_jst")
+    return tuple(inconsistent)
 
 
 def _read_raw_rows(path: str) -> list[dict[str, str]]:
@@ -518,20 +539,29 @@ def collect_execution_evaluation_rows(
     def _route(as_of: date | datetime, version: str | None) -> _InventoryBuilder:
         return blocking if is_gate_blocking_defect(as_of, version) else archive
 
-    # Six-book completeness per batch; complete ones also feed duplicate detection.
+    # Six-book completeness per batch (every row carrying the same batch metadata);
+    # complete ones also feed duplicate detection.
     complete_batches: dict[str, tuple[datetime, str]] = {}
     for batch_id, books in rows_by_batch.items():
-        first = next(iter(books.values()))
-        as_of = _row_as_of_jst(first)
-        version = first["execution_version"]
+        batch_rows = list(books.values())
+        as_of = _row_as_of_jst(batch_rows[0])
+        version = batch_rows[0]["execution_version"]
         missing = tuple(b.value for b in EXECUTION_BOOK_ORDER if b.value not in books)
-        if missing:
+        inconsistent = _inconsistent_batch_fields(batch_rows)
+        if inconsistent:
+            # Route a mixed batch by its latest day and by the current version whenever any
+            # row carries it, so a version-boundary batch blocks the current gate.
+            as_of = max(_row_as_of_jst(row) for row in batch_rows)
+            if any(row["execution_version"] == EXECUTION_VERSION for row in batch_rows):
+                version = EXECUTION_VERSION
+        if missing or inconsistent:
             _route(as_of, version).incomplete_batches.append(
                 IncompleteExecutionBatch(
                     forecast_batch_id=batch_id,
                     execution_version=version,
                     as_of_jst=as_of,
                     missing_books=missing,
+                    inconsistent_fields=inconsistent,
                 )
             )
         else:
@@ -1251,8 +1281,10 @@ def export_execution_report_artifacts(
     Returns a dict keyed ``execution_{scope}_md`` / ``_csv`` / ``_json`` with
     absolute paths.
     """
-    if not scope or os.sep in scope or "/" in scope:
-        raise ValueError(f"invalid execution report scope {scope!r}")
+    if scope not in EXECUTION_REPORT_SCOPES:
+        raise ValueError(
+            f"invalid execution report scope {scope!r}: expected one of {EXECUTION_REPORT_SCOPES}"
+        )
     if _DATE_STR_PATTERN.fullmatch(date_str) is None:
         raise ValueError(
             f"invalid execution report date_str {date_str!r}: expected YYYYMMDD or YYYYMM"
@@ -1307,6 +1339,7 @@ __all__ = [
     "GATE_MAX_DRAWDOWN",
     "GATE_MIN_CALENDAR_DAYS",
     "GATE_MIN_T_STAT",
+    "EXECUTION_REPORT_SCOPES",
     "GATE_MIN_TRADE_COUNT",
     "CollectedExecutionEvaluations",
     "ExecutionDefectInventory",

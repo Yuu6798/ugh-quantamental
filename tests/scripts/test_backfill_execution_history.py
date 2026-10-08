@@ -1092,3 +1092,47 @@ def test_required_strategy_kinds_match_the_builder() -> None:
 
 def test_backfill_entry_status_is_the_reserved_literal() -> None:
     assert backfill.BACKFILL_ENTRY_STATUS == "backfill_bar"
+
+
+def test_duplicate_strategy_rows_are_a_partial_forecast(tmp_path: Path) -> None:
+    """Seven rows with a duplicated kind are not the daily set even when every required kind
+    is present: the absent baseline makes it partial_forecast, nothing is backfilled."""
+    layout = _build_checkout(tmp_path)
+    required = set(backfill._REQUIRED_STRATEGY_KINDS)
+
+    def duplicate_a_required_kind(rows: list[dict[str, str]]) -> None:
+        spare = next(r for r in rows if StrategyKind(r["strategy_kind"]) not in required)
+        spare["strategy_kind"] = StrategyKind.ugh_v2_alpha.value
+
+    _edit_csv(_batch_dir(layout.csv_root, _D1) / "forecast.csv", duplicate_a_required_kind)
+
+    summary, _lines = _run(layout)
+
+    assert summary.partial_forecast == 2  # the built-in partial batch plus this one
+    assert summary.written_decisions_and_evaluations == 1  # the catch-up window only
+    assert not (_batch_dir(layout.csv_root, _D1) / "execution.csv").exists()
+    assert _counter_sum(summary) == summary.batches
+
+
+@pytest.mark.parametrize(
+    ("as_of", "filename"),
+    [(_D2, "evaluation.csv"), (_D2, "outcome.csv"), (_D1, "forecast.csv")],
+    ids=["evaluation", "outcome", "forecast"],
+)
+def test_unreadable_archive_csv_is_skipped_with_a_warning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], as_of: datetime, filename: str
+) -> None:
+    """An undecodable archive file costs only the batches that depend on it and the pass still
+    prints its summary (the "complete" window's evaluation and outcome live in the next day's
+    directory, its forecast in its own)."""
+    layout = _build_checkout(tmp_path)
+    (_batch_dir(layout.csv_root, as_of) / filename).write_bytes(b"\xff\xfe\x00\x80not,utf8\n")
+
+    backfill.main(["--fxdata-dir", str(layout.root)])
+
+    out = capsys.readouterr().out
+    assert "[OK] backfill_execution_history" in out
+    assert "written (decisions + evaluations): 1" in out  # the catch-up window only
+    warn_lines = [line for line in out.splitlines() if line.startswith("[WARN]")]
+    assert any(filename in line and "unreadable" in line for line in warn_lines)
+    assert not (_batch_dir(layout.csv_root, _D1) / "execution.csv").exists()
