@@ -59,7 +59,9 @@ run 実行時 (観測実績 18:00〜翌 03:00 JST) であり、**D 08:00 に約�
 持ち越しなし。従来の試算で使った「翌営業日足」方式は、live 価格が記録される v1 では廃止する
 (別仮説の検証になるため)。
 
-判断は、batch D が存在し、かつ `history/{D}/{batch}/execution.csv` が**未発行**の run が記録する。
+判断は、batch D が存在し、かつ `history/{D}/{batch}/execution.csv` が**完全な形で未発行**の run が
+記録する (完全 = 6 book それぞれ 1 行が検証付きで読める。header のみ・途中で切れたファイルは未発行と
+同じ扱いで置き換える。書き込みは一時ファイルから `os.replace` で原子的に行う)。
 通常は batch D を作成した run がこれに当たる。同日の 2 本目以降の retry は、ファイルがあれば
 live spot を取り直さず何もしない。前 run が判断の書き込みに失敗していた場合だけ、次の run が
 その時刻の live spot で記録して回復する (`entry_time_utc` が実際の判断時刻)。既存ファイルは
@@ -123,7 +125,9 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
 | `hit` | `side × (realized_close − realized_open) > 0`、`side == 0` なら空 |
 | `evaluated_at_utc` | 評価時刻 |
 
-live 系列のコスト控除後リターンは `pnl_live_bp − cost_live_bp`、bar 系列は `pnl_bar_bp − cost_bar_bp`
+行の `pnl_*_bp` / `cost_*_bp` は**単位サイズ** (size 1.0) の値で、capture など方向の価値の指標に使う。
+売買方針そのものの日次リターンは size を掛けた `size × (pnl_live_bp − cost_live_bp)` (live 系列) /
+`size × (pnl_bar_bp − cost_bar_bp)` (bar 系列) で、資産曲線・t 値・ゲートはこちらを使う
 (どちらも自分の entry 価格で正規化する)。金額 (円) は行に持たない。資産曲線は集計層 (§8) が行を
 時系列順に畳み込んで計算する
 (`position_usd = equity × size / entry`、`pnl_jpy = side × position_usd × (exit − entry) − abs(side) × position_usd × 0.01`、
@@ -149,7 +153,7 @@ live 系列のコスト控除後リターンは `pnl_live_bp − cost_live_bp`�
 | Step | 内容 |
 |---|---|
 | 3b (Step 3 の直後) | batch が存在し `history/{date}/{batch}/execution.csv` が無いとき: batch と `build_baseline_context(snapshot)` と snapshot から 6 件の `ExecutionDecision` を作る (純関数 `build_execution_decisions`)。live spot を取得して記録する。ファイルがあれば何もしない (§3) |
-| 4c (Step 4b の直後) | **独立した有界スキャン**: 直近 `outcome_catchup_days + 1` 営業日の各窓 D について、`history/{D}/{batch_D}/execution.csv` が存在し `execution_evaluation.csv` が無く、窓 D の outcome が DB にある (`make_outcome_id` で id を再計算して `load_fx_outcome_record`) なら、`ExecutionEvaluation` 6 件を作る (純関数 `evaluate_execution_decisions`)。Step 4 の直前窓と Step 4b の catch-up 窓はこのスキャンに含まれるので個別の配線は不要。評価の書き込みに失敗した窓は次 run のスキャンで再試行される |
+| 4c (Step 4b の直後) | **archive 全体の独立スキャン**: `history/*/*/execution.csv` のうち完全なもので、同 dir に完全な `execution_evaluation.csv` が無い batch を列挙し、その窓の outcome が DB にある (`make_outcome_id` で id を再計算して `load_fx_outcome_record`) ものだけ `ExecutionEvaluation` 6 件を作る (純関数 `evaluate_execution_decisions`)。outcome が無い窓 (当日の pending) は skip。候補は通常 0〜1 件なので全走査でも軽い。Step 4 の直前窓と Step 4b の catch-up 窓はこのスキャンに含まれるので個別の配線は不要。評価の書き込みに失敗した窓は、`outcome_catchup_days` の外に出ても次 run のスキャンで再試行される |
 | 5b / 6b | `execution.csv` / `execution_evaluation.csv` を `history/{date}/{batch}/` に書き、`latest/execution.csv` を更新する。既存の `execution.csv` は上書きしない (§3) |
 
 `FxDailyAutomationConfig` に `run_execution_layer: bool = True` (new) を追加。
@@ -166,8 +170,9 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
 book ごとに次を出す:
 
 - 判断数、取引数、見送り内訳、live 取得率
-- 方向的中率 (取引日)、capture bp (`Σ side × realized bp`、単位サイズ)、signed bp の平均・標準偏差・t 値
-  (live 系列 = `pnl_live_bp − cost_live_bp`、bar 系列 = `pnl_bar_bp − cost_bar_bp` を別々に)
+- 方向的中率 (取引日)、capture bp (`Σ side × realized bp`、単位サイズ)、size 加重の日次リターン
+  (live 系列 = `size × (pnl_live_bp − cost_live_bp)`、bar 系列 = `size × (pnl_bar_bp − cost_bar_bp)`) の
+  平均・標準偏差・t 値を別々に
 - 損益 (円、live 系列と bar 系列)、最終資産、最大 DD、PF、コスト合計
 - ベンチマーク差: `ugh_x1` と `bench_gpt_m3` / `bench_long` の損益差と capture 差
 - 合格ゲート進捗 (§9)。ゲートの母集団は週次・月次の期間窓とは独立で、history 全体のうち
@@ -187,7 +192,7 @@ book ごとに次を出す:
 - 合格ゲート (`ugh_x1` を実運用候補に進める条件、すべて live 系列。母集団は現行 `execution_version`
   の累積コホートで、版を bump したらコホートもゼロから始まる):
   1. 取引 100 回以上かつ観測 6 か月以上
-  2. コスト控除後の live signed bp (`pnl_live_bp − cost_live_bp`) の t 値 ≥ 2.0
+  2. コスト控除後・size 加重の live 日次リターン (`size × (pnl_live_bp − cost_live_bp)`) の t 値 ≥ 2.0
   3. 最大 DD ≤ 初期資産の 10%
   4. 同期間の `bench_gpt_m3` と `bench_long` の両方を損益で上回る
 - 不合格なら `x2` として設計し直し、観測を 1 からやり直す (期間を継ぎ足さない)。

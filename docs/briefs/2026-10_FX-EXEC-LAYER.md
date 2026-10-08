@@ -76,9 +76,12 @@
       `publish_execution_csvs(csv_output_dir, date_str, forecast_batch_id, decision_path,
       evaluation_path) -> dict[str, str | None]` がある。publish は
       `history/{date_str}/{forecast_batch_id}/execution.csv` と同 `execution_evaluation.csv` を書き、
-      `latest/execution.csv` を更新する。**既存の `history/.../execution.csv` は上書きせず**、その
-      パスをそのまま返す (`execution_evaluation.csv` は上書き可)。書き方は既存
-      `csv_exports.write_csv_rows` と `csv_utils` を再利用し、`make_daily_csv_stem` の命名に揃える。
+      `latest/execution.csv` を更新する。**完全な既存の `history/.../execution.csv` は上書きせず**その
+      パスをそのまま返す。完全 = `load_execution_decisions_csv` が 6 book それぞれ 1 行を検証付きで
+      返せること (`is_complete_decision_file(path) -> bool` (new) で判定)。header のみ・途中で切れた
+      ファイルは不完全として置き換える。`execution_evaluation.csv` は上書き可。書き込みは一時ファイルに
+      書いて `os.replace` で原子的に差し替える。書き方は既存 `csv_exports.write_csv_rows` と
+      `csv_utils` を再利用し、`make_daily_csv_stem` の命名に揃える。
 - [ ] `FxDailyAutomationConfig` に `run_execution_layer: bool = True` (new)、
       `FxDailyAutomationResult` に `execution_csv_path: str | None = None`、
       `execution_evaluation_csv_path: str | None = None`、`execution_decisions_recorded: int = 0`、
@@ -86,21 +89,22 @@
 - [ ] `run_fx_daily_protocol_once` が `config.write_csv_exports and config.run_execution_layer` の
       ときだけ次を行う (spec §7):
       - Step 3b: batch が存在し (`forecast_batch_id is not None`、作成直後でも既存でも) かつ
-        `history/{date}/{batch}/execution.csv` が**存在しない**ときに限り、
+        `history/{date}/{batch}/execution.csv` が**完全な形で存在しない** (`is_complete_decision_file`
+        が False。無い・header のみ・途中で切れている) ときに限り、
         `FxForecastRepository.load_fx_forecast_batch` で読んだ batch、`build_baseline_context(snapshot)`、
         `snapshot.completed_windows` の終値から `build_execution_decisions` を呼ぶ。通常は batch を作った
         run がこれに当たる。前 run が判断の書き込みに失敗していれば次の run がこの経路で回復する
         (live spot はその時刻で取り直す。`entry_time_utc` がそれを記録する)。既にファイルがあれば
         何もしない (live spot も取り直さない)。live spot は `fetch_live_spot_yahoo` を**1 回**呼び、
         失敗時は warning ログ + `entry_status "live_unavailable"`。
-      - Step 4c (Step 4b の後): **独立した有界スキャン**。`as_of_jst` から `prev_as_of_jst` で
-        `config.outcome_catchup_days + 1` 営業日さかのぼり、各窓 D について
-        `history/{D:%Y%m%d}/{make_forecast_batch_id(pair, D, protocol_version)}/execution.csv` が存在し、
-        同 dir に `execution_evaluation.csv` が無く、`make_outcome_id(pair, D, next_as_of_jst(D),
+      - Step 4c (Step 4b の後): **archive 全体の独立スキャン**。`history/*/*/execution.csv` を列挙し
+        (`glob`、ディレクトリ名から日付 D と batch id を取る)、完全な判断ファイルで、同 dir に完全な
+        `execution_evaluation.csv` (6 book 揃い) が無く、`make_outcome_id(pair, D, next_as_of_jst(D),
         schema_version)` の outcome が `FxOutcomeEvaluationRepository.load_fx_outcome_record` で読める
-        ときだけ、判断行を読んで `evaluate_execution_decisions` を呼ぶ。条件を満たさない窓は何もしない
-        (warning 不要)。Step 4 の直前窓も Step 4b の catch-up 窓もこのスキャンに含まれるので、個別の
-        配線はしない。評価の書き込みに失敗した窓は次 run のスキャンで再試行される。
+        ときだけ、判断行を読んで `evaluate_execution_decisions` を呼ぶ。outcome が無い窓 (当日の
+        pending) と条件を満たさない窓は何もしない (warning 不要)。候補は通常 0〜1 件。Step 4 の直前窓も
+        Step 4b の catch-up 窓もこのスキャンに含まれるので個別の配線はしない。評価の書き込みに失敗した
+        窓は `outcome_catchup_days` の外に出ても次 run のスキャンで再試行される。
       - Step 5b / 6b: export と publish。`execution_evaluation.csv` は評価した窓の batch dir に書く
         (当日の dir ではない)。
       - 執行層の例外はすべて捕捉して warning ログにし、`FxDailyAutomationResult` の該当フィールドを
@@ -180,9 +184,10 @@
     `execution_decisions_recorded == 6`、(b) 同日 2 回目の run (batch 既存、`execution.csv` あり) が
     判断を作らず既存ファイルを変えない (live spot も呼ばれない)、(b2) batch 既存で `execution.csv` が
     無い run が判断を作る (回復経路)、(c) 翌日の run が `execution_evaluation.csv` 6 行を前日の batch dir に書き
-    `execution_evaluations_recorded == 6`、(c2) 2 営業日前の窓の `execution_evaluation.csv` を消して
-    run すると (outcome は DB にある) スキャンが書き直す、(c3) 既に `execution_evaluation.csv` がある窓は
-    再評価されない、(d) live 取得失敗で `entry_status live_unavailable` かつ
+    `execution_evaluations_recorded == 6`、(c2) `outcome_catchup_days + 3` 営業日前の窓の
+    `execution_evaluation.csv` を消して run すると (outcome は DB にある) スキャンが書き直す、(c3) 既に
+    完全な `execution_evaluation.csv` がある窓は再評価されない、(c4) header のみの `execution.csv` は
+    不完全とみなされ判断が作り直される、(d) live 取得失敗で `entry_status live_unavailable` かつ
     run は成功、(e) `run_execution_layer=False` で何も書かない、(f) 執行層で例外を起こしても
     `forecast_created` と outcome 記録は保たれる。
   - 既存テストは無変更で通る。
