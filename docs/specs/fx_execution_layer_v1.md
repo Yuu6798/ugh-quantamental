@@ -167,7 +167,7 @@ book ごとに次を出す:
 
 - 判断数、取引数、見送り内訳、live 取得率
 - 方向的中率 (取引日)、capture bp (`Σ side × realized bp`、単位サイズ)、signed bp の平均・標準偏差・t 値
-  (live 系列 = `pnl_live_bp − cost_bp`、bar 系列 = `pnl_bar_bp − cost_bp` を別々に)
+  (live 系列 = `pnl_live_bp − cost_live_bp`、bar 系列 = `pnl_bar_bp − cost_bar_bp` を別々に)
 - 損益 (円、live 系列と bar 系列)、最終資産、最大 DD、PF、コスト合計
 - ベンチマーク差: `ugh_x1` と `bench_gpt_m3` / `bench_long` の損益差と capture 差
 - 合格ゲート進捗 (§9)。ゲートの母集団は週次・月次の期間窓とは独立で、history 全体のうち
@@ -187,7 +187,7 @@ book ごとに次を出す:
 - 合格ゲート (`ugh_x1` を実運用候補に進める条件、すべて live 系列。母集団は現行 `execution_version`
   の累積コホートで、版を bump したらコホートもゼロから始まる):
   1. 取引 100 回以上かつ観測 6 か月以上
-  2. コスト控除後の live signed bp (`pnl_live_bp − cost_bp`) の t 値 ≥ 2.0
+  2. コスト控除後の live signed bp (`pnl_live_bp − cost_live_bp`) の t 値 ≥ 2.0
   3. 最大 DD ≤ 初期資産の 10%
   4. 同期間の `bench_gpt_m3` と `bench_long` の両方を損益で上回る
 - 不合格なら `x2` として設計し直し、観測を 1 からやり直す (期間を継ぎ足さない)。
