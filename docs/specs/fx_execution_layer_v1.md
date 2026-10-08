@@ -77,9 +77,10 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
 | `bench_gpt_m3` | `sign(C[t-2] - C[t-5])`、C[t-1] = 直近完了窓の終値 (`completed_windows[-1].close_price`)、t = D | 1.0 | `momentum_zero`: 差がゼロ |
 | `bench_long` | 常に +1 | 1.0 | なし |
 
-- 入力はすべて判断時刻に確定しているもの: 当日の forecast batch (7 件)、`BaselineContext`
-  (`build_baseline_context(snapshot)` の `previous_close_change_bp` /
-  `trailing_mean_abs_close_change_bp`)、snapshot の完了窓終値。
+- 入力はすべて判断時刻に確定しているもの: 当日の forecast batch の方向 (`strategy_kind → forecast_direction`
+  の対応。builder は `ForecastRecord` ではなくこの対応を受け取るので、CSV からの backfill でも同じ
+  関数を使える)、`BaselineContext` (`build_baseline_context(snapshot)` の `previous_close_change_bp` /
+  `trailing_mean_abs_close_change_bp`)、snapshot の完了窓終値、`entry_status` と live 価格。
 - `ugh_x1` のサイズは「日次 30bp のボラ目標、レバ 1 倍上限」。ショックフィルタは
   「前窓が 2.5σ 相当を超えたら翌窓は賭けない」。いずれも conviction を使わない。
 - `ugh_divergence` は試算で「β が単純テクニカルと割れた日に 25 勝 10 敗」だった観察の
@@ -117,11 +118,14 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
 | `realized_open`, `realized_close` | `OutcomeRecord` の写し。出口 = `realized_close` |
 | `pnl_live_bp` | `side × (realized_close − entry_price_live) / entry_price_live × 1e4`、live 欠落時は空 |
 | `pnl_bar_bp` | `side × (realized_close − realized_open) / realized_open × 1e4` |
-| `cost_bp` | `abs(side) × 0.01 / entry × 1e4` (entry は live、欠落時は `realized_open`)。`side == 0` なら 0 |
+| `cost_live_bp` | `abs(side) × 0.01 / entry_price_live × 1e4`。live 価格が無い行は空、`side == 0` なら 0 |
+| `cost_bar_bp` | `abs(side) × 0.01 / realized_open × 1e4`。`side == 0` なら 0 |
 | `hit` | `side × (realized_close − realized_open) > 0`、`side == 0` なら空 |
 | `evaluated_at_utc` | 評価時刻 |
 
-金額 (円) は行に持たない。資産曲線は集計層 (§8) が行を時系列順に畳み込んで計算する
+live 系列のコスト控除後リターンは `pnl_live_bp − cost_live_bp`、bar 系列は `pnl_bar_bp − cost_bar_bp`
+(どちらも自分の entry 価格で正規化する)。金額 (円) は行に持たない。資産曲線は集計層 (§8) が行を
+時系列順に畳み込んで計算する
 (`position_usd = equity × size / entry`、`pnl_jpy = side × position_usd × (exit − entry) − abs(side) × position_usd × 0.01`、
 初期資産 3,000,000 円、複利)。live 系列は `entry_status == live` の行だけで構成し、欠落日は
 取引なし (資産据え置き) として数え、欠落率を別途報告する。
@@ -145,7 +149,7 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
 | Step | 内容 |
 |---|---|
 | 3b (Step 3 の直後) | batch が存在し `history/{date}/{batch}/execution.csv` が無いとき: batch と `build_baseline_context(snapshot)` と snapshot から 6 件の `ExecutionDecision` を作る (純関数 `build_execution_decisions`)。live spot を取得して記録する。ファイルがあれば何もしない (§3) |
-| 4c (Step 4 の直後) | 窓 D の outcome が記録されたとき: `history/{D}/{batch}/execution.csv` を読み、`ExecutionEvaluation` 6 件を作る (純関数 `evaluate_execution_decisions`)。Step 4b の catch-up で outcome が回収された窓も同様に評価する |
+| 4c (Step 4b の直後) | **独立した有界スキャン**: 直近 `outcome_catchup_days + 1` 営業日の各窓 D について、`history/{D}/{batch_D}/execution.csv` が存在し `execution_evaluation.csv` が無く、窓 D の outcome が DB にある (`make_outcome_id` で id を再計算して `load_fx_outcome_record`) なら、`ExecutionEvaluation` 6 件を作る (純関数 `evaluate_execution_decisions`)。Step 4 の直前窓と Step 4b の catch-up 窓はこのスキャンに含まれるので個別の配線は不要。評価の書き込みに失敗した窓は次 run のスキャンで再試行される |
 | 5b / 6b | `execution.csv` / `execution_evaluation.csv` を `history/{date}/{batch}/` に書き、`latest/execution.csv` を更新する。既存の `execution.csv` は上書きしない (§3) |
 
 `FxDailyAutomationConfig` に `run_execution_layer: bool = True` (new) を追加。
@@ -193,7 +197,11 @@ book ごとに次を出す:
 
 保存済み予測 (2026-05-08 以降) について、`scripts/backfill_execution_history.py` (new) が
 `execution.csv` / `execution_evaluation.csv` を `entry_status = backfill_bar` で生成する
-(live なし、`pnl_live_bp` 空)。2026-05-07 以前は予測が無いので対象外 (2026-10-08 の
+(live なし、`pnl_live_bp` / `cost_live_bp` 空)。入力の結合は history 全体の横断 join で行う
+(評価と outcome は翌日の batch dir にあるため、`labeled_observations.collect_evaluated_forecast_rows`
+と同じく `forecast_id` でグローバルに引く)。方向は `forecast.csv` の `strategy_kind` /
+`forecast_direction`、outcome は `outcome.csv` の `outcome_id` / `window_start_jst` / `realized_open` /
+`realized_close`、snapshot は `history/{as_of}/{batch}/input_snapshot.json` から取る。2026-05-07 以前は予測が無いので対象外 (2026-10-08 の
 Jan〜Oct 再計算は分析であり、観測記録には入れない)。backfill 行は集計で bar 系列にのみ入り、
 ゲート判定 (live 系列) には入らない。
 
