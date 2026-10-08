@@ -514,6 +514,38 @@ class TestExportExecutionEvaluationCsv:
 # ---------------------------------------------------------------------------
 
 
+class TestSyncLatestExecutionCsv:
+    def test_missing_latest_is_created_from_the_archive(self, tmp_path) -> None:
+        from ugh_quantamental.fx_protocol.execution_exports import sync_latest_execution_csv
+
+        archive = _decision_csv(tmp_path, "src", _live_decisions())
+        out_dir = os.path.join(str(tmp_path), "out")
+        assert sync_latest_execution_csv(out_dir, archive) is True
+        latest = os.path.join(out_dir, "latest", "execution.csv")
+        assert _read_text(latest) == _read_text(archive)
+
+    def test_identical_latest_is_left_untouched(self, tmp_path) -> None:
+        from ugh_quantamental.fx_protocol.execution_exports import sync_latest_execution_csv
+
+        archive = _decision_csv(tmp_path, "src", _live_decisions())
+        out_dir = os.path.join(str(tmp_path), "out")
+        sync_latest_execution_csv(out_dir, archive)
+        latest = os.path.join(out_dir, "latest", "execution.csv")
+        before = os.stat(latest).st_mtime_ns
+        assert sync_latest_execution_csv(out_dir, archive) is False
+        assert os.stat(latest).st_mtime_ns == before
+
+    def test_stale_latest_is_replaced_atomically(self, tmp_path) -> None:
+        from ugh_quantamental.fx_protocol.execution_exports import sync_latest_execution_csv
+
+        archive = _decision_csv(tmp_path, "src", _live_decisions())
+        out_dir = os.path.join(str(tmp_path), "out")
+        latest = _write_text(os.path.join(out_dir, "latest", "execution.csv"), "stale\n")
+        assert sync_latest_execution_csv(out_dir, archive) is True
+        assert _read_text(latest) == _read_text(archive)
+        assert [n for n in os.listdir(os.path.dirname(latest)) if n.startswith(".")] == []
+
+
 class TestPublishExecutionCsvs:
     def test_decision_creates_history_and_latest(self, tmp_path) -> None:
         out = os.path.join(str(tmp_path), "csv")

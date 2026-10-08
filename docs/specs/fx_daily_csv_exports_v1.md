@@ -94,10 +94,11 @@ is spec §5.1 / §5.2 (`EXECUTION_FIELDNAMES` / `EXECUTION_EVALUATION_FIELDNAMES
   evaluations of the same batch and sits in the **evaluated** window's directory, not
   the directory of the run that evaluated it. Overwrite is allowed (idempotent given the
   persisted outcome); `is_complete_evaluation_file` gates re-evaluation.
-- `latest/execution.csv` is the copy of the most recently **recorded** decisions. It is
-  updated only when a run records decisions and is never deleted, so it can lag
-  `latest/forecast.csv` by a day after a run that recorded none (archive already
-  complete, window closed, layer disabled or failed).
+- `latest/execution.csv` mirrors the archived decisions of the batch the run worked on:
+  it is written when a run records decisions and re-synced from the complete archive
+  when a same-day rerun finds the decisions already recorded (no write when the bytes
+  already match). It is never deleted, so it keeps the previous batch after a run
+  that recorded nothing (window closed, layer disabled, decision step failed).
 - `execution/{pair}_{YYYYMMDD}_execution.csv` and
   `execution/{pair}_{YYYYMMDD}_execution_evaluation.csv` are the staging files
   (`make_daily_csv_stem` naming); for evaluations `YYYYMMDD` is the evaluated window's

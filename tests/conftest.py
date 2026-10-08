@@ -1,9 +1,9 @@
-"""Shared fixtures for ``tests/fx_protocol``.
+"""Shared fixtures for the whole test suite.
 
 The FX execution layer (automation Step 3b, ``docs/specs/fx_execution_layer_v1.md`` §6)
 fetches a live USDJPY spot on every run that records decisions, and
 ``FxDailyAutomationConfig.run_execution_layer`` defaults to ``True``.  Tests never
-touch the network, so the fetch is refused for every test in this package: the
+touch the network, so the fetch is refused for every test in the suite: the
 automation then records ``entry_status = "live_unavailable"`` rows, exactly as a
 real run would after a failed fetch.  A test that needs a quote replaces the same
 attribute with its own stub (``monkeypatch.setattr`` on

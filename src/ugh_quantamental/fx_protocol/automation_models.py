@@ -59,6 +59,24 @@ class CatchupWindowResult(BaseModel):
     evaluation_csv_path: str | None = None
 
 
+class ExecutionEvaluationWindowResult(BaseModel):
+    """One forecast window evaluated by the execution-layer archive scan (Step 4c).
+
+    Reported only for windows whose ``execution_evaluation.csv`` was written
+    during *this* run; a window already holding a complete evaluation file is
+    skipped silently and does not reappear here. Mirrors ``CatchupWindowResult``
+    so a backlog of several windows is reported in full rather than collapsed
+    into the singular ``execution_evaluation_csv_path`` field.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    forecast_batch_id: str
+    as_of_jst: datetime
+    evaluation_csv_path: str
+    evaluation_count: int
+
+
 class FxDailyAutomationResult(BaseModel):
     """Result of one completed FX daily automation run."""
 
@@ -98,3 +116,6 @@ class FxDailyAutomationResult(BaseModel):
     execution_evaluation_csv_path: str | None = None
     execution_decisions_recorded: int = 0
     execution_evaluations_recorded: int = 0
+    # Every window the Step 4c scan evaluated this run, ascending by as_of_jst;
+    # execution_evaluation_csv_path is the newest of these (or None).
+    execution_evaluation_windows: tuple[ExecutionEvaluationWindowResult, ...] = ()

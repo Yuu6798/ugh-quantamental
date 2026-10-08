@@ -428,6 +428,31 @@ def is_complete_evaluation_file(path: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def sync_latest_execution_csv(csv_output_dir: str, history_execution_path: str) -> bool:
+    """Make ``latest/execution.csv`` a byte-identical copy of a complete archive file.
+
+    Used by automation Step 3b when the batch's ``history/.../execution.csv``
+    is already complete: an earlier publish may have written the archive and
+    then failed before (or while) refreshing ``latest/``, which would otherwise
+    leave ``latest/execution.csv`` on an older batch forever.  Nothing is
+    written when the bytes already match (so a plain same-day rerun leaves the
+    file untouched), and the copy is atomic.
+
+    Returns ``True`` when ``latest/execution.csv`` was (re)written.
+    """
+    latest_dir = os.path.join(os.path.abspath(csv_output_dir), "latest")
+    latest_path = os.path.join(latest_dir, "execution.csv")
+    with open(history_execution_path, "rb") as fh:
+        archive_bytes = fh.read()
+    if os.path.isfile(latest_path):
+        with open(latest_path, "rb") as fh:
+            if fh.read() == archive_bytes:
+                return False
+    os.makedirs(latest_dir, exist_ok=True)
+    _atomic_copy(history_execution_path, latest_path)
+    return True
+
+
 def publish_execution_csvs(
     csv_output_dir: str,
     date_str: str,
@@ -506,4 +531,5 @@ __all__ = [
     "load_execution_decisions_csv",
     "load_execution_evaluations_csv",
     "publish_execution_csvs",
+    "sync_latest_execution_csv",
 ]

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from ugh_quantamental.fx_protocol.automation_models import (
     CatchupWindowResult,
+    ExecutionEvaluationWindowResult,
     FxDailyAutomationConfig,
     FxDailyAutomationResult,
 )
@@ -382,6 +383,7 @@ def _record_execution_decisions(
         export_execution_csv,
         is_complete_decision_file,
         publish_execution_csvs,
+        sync_latest_execution_csv,
     )
     from ugh_quantamental.persistence.repositories import FxForecastRepository
 
@@ -394,6 +396,15 @@ def _record_execution_decisions(
         "execution.csv",
     )
     if is_complete_decision_file(history_execution):
+        # Already recorded: no rebuild, no live fetch.  Only make sure latest/
+        # mirrors the archive, in case an earlier publish wrote the archive and
+        # failed before refreshing latest/ (no-op when the bytes already match).
+        if sync_latest_execution_csv(config.csv_output_dir, history_execution):
+            logger.warning(
+                "Execution layer: latest/execution.csv refreshed from the archived decisions "
+                "of batch %s.",
+                forecast_batch_id,
+            )
         return None, 0
 
     batch = FxForecastRepository.load_fx_forecast_batch(session, forecast_batch_id)
@@ -466,7 +477,7 @@ def _evaluate_execution_archive(
     session: "Session",
     config: FxDailyAutomationConfig,
     now_utc: datetime,
-) -> tuple[str | None, int]:
+) -> tuple[ExecutionEvaluationWindowResult, ...]:
     """Automation Step 4c (with Steps 5b / 6b for evaluations): archive-wide evaluation scan.
 
     Walks every ``history/*/*/execution.csv`` under ``config.csv_output_dir``
@@ -487,7 +498,8 @@ def _evaluate_execution_archive(
     idempotent given the persisted outcome.  One window's failure is logged
     and does not stop the scan.
 
-    Returns ``(last_staging_csv_path, total_evaluations_recorded)``.
+    Returns one ``ExecutionEvaluationWindowResult`` per window evaluated in
+    this pass, ascending by ``as_of_jst`` (empty when nothing was evaluated).
     """
     from ugh_quantamental.fx_protocol.execution_exports import (
         export_execution_evaluation_csv,
@@ -499,10 +511,9 @@ def _evaluate_execution_archive(
     from ugh_quantamental.persistence.repositories import FxOutcomeEvaluationRepository
 
     pattern = os.path.join(
-        os.path.abspath(config.csv_output_dir), "history", "*", "*", "execution.csv"
+        glob.escape(os.path.abspath(config.csv_output_dir)), "history", "*", "*", "execution.csv"
     )
-    last_staging_path: str | None = None
-    total_recorded = 0
+    windows: list[ExecutionEvaluationWindowResult] = []
     for decision_file in sorted(glob.glob(pattern)):
         evaluation_file = os.path.join(os.path.dirname(decision_file), "execution_evaluation.csv")
         try:
@@ -512,6 +523,25 @@ def _evaluate_execution_archive(
                 continue
             decisions = load_execution_decisions_csv(decision_file)
             first = decisions[0]
+            batch_dir = os.path.dirname(decision_file)
+            expected_dir = (
+                first.as_of_jst.strftime("%Y%m%d"),
+                first.forecast_batch_id,
+            )
+            actual_dir = (
+                os.path.basename(os.path.dirname(batch_dir)),
+                os.path.basename(batch_dir),
+            )
+            if actual_dir != expected_dir:
+                # A decision file whose rows do not belong to its directory
+                # (copied or renamed out of band) would be re-evaluated and
+                # re-published elsewhere on every run; leave it alone.
+                logger.warning(
+                    "Execution layer: %s holds decisions for %s/%s; skipping (non-fatal).",
+                    decision_file,
+                    *expected_dir,
+                )
+                continue
             outcome_id = make_outcome_id(
                 config.pair, first.as_of_jst, first.window_end_jst, config.schema_version
             )
@@ -537,8 +567,14 @@ def _evaluate_execution_archive(
                 None,
                 staging_path,
             )
-            last_staging_path = staging_path
-            total_recorded += len(evaluations)
+            windows.append(
+                ExecutionEvaluationWindowResult(
+                    forecast_batch_id=first.forecast_batch_id,
+                    as_of_jst=first.as_of_jst,
+                    evaluation_csv_path=staging_path,
+                    evaluation_count=len(evaluations),
+                )
+            )
         except Exception as exc:
             logger.warning(
                 "Execution layer evaluation step failed for %s (non-fatal): %s",
@@ -547,7 +583,7 @@ def _evaluate_execution_archive(
                 exc_info=True,
             )
             continue
-    return last_staging_path, total_recorded
+    return tuple(sorted(windows, key=lambda w: w.as_of_jst))
 
 
 def run_fx_daily_protocol_once(
@@ -1050,20 +1086,21 @@ def run_fx_daily_protocol_once(
     # Evaluations land in the evaluated window's own batch directory (Steps
     # 5b / 6b inside the helper).  Failures are non-fatal, per window and as a
     # whole.
-    execution_evaluation_csv_path: str | None = None
-    execution_evaluations_recorded = 0
+    execution_evaluation_windows: tuple[ExecutionEvaluationWindowResult, ...] = ()
     if config.write_csv_exports and config.run_execution_layer:
         try:
-            (
-                execution_evaluation_csv_path,
-                execution_evaluations_recorded,
-            ) = _evaluate_execution_archive(session, config, now_utc)
+            execution_evaluation_windows = _evaluate_execution_archive(session, config, now_utc)
         except Exception as exc:
             logger.warning(
                 "Execution layer evaluation step failed (non-fatal): %s", exc, exc_info=True
             )
-            execution_evaluation_csv_path = None
-            execution_evaluations_recorded = 0
+            execution_evaluation_windows = ()
+    execution_evaluation_csv_path = (
+        execution_evaluation_windows[-1].evaluation_csv_path
+        if execution_evaluation_windows
+        else None
+    )
+    execution_evaluations_recorded = sum(w.evaluation_count for w in execution_evaluation_windows)
 
     # --- Step 5: CSV exports ---
     forecast_csv_path: str | None = None
@@ -1341,4 +1378,5 @@ def run_fx_daily_protocol_once(
         execution_evaluation_csv_path=execution_evaluation_csv_path,
         execution_decisions_recorded=execution_decisions_recorded,
         execution_evaluations_recorded=execution_evaluations_recorded,
+        execution_evaluation_windows=execution_evaluation_windows,
     )

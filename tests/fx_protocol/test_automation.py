@@ -1477,6 +1477,66 @@ class TestExecutionLayerAutomation:
         finally:
             session.close()
 
+    # (b4) -----------------------------------------------------------------
+    def test_b4_same_day_rerun_resyncs_missing_latest_from_the_archive(
+        self, tmp_path, live_spot
+    ) -> None:
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path)
+            snap, r1 = self._run(session, cfg, 20)
+            session.commit()
+            history_file = (
+                self._batch_dir(tmp_path, snap.as_of_jst, r1.forecast_batch_id) / "execution.csv"
+            )
+            latest_file = tmp_path / "latest" / "execution.csv"
+            archive_bytes = history_file.read_bytes()
+            archive_mtime = history_file.stat().st_mtime_ns
+            # An earlier publish wrote the archive but lost latest/ (or wrote a
+            # stale one): the rerun must repair latest/ without rebuilding.
+            latest_file.write_bytes(b"stale")
+
+            _, r2 = self._run(session, cfg, 20, hours_after_fixing=12)
+
+            assert live_spot.call_count == 1
+            assert history_file.read_bytes() == archive_bytes
+            assert history_file.stat().st_mtime_ns == archive_mtime
+            assert latest_file.read_bytes() == archive_bytes
+            assert r2.execution_decisions_recorded == 0
+            assert r2.execution_csv_path is None
+        finally:
+            session.close()
+
+    # (c5) -----------------------------------------------------------------
+    def test_c5_decision_file_in_a_foreign_directory_is_skipped(self, tmp_path, live_spot) -> None:
+        import shutil
+
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path)
+            snap1, r1 = self._run(session, cfg, 20)
+            session.commit()
+            real_file = (
+                self._batch_dir(tmp_path, snap1.as_of_jst, r1.forecast_batch_id) / "execution.csv"
+            )
+            foreign_dir = tmp_path / "history" / snap1.as_of_jst.strftime("%Y%m%d") / "fb_foreign"
+            foreign_dir.mkdir(parents=True)
+            shutil.copy2(real_file, foreign_dir / "execution.csv")
+
+            _, r2 = self._run(session, cfg, 21)
+            session.commit()
+
+            # Only the genuine batch directory is evaluated; the copy is left alone.
+            assert len(r2.execution_evaluation_windows) == 1
+            assert r2.execution_evaluation_windows[0].forecast_batch_id == r1.forecast_batch_id
+            assert r2.execution_evaluations_recorded == _EXECUTION_BOOK_COUNT
+            assert not (foreign_dir / "execution_evaluation.csv").exists()
+
+            _, r3 = self._run(session, cfg, 21, hours_after_fixing=12)
+            assert r3.execution_evaluation_windows == ()
+        finally:
+            session.close()
+
     # (b2) -----------------------------------------------------------------
     def test_b2_missing_archive_is_recovered_by_the_next_run(self, tmp_path, live_spot) -> None:
         from ugh_quantamental.fx_protocol.execution_exports import load_execution_decisions_csv
@@ -1581,6 +1641,13 @@ class TestExecutionLayerAutomation:
             assert r2.execution_evaluation_csv_path == str(
                 tmp_path / "execution" / "USDJPY_20260202_execution_evaluation.csv"
             )
+            # One structured entry per evaluated window (here exactly one).
+            assert len(r2.execution_evaluation_windows) == 1
+            window = r2.execution_evaluation_windows[0]
+            assert window.forecast_batch_id == r1.forecast_batch_id
+            assert window.as_of_jst == snap1.as_of_jst
+            assert window.evaluation_csv_path == r2.execution_evaluation_csv_path
+            assert window.evaluation_count == _EXECUTION_BOOK_COUNT
             prev_dir = self._batch_dir(tmp_path, snap1.as_of_jst, r1.forecast_batch_id)
             evaluations = load_execution_evaluations_csv(str(prev_dir / "execution_evaluation.csv"))
             assert len(evaluations) == _EXECUTION_BOOK_COUNT
@@ -1766,6 +1833,7 @@ class TestExecutionLayerAutomation:
                 assert result.execution_evaluation_csv_path is None
                 assert result.execution_decisions_recorded == 0
                 assert result.execution_evaluations_recorded == 0
+                assert result.execution_evaluation_windows == ()
             assert live_spot.call_count == 0
             assert not (tmp_path / "latest" / "execution.csv").exists()
             assert not (tmp_path / "execution").exists()
