@@ -212,8 +212,10 @@ epsilon でも trailing 幅でもなく、**1 日の反発 (`price_implied_score
    最初の実測。
 2. **`provider_quality_issue` の偽陽性リスクの消滅確認** — 10 月の `provider_health.csv` で
    月〜木の最終 retry が lag=0 になっているか (10/1〜10/2 は確認済)。
-3. **月の中で engine_version が 2 値** — 10 月 artifact の `engine_versions_in_window` は
-   v2.7 のみ (10/1 以降の発行) になる見込みだが、9/30 発行分の評価が 10/1 に入る点に注意。
+3. **engine_version の監査フィールド** — 10 月 artifact の対象 batch は v2.7 のみ (窓は forecast の
+   `as_of_jst` で切るため 9/30 発行分は 9 月側)。ただし `engine_versions_in_window` は
+   `labeled_observations.csv` の版列から作られ、その列が無い現状では**空**になる (9/28 週報 運用ヘルス 1
+   の注記、持ち越し 9)。空を退行と読まないこと。列追加の brief 後に初めて値が入る。
 4. **絶対 bp 閾値 (CC-M02)** — 10 月のボラティリティが 9 月より低ければ `inspect_state_mapping` は
    自然に非発火になる。発火の有無と RW 平均誤差を並べて、相対化の要否を判断する。
 5. **政策日程** — 米 9 月 CPI 10/14、FOMC 10/27〜28、日銀 10/29〜30。9 月の 3 回の方向転換は

@@ -215,12 +215,13 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
 - 現行 version の batch に 6 book 未満のもの (§8 の `incomplete_batches`)、または完全な `execution.csv`
   があるのに完全な `execution_evaluation.csv` が無い batch (`missing_evaluations`。期待コホートは判断
   ファイルの棚卸しから導く。`window_end_jst` が集計時刻より後の pending 窓は除く)、または
-  `execution.csv` はあるが完全でない dir (`incomplete_decision_batches`、version 不明なら現行版扱い)、
-  または現行版の activation marker (`execution.EXECUTION_ACTIVATION_AS_OF`、コードに固定した初回運用日。
-  最初に publish に成功した日から推定しない — 初日の publish 失敗を見失うため) 以降で forecast batch が
-  あるのに正本 dir (`history/{as_of_jst}/{forecast_batch_id}/`。forecast batch は `forecast_batch_id` で
-  重複排除し、catch-up が END 日付 dir に置いた複製は見ない) に `execution.csv` が丸ごと無い batch (`missing_decisions`。窓内に判断を publish できなかった
-  日。pending 窓は除く) が
+  `execution.csv` はあるが完全でない dir (`incomplete_decision_batches`。version は読めないので dir の
+  日付が activation marker 以降なら現行版扱い、それより前は報告のみ)、または**期待日** — `calendar` の
+  protocol 営業日のうち activation marker (`execution.EXECUTION_ACTIVATION_AS_OF`、コードに固定した初回
+  運用日。最初に publish に成功した日から推定しない — 初日の publish 失敗を見失うため) 以降で窓が閉じた
+  日から、明示的に諦めた日 `execution.EXECUTION_EXCLUDED_AS_OF` (追加は §12 に理由を書く PR で行う) を
+  引いたもの — に完全な `execution.csv` が 1 つも無い日 (`missing_decisions`。archive の forecast の有無には
+  依存しない: publish が壊れた日もプロトコルが走らなかった日も同じ欠落) が
   1 つでもあれば、条件の現在値は出すがゲートは **blocked** (`passed = False`、`blocked_reasons` に
   `incomplete_batches` / `missing_evaluations` / `incomplete_decisions` / `missing_decisions`)。欠けた archive を黙って短くした上で合格にはしない
   (昇格証拠は欠落・部分 batch で fail する、`AGENTS.md` §5)。修復は Step 4c の再スキャンか §10 の

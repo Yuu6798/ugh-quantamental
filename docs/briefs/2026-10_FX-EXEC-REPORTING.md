@@ -26,15 +26,19 @@
       ファイルの存在。評価ファイルが丸ごと無い・header のみの batch もここで捕捉する)。棚卸しで
       `execution.csv` はあるが完全でない (header のみ・6 book 未満・読めない) dir は
       `incomplete_decision_batches: tuple[str, ...]` (`history/{date}/{batch}` の相対 path) として返す
-      (version は読めないことがあるので現行版扱い)。さらに **forecast batch の棚卸し**: `execution.EXECUTION_ACTIVATION_AS_OF`
-      (現行版の activation marker。最初に publish に成功した日ではなく、コードに固定した日付) 以降の
-      `history/*/*/forecast.csv` (7 行) を **`forecast_batch_id` で重複排除**し (catch-up は同じ batch の
-      `forecast.csv` を窓の END 日付 dir にも複製する)、各 batch の正本 dir を forecast 行の `as_of_jst` から
-      `history/{as_of_jst:%Y%m%d}/{forecast_batch_id}/` と解決して、そこに `execution.csv` が
-      **丸ごと無い** batch を `missing_decisions: tuple[MissingExecutionDecision, ...]`
-      (`forecast_batch_id`, `as_of_jst`) として返す (forecast の複製が置かれた dir は見ない) (判断の publish が窓内に一度も成功しなかった日。窓が閉じた batch は live 判断を作らない設計
-      なので、backfill が `backfill_bar` で埋めるまでここに残る。`window_end_jst > generated_at_utc`
-      の pending 窓は除く)。走査規約は `labeled_observations.collect_evaluated_forecast_rows` と同じ。
+      (version は読めないことがあるので、dir の日付が `EXECUTION_ACTIVATION_AS_OF` 以降なら現行版扱い、
+      それより前なら報告のみで block しない)。さらに **期待コホートは archive の外から導く**:
+      `calendar` の protocol 営業日のうち `execution.EXECUTION_ACTIVATION_AS_OF` (現行版の activation
+      marker。コードに固定した日付) 以降で窓が閉じた日 (`next_as_of_jst(D) <= generated_at_utc`) から
+      `execution.EXECUTION_EXCLUDED_AS_OF` (new; 明示的に諦めた日の `frozenset[date]`。追加は spec §12
+      に理由を書く PR で行う) を引いた集合を期待日とし、各期待日 D について `history/{D:%Y%m%d}/*/execution.csv`
+      に行の `as_of_jst` が D の完全な判断ファイルが 1 つも無ければ `missing_decisions:
+      tuple[MissingExecutionDecision, ...]` (`as_of_jst`、`forecast_batch_id` は forecast.csv が正本 dir に
+      あればその id、無ければ None) として返す。forecast.csv の有無・内容には依存しない (publish が壊れた日
+      も、プロトコル自体が走らなかった日も同じく欠落)。窓が閉じた batch は live 判断を作らない設計なので、
+      backfill が `backfill_bar` で埋める (forecast が無い日は埋められないので、諦めるなら
+      `EXECUTION_EXCLUDED_AS_OF` に加える) までここに残る。走査規約は
+      `labeled_observations.collect_evaluated_forecast_rows` と同じ。
 - [ ] `run_execution_report(csv_output_dir, *, start_as_of_jst, end_as_of_jst, generated_at_utc)
       -> dict[str, Any]` が純粋な集計 (ファイル読みのみ、書き込みなし) で、**期間窓内**の行について
       (`start_as_of_jst` / `end_as_of_jst` は `datetime | None`、None はその端を無制限にする =
