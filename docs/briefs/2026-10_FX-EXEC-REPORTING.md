@@ -22,7 +22,9 @@
       `labeled_observations.collect_evaluated_forecast_rows` と同じ。
 - [ ] `run_execution_report(csv_output_dir, *, start_as_of_jst, end_as_of_jst, generated_at_utc)
       -> dict[str, Any]` が純粋な集計 (ファイル読みのみ、書き込みなし) で、**期間窓内**の行について
-      book ごとに spec §8 の指標を返す: `decision_count`, `trade_count`, `skip_counts` (skip_reason 別),
+      (`start_as_of_jst` / `end_as_of_jst` は `datetime | None`、None はその端を無制限にする =
+      両方 None で history 全体) book ごとに spec §8 の指標を返す: `decision_count`, `trade_count`,
+      `skip_counts` (評価行の `skip_reason` 列の値別、取引行は含めない),
       `live_coverage_rate`, `direction_hit_rate`, `capture_bp` (`Σ side × (realized_close −
       realized_open) / realized_open × 1e4`、単位サイズ)、`signed_bp_live_mean/sd/t`
       (`size × (pnl_live_bp − cost_live_bp)`、live 行のみ)、`signed_bp_bar_mean/sd/t`
@@ -41,8 +43,12 @@
       `signed_bp_live` (= `size × (pnl_live_bp − cost_live_bp)`) から計算し、bar 系列はゲートに使わない。
 - [ ] `export_execution_report_artifacts(report, csv_output_dir, scope, date_str)` が
       `csv/analytics/execution/{scope}/{date_str}/execution_{scope}.md|.csv|.json` (scope は
-      `weekly` / `monthly`) と `latest/execution_summary.json` を書く。md は book 別の表 1 つ、
-      ベンチマーク差の表 1 つ、ゲート進捗の表 1 つ。
+      `weekly` / `monthly`) を書く。md は book 別の表 1 つ、ベンチマーク差の表 1 つ、ゲート進捗の
+      表 1 つ。`latest/execution_summary.json` は期間窓の report からは書かず、
+      `export_execution_latest_summary(cumulative_report, csv_output_dir)` (new) が
+      `run_execution_report(csv_output_dir, start_as_of_jst=None, end_as_of_jst=None, ...)`
+      (history 全体を 1 つの窓として集計) の結果を書く。weekly / monthly の呼び出し元は scoped
+      artifact の直後にこれを呼ぶので、latest の内容は直前に走った scope に依存しない。
 - [ ] `scripts/run_fx_daily_protocol.py` の金曜 weekly block (`--- Weekly report (Friday auto-trigger) ---`
       の中、`export_weekly_report_artifacts` の後) で、同じ週窓について執行層の weekly artifact を
       生成する。失敗は `[WARN] Execution report generation failed (non-fatal)` (new) で握りつぶす。
@@ -56,12 +62,14 @@
       (b) その batch の評価行が指す `outcome.csv` の `outcome_id` / `window_start_jst` / `realized_open` /
       `realized_close`、(c) `analyze_estar_lag.find_snapshot_path(fxdata_dir, as_of.date())` で見つけた
       `input_snapshot.json` (`load_market_snapshot` で読み `build_baseline_context` へ) の 3 つが揃う batch
-      だけを対象にし、`history/{as_of}/{batch}/execution.csv` が**無い**場合だけ
-      `entry_status = backfill_bar` の判断 6 行と評価 6 行を生成する (`build_execution_decisions` に
-      `forecast_directions` の対応と `entry_status="backfill_bar"`, `live_entry=None` を渡す。
-      `ForecastRecord` / `OutcomeRecord` は復元しない)。揃わない batch は理由別に件数を出して skip。
-      既存ファイルは一切上書きしない。`--dry-run` で件数だけ出す。`fx-daily-data` には push しない
-      (ローカル checkout に書き、push は人が行う)。
+      だけを対象にし、`history/{as_of}/{batch}/execution.csv` が完全 (`is_complete_decision_file`)
+      で**無い**場合は `entry_status = backfill_bar` の判断 6 行と評価 6 行を生成する
+      (`build_execution_decisions` に `forecast_directions` の対応と `entry_status="backfill_bar"`,
+      `live_entry=None` を渡す。`ForecastRecord` / `OutcomeRecord` は復元しない)。`execution.csv` が
+      完全で `execution_evaluation.csv` が完全でない batch (前回の中断) は、既存の判断 6 行を
+      `load_execution_decisions_csv` で読んで評価 6 行だけを生成する (判断は書き直さない)。揃わない
+      batch は理由別に件数を出して skip。完全な既存ファイルは一切上書きしない。`--dry-run` で
+      件数だけ出す。`fx-daily-data` には push しない (ローカル checkout に書き、push は人が行う)。
 - [ ] `docs/specs/fx_execution_layer_v1.md` §8〜§10 を実装に合わせて更新 (Status は
       `Implemented (v1)` のまま、集計の列定義を追記)。`.claude/skills/fx-weekly-report/SKILL.md` §4 に
       `## 執行層 (仮想売買)` 節の追加手順を 1 段落で記す (artifact のパスと、ゲート進捗を 1 行で
@@ -97,15 +105,17 @@
 - PR title: `feat(fx): execution layer reporting, acceptance gate and history backfill`
 - Expected files changed: 上記 IN の一覧
 - Required tests:
-  - 集計: 合成した `execution_evaluation.csv` (3 book × 6 窓、live 欠落 1 行、side 0 1 行、
-    backfill 2 行) から、損益・資産・DD・t 値・capture・live 率・ゲートの各値を数値で固定。
+  - 集計: 合成した `execution_evaluation.csv` (6 book × 6 窓の完全 batch、live 欠落 1 行、side 0
+    1 行 (`skip_reason` 付き)、backfill 2 行) から、損益・資産・DD・t 値・capture・live 率・見送り
+    内訳・ゲートの各値を数値で固定 (詳細な数値検証は 3 book 分で十分だが fixture は 6 book を揃える)。
     重複 batch (同じ `forecast_batch_id` が 2 つの dir にある) が 1 回だけ数えられること。
   - ゲート: 4 条件の境界 (取引 99 と 100、t 1.99 と 2.00、DD −10% と −10.01%、ベンチマーク同額)、
     期間窓を狭めてもコホートが変わらないこと、`execution_version` が違う行と backfill 行が
     コホートに入らないこと、6 book 未満の batch が集計とコホートの両方から除外されること。
-  - export: 3 形式と `latest/execution_summary.json` が書かれること (`tmp_path`)。
-  - backfill: 既存 `execution.csv` を上書きしないこと、`--dry-run` が書かないこと、
-    不完全 batch (forecast 6 行) を飛ばすこと。
+  - export: 3 形式が書かれること、`latest/execution_summary.json` が累積 report から書かれ、
+    期間窓を変えても内容が変わらないこと (`tmp_path`)。
+  - backfill: 完全な既存 `execution.csv` を上書きしないこと、`execution.csv` だけある batch で評価
+    6 行だけが生成されること、`--dry-run` が書かないこと、不完全 batch (forecast 6 行) を飛ばすこと。
   - 既存テストは無変更で通る。
 
 ## Done When

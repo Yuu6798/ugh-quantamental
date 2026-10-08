@@ -116,7 +116,7 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
 | 列 | 内容 |
 |---|---|
 | `execution_version`, `book_id`, `as_of_jst`, `window_end_jst`, `forecast_batch_id`, `outcome_id` | キー |
-| `side`, `size`, `entry_status`, `entry_price_live` | 判断の写し |
+| `side`, `size`, `skip_reason`, `entry_status`, `entry_price_live` | 判断の写し。`skip_reason` は見送り内訳の集計用 (取引行は空) — 集計層は評価ファイルだけを読む |
 | `realized_open`, `realized_close` | `OutcomeRecord` の写し。出口 = `realized_close` |
 | `pnl_live_bp` | `side × (realized_close − entry_price_live) / entry_price_live × 1e4`、live 欠落時は空 |
 | `pnl_bar_bp` | `side × (realized_close − realized_open) / realized_open × 1e4` |
@@ -169,7 +169,7 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
 book_id)` で重複排除して読み、**6 book が揃わない batch は丸ごと除外** (件数と id を報告) した上で、
 book ごとに次を出す:
 
-- 判断数、取引数、見送り内訳、live 取得率
+- 判断数、取引数、見送り内訳 (評価行の `skip_reason` 別)、live 取得率
 - 方向的中率 (取引日)、capture bp (`Σ side × realized bp`、単位サイズ)、size 加重の日次リターン
   (live 系列 = `size × (pnl_live_bp − cost_live_bp)`、bar 系列 = `size × (pnl_bar_bp − cost_bar_bp)`) の
   平均・標準偏差・t 値を別々に
@@ -181,7 +181,9 @@ book ごとに次を出す:
 出力先: `csv/analytics/execution/weekly/<YYYYMMDD>/execution_weekly.{md,csv,json}`
 (金曜最終 retry の weekly block と月曜の `run_fx_analysis_pipeline.py` weekly モード) と
 `csv/analytics/execution/monthly/<YYYYMM>/execution_monthly.{md,csv,json}` (monthly モード)。
-`latest/execution_summary.json` に累積の book 別サマリを置く。
+`latest/execution_summary.json` は期間窓の report からは書かず、history 全体を 1 つの窓として
+同じ集計を走らせた累積の book 別サマリ (ゲート進捗を含む) を置く。weekly / monthly の生成時に
+それぞれ更新するが、内容は呼び出し元の期間窓に依存しない。
 
 ## 9. Governance and acceptance gate
 
@@ -208,7 +210,9 @@ book ごとに次を出す:
 `forecast_direction`、outcome は `outcome.csv` の `outcome_id` / `window_start_jst` / `realized_open` /
 `realized_close`、snapshot は `history/{as_of}/{batch}/input_snapshot.json` から取る。2026-05-07 以前は予測が無いので対象外 (2026-10-08 の
 Jan〜Oct 再計算は分析であり、観測記録には入れない)。backfill 行は集計で bar 系列にのみ入り、
-ゲート判定 (live 系列) には入らない。
+ゲート判定 (live 系列) には入らない。完全な既存ファイルは上書きしない。`execution.csv` が完全で
+`execution_evaluation.csv` が無い (または不完全な) batch は前回の中断とみなし、既存の判断 6 行を
+読んで評価 6 行だけを生成する (再実行で修復される)。
 
 ## 11. Module layout
 

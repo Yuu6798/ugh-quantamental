@@ -19,7 +19,8 @@
       FX-EXEC-REPORTING の backfill 行用に今から予約)、`entry_price_live` は
       `entry_status == "live"` のときだけ非 None (他 2 値では None)、`ExecutionEvaluation` の
       `pnl_live_bp` と `cost_live_bp` は `entry_price_live` が None のときだけ None (`cost_bar_bp` は常に
-      float)。
+      float)。`ExecutionEvaluation` は判断の `skip_reason` も写す (`side == 0` のときだけ非 None;
+      集計の見送り内訳は評価行だけから作る)。
       SQLAlchemy を import しない。
 - [ ] `src/ugh_quantamental/fx_protocol/execution.py` (new) が定数
       `EXECUTION_VERSION = "x1"`、`EXECUTION_INITIAL_EQUITY_JPY = 3_000_000`、
@@ -62,6 +63,7 @@
       空、`forecast_batch_id` が揃っていない、`window_start_jst != decisions[0].as_of_jst`、価格が
       非有限または 0 以下のときは `ValueError`。`side == 0` の行は `pnl_bar_bp 0.0`、`cost_bar_bp 0.0`、
       `hit None` (live 価格があれば `pnl_live_bp 0.0` / `cost_live_bp 0.0`、無ければ両方 None)。
+      `side` / `size` / `skip_reason` / `entry_status` / `entry_price_live` は判断行から写す。
 - [ ] `src/ugh_quantamental/fx_protocol/data_sources.py` に `fetch_live_spot_yahoo(*, timeout: int = 30)
       -> tuple[float, datetime]` (new) があり、`YahooFinanceFxMarketDataProvider` と同じ
       `https://query2.finance.yahoo.com/v8/finance/chart/USDJPY=X` から `meta.regularMarketPrice` を
