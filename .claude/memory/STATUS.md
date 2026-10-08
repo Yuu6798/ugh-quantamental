@@ -19,8 +19,8 @@ active queue - 未着手または進行中の Phase / Brief / Milestone のみ�
 3. **測定器の見直し (CC-M02 / CC-M03、10 月 artifact を見て判断)** - `inspect_magnitude_mapping` (5.0bp) / `inspect_state_mapping` (30bp) は絶対 bp で高ボラ月に発火しやすい (9 月 RW 平均誤差 52bp は 8 月の 2.1 倍)。RW 比の相対閾値を候補に。Axis 4 の `disconfirmer_explained` 集計が artifact に無い。
 4. **レンジ幅較正の brief 化 — 据え置き** - 9 月 Range 89.5%、外した 2 日 (9/3・9/7) は設計上のテール。sharpness 基準の定義が第 1 課題、一様スケールと条件付き幅は基準決定後に比較。急がない。
 5. **regime=choppy の判定保留を継続** - 標本ゼロ 13 週目。intervention_risk / volatility=high の崩落は「大変動直後に弱い」の言い換え (ラベルは move-size 由来)。
-6. **売買 / execution レイヤーの planning doc 起草** - conviction は e_star 符号整合時のみ信頼可、かつ**3 方向入力が同符号に揃った日 (少なくとも fundamental が ±1) の conviction は割り引く**条件 (9/25 は technical +0.77 なので「2 項とも飽和」では外れる)を sizing 入力設計に織り込む (findings 2026-09 §4)。
-7. **follow-up (低優先)** - PRICE-ALERT の sticky 挙動は open (9 月は検証機会なし、9/25 発報が未 clear で月をまたいだ)。cron 遅延 +3h39〜+6h56 は #130 で赤を生まなくなったため監視のみ。グリッド方針 (B7) は **2026-08-30 ユーザー判断で終了 — 追跡・エスカレーション対象外**。
+6. **執行層 (UGH 売買エンジン x1 + GPT-M3 ベンチマーク観測) の実装** - 設計済 (10/8、`docs/specs/fx_execution_layer_v1.md`)。brief **FX-EXEC-LAYER** (判断の記録・live spot・評価・CSV、`docs/briefs/2026-10_FX-EXEC-LAYER.md`) → merge 後に **FX-EXEC-REPORTING** (週次・月次集計、合格ゲート、backfill)。根拠: 10/8 の試算で β の方向は 60% 的中だが conviction が逆相関 (<0.4 で 78%・+884bp、≥0.8 で 53%・−689bp) で magnitude がそれに比例、合議型は最悪の部分集合、売買順位は政策ショック日で決まり 199 日でも |t| ≤ 1.3 (`.claude/memory/2026-10-08.md`)。執行層は conviction を使わず (vol 目標 30bp + ショックフィルタ 2.5×trailing)、`execution_version` で凍結、前向き観測のみ。engine は変更しない。
+7. **follow-up (低優先)** - **yahoo fallback の退化 bar ガード** (9/29: open ≈ close で trailing 統計量が 1.23bp に潰れ batch 7 件と 9/28 outcome を汚染、brief 未起草)。PRICE-ALERT の sticky 挙動は 9/25→9/28 で実測済 (設計どおり、再武装案は保留)。cron 遅延 +3h39〜+6h56 は #130 で赤を生まなくなったため監視のみ。グリッド方針 (B7) は **2026-08-30 ユーザー判断で終了 — 追跡・エスカレーション対象外**。
 
 ## 直近 merged
 

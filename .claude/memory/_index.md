@@ -15,6 +15,7 @@
 - 2026-06-27: 2026-06 engine review program (planning doc + Task Brief 5 本、PR #114、Codex 8 rounds)。regime ラベルの循環を検出。詳細は `archive/2026-06/2026-06-27.md`
 - 2026-06-28: 2026-06 の 5 briefs を全実装 (#116〜#120)、engine default v2.5 (ANNOT-LIVE / HYSTERESIS / MAG-EXPANSION / STATEPROXY-REDEF / GOV-REGIME-FLAGS)。詳細は `archive/2026-06/2026-06-28.md`
 - 2026-10-01: 2026-09 月次レビュー — 9 月の RW 比 +141bp は 3 日 (conviction 上限の順張り反転 × v2.5 拡張項) に集中。replay で拡張項無効化が 6 か月すべて改善 → **engine v2.7** (#134)、fixing 前着地の繰り越し (#135)、findings + briefs + replay script (#133、Codex 9 rounds / 13 件)、policy encode (#136)。
+- 2026-10-08: UGH の売買価値の切り分け (方向 60% は実在、conviction 逆相関で magnitude が打ち消す、合議は最悪部分集合、順位は政策ショック 8 日) と仮想売買試算 (合議・GPT-M3・Fable-VR1・1 月拡張・v2.7 再計算)。執行層 v1 の spec + brief FX-EXEC-LAYER / FX-EXEC-REPORTING を起草。9/29 yahoo 退化 bar を発見・訂正。
 
 <!--
 新規エントリのテンプレート:
