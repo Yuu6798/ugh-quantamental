@@ -218,7 +218,8 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
   `execution.csv` はあるが完全でない dir (`incomplete_decision_batches`、version 不明なら現行版扱い)、
   または現行版の activation marker (`execution.EXECUTION_ACTIVATION_AS_OF`、コードに固定した初回運用日。
   最初に publish に成功した日から推定しない — 初日の publish 失敗を見失うため) 以降で forecast batch が
-  あるのに `execution.csv` が丸ごと無い batch (`missing_decisions`。窓内に判断を publish できなかった
+  あるのに正本 dir (`history/{as_of_jst}/{forecast_batch_id}/`。forecast batch は `forecast_batch_id` で
+  重複排除し、catch-up が END 日付 dir に置いた複製は見ない) に `execution.csv` が丸ごと無い batch (`missing_decisions`。窓内に判断を publish できなかった
   日。pending 窓は除く) が
   1 つでもあれば、条件の現在値は出すがゲートは **blocked** (`passed = False`、`blocked_reasons` に
   `incomplete_batches` / `missing_evaluations` / `incomplete_decisions` / `missing_decisions`)。欠けた archive を黙って短くした上で合格にはしない

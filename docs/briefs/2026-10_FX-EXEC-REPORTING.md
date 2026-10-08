@@ -28,9 +28,11 @@
       `incomplete_decision_batches: tuple[str, ...]` (`history/{date}/{batch}` の相対 path) として返す
       (version は読めないことがあるので現行版扱い)。さらに **forecast batch の棚卸し**: `execution.EXECUTION_ACTIVATION_AS_OF`
       (現行版の activation marker。最初に publish に成功した日ではなく、コードに固定した日付) 以降の
-      `history/*/*/forecast.csv` (7 行) のうち、同 dir に `execution.csv` が**丸ごと無い** batch を
-      `missing_decisions: tuple[MissingExecutionDecision, ...]` (`forecast_batch_id`, `as_of_jst`) として
-      返す (判断の publish が窓内に一度も成功しなかった日。窓が閉じた batch は live 判断を作らない設計
+      `history/*/*/forecast.csv` (7 行) を **`forecast_batch_id` で重複排除**し (catch-up は同じ batch の
+      `forecast.csv` を窓の END 日付 dir にも複製する)、各 batch の正本 dir を forecast 行の `as_of_jst` から
+      `history/{as_of_jst:%Y%m%d}/{forecast_batch_id}/` と解決して、そこに `execution.csv` が
+      **丸ごと無い** batch を `missing_decisions: tuple[MissingExecutionDecision, ...]`
+      (`forecast_batch_id`, `as_of_jst`) として返す (forecast の複製が置かれた dir は見ない) (判断の publish が窓内に一度も成功しなかった日。窓が閉じた batch は live 判断を作らない設計
       なので、backfill が `backfill_bar` で埋めるまでここに残る。`window_end_jst > generated_at_utc`
       の pending 窓は除く)。走査規約は `labeled_observations.collect_evaluated_forecast_rows` と同じ。
 - [ ] `run_execution_report(csv_output_dir, *, start_as_of_jst, end_as_of_jst, generated_at_utc)
