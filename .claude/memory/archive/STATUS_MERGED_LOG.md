@@ -72,3 +72,7 @@
 ## 2026-10-01 (PR #137 merge sweep overflow)
 
 - **PR #132 / 9/14–9/18 週報** (2026-09-23) - 日米同時利上げ週 (FOMC 3.75–4.00% 12-0、日銀 1.25% 7-2)、USDJPY 3 連騰 +189bp。UGH Range 16/16、方向 α1/β2/γ1/δ0。前週の「1 日遅れ追随」を 2 週 10 日で数え直し、前窓 down 後 20/20・up 後 2/20 の非対称を報告 (→ 9/25 週報で撤回、10/1 月次で機序を「同符号に揃う冗長入力の多数決」と特定)。運用: #130 の金曜繰り越しが本番初動作 (15:02Z 着地で金曜完走、Saturday artifact 4 週ぶり)、#131 の重複 0 件。月〜木最終 retry の偽 provider lag を新規発見。Codex 6 rounds / 8 件全採用 (数え間違い・因果の時系列・持ち越し番号ずれ・p_weight 順位・グリッド週数・volatility baseline の 5 日窓)。
+
+## 2026-10-08 (PR #138 merge sweep overflow)
+
+- **PR #133 / 2026-09 月次レビュー + briefs 2 本 + replay script + 9/21–9/25 週報** (2026-10-01) - 9 月の RW 比 +141bp は 9/10・9/14・9/25 の 3 日 (+148bp) に集中、いずれも conviction 0.75〜0.95 の順張り反転。機序は同符号に揃う冗長入力 (fundamental 飽和) → alignment≈1 → conviction 上限 → v2.5 拡張 ×1.2〜1.7。queue 2 (9/7 FLAT 分解) 決着: price_implied と SMA 系の符号衝突で e_star≈0、閾値では救えない。signal スケール案は縮小効果のみで不採用。`scripts/replay_magnitude_counterfactual.py` (persisted 全件 validate、mode A は v2.6 固定、`--expected-validated`)。**Codex 9 rounds / 13 件全採用** — script の検証網羅性 6 件、brief が名指す symbol/flag 名/条件分岐の実在確認 4 件 (`/new-brief` §1a の grounding を skip した結果)、findings の表現 3 件。
