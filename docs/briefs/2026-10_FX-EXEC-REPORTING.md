@@ -26,8 +26,13 @@
       ファイルの存在。評価ファイルが丸ごと無い・header のみの batch もここで捕捉する)。棚卸しで
       `execution.csv` はあるが完全でない (header のみ・6 book 未満・読めない) dir は
       `incomplete_decision_batches: tuple[str, ...]` (`history/{date}/{batch}` の相対 path) として返す
-      (version は読めないことがあるので現行版扱い)。走査規約は
-      `labeled_observations.collect_evaluated_forecast_rows` と同じ。
+      (version は読めないことがあるので現行版扱い)。さらに **forecast batch の棚卸し**: 現行版の最初の
+      判断 batch (`execution_version == EXECUTION_VERSION` の `execution.csv` のうち最小の `as_of_jst`)
+      以降の `history/*/*/forecast.csv` (7 行) のうち、同 dir に `execution.csv` が**丸ごと無い** batch を
+      `missing_decisions: tuple[MissingExecutionDecision, ...]` (`forecast_batch_id`, `as_of_jst`) として
+      返す (判断の publish が窓内に一度も成功しなかった日。窓が閉じた batch は live 判断を作らない設計
+      なので、backfill が `backfill_bar` で埋めるまでここに残る。`window_end_jst > generated_at_utc`
+      の pending 窓は除く)。走査規約は `labeled_observations.collect_evaluated_forecast_rows` と同じ。
 - [ ] `run_execution_report(csv_output_dir, *, start_as_of_jst, end_as_of_jst, generated_at_utc)
       -> dict[str, Any]` が純粋な集計 (ファイル読みのみ、書き込みなし) で、**期間窓内**の行について
       (`start_as_of_jst` / `end_as_of_jst` は `datetime | None`、None はその端を無制限にする =
@@ -39,7 +44,9 @@
       (`size × (pnl_live_bp − cost_live_bp)`、**live かつ取引行 `side != 0`** のみ)、`signed_bp_bar_mean/sd/t`
       (`size × (pnl_bar_bp − cost_bar_bp)`、全 entry_status の取引行)、`capture_bp` だけは単位サイズのまま、
       `pnl_jpy_live`, `pnl_jpy_bar`, `final_equity_jpy_live`, `final_equity_jpy_bar`,
-      `max_drawdown_live`, `max_drawdown_bar`, `profit_factor_live`, `cost_jpy_live`, `cost_jpy_bar`
+      `max_drawdown_live`, `max_drawdown_bar`, `profit_factor_live` (live 資産曲線の取引ごとの純損益
+      `pnl_jpy` (コスト控除後) について `Σ 正の pnl_jpy / |Σ 負の pnl_jpy|`。負の取引が無い、または取引が
+      無いときは None = JSON null、`inf` は出さない), `cost_jpy_live`, `cost_jpy_bar`
       (コスト合計は系列ごと: live 系列は live 行の、bar 系列は全行の資産曲線で発生した円コスト)。資産曲線は spec §5.2 の式 (初期 3,000,000 円、複利、
       `position_usd = equity × size / entry`) で、live 系列は `entry_status == live` の行のみ、
       bar 系列は全行 (`backfill_bar` を含む)。
@@ -56,10 +63,12 @@
       book は条件 4 の比較にだけ使う。t 値は `signed_bp_live` (= `size × (pnl_live_bp − cost_live_bp)`)
       から計算し、bar 系列はゲートに使わない。現行 `execution_version` に `incomplete_batches` または
       `missing_evaluations` (`window_end_jst > generated_at_utc` の pending 窓は除く) または
-      `incomplete_decision_batches` が 1 つでもあれば `gate.passed = False` かつ `gate.blocked_reasons`
-      (new; `tuple[str, ...]`、値は `"incomplete_batches"` / `"missing_evaluations"` /
-      `"incomplete_decisions"`、通常は空) に理由を入れる — 欠けた archive を黙って短くして合格には
-      しない。
+      `incomplete_decision_batches` または `missing_decisions` が 1 つでもあれば `gate.passed = False` かつ
+      `gate.blocked_reasons` (new; `tuple[str, ...]`、値は `"incomplete_batches"` /
+      `"missing_evaluations"` / `"incomplete_decisions"` / `"missing_decisions"`、通常は空) に理由を
+      入れる — 欠けた archive を黙って短くして合格にはしない。`missing_decisions` は backfill が
+      `backfill_bar` 行を書けば解消する (その batch は live コホートに入らず、`live_coverage_rate` に
+      失われた日として現れる)。
 - [ ] `export_execution_report_artifacts(report, csv_output_dir, scope, date_str)` が
       `csv/analytics/execution/{scope}/{date_str}/execution_{scope}.md|.csv|.json` (scope は
       `weekly` / `monthly`) を書く。md は層 (version) ごとに book 別の表 1 つとベンチマーク差の表 1 つ、
@@ -148,7 +157,10 @@
     だけがあり評価ファイルが無い (または header のみの) 過去窓で `missing_evaluations` に入り
     `"missing_evaluations" in blocked_reasons` になること、`window_end_jst` が `generated_at_utc` より
     後の pending 窓はそこに入らないこと、header のみの `execution.csv` だけがある dir が
-    `incomplete_decision_batches` に入り `"incomplete_decisions" in blocked_reasons` になること、見送り
+    `incomplete_decision_batches` に入り `"incomplete_decisions" in blocked_reasons` になること、現行版の
+    最初の判断 batch 以降で `forecast.csv` だけがあり `execution.csv` が無い過去窓が `missing_decisions`
+    に入り `"missing_decisions" in blocked_reasons` になり、backfill 後 (backfill_bar 行あり) は外れること、
+    `profit_factor_live` が負の取引ゼロで None になること、見送り
     (side 0) の live 行を足しても `signed_bp_live_t` と `trade_count` が変わらないこと、
     `execution_version` が 2 つ混在する fixture で層が 2 つに
     分かれ版を跨いで足されないこと、`trade_count` が `ugh_x1` の取引行数だけを数えること (他 book の

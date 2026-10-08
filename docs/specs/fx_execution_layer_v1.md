@@ -215,9 +215,11 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
 - 現行 version の batch に 6 book 未満のもの (§8 の `incomplete_batches`)、または完全な `execution.csv`
   があるのに完全な `execution_evaluation.csv` が無い batch (`missing_evaluations`。期待コホートは判断
   ファイルの棚卸しから導く。`window_end_jst` が集計時刻より後の pending 窓は除く)、または
-  `execution.csv` はあるが完全でない dir (`incomplete_decision_batches`、version 不明なら現行版扱い) が
+  `execution.csv` はあるが完全でない dir (`incomplete_decision_batches`、version 不明なら現行版扱い)、
+  または現行版の最初の判断 batch 以降で forecast batch があるのに `execution.csv` が丸ごと無い batch
+  (`missing_decisions`。窓内に判断を publish できなかった日。pending 窓は除く) が
   1 つでもあれば、条件の現在値は出すがゲートは **blocked** (`passed = False`、`blocked_reasons` に
-  `incomplete_batches` / `missing_evaluations` / `incomplete_decisions`)。欠けた archive を黙って短くした上で合格にはしない
+  `incomplete_batches` / `missing_evaluations` / `incomplete_decisions` / `missing_decisions`)。欠けた archive を黙って短くした上で合格にはしない
   (昇格証拠は欠落・部分 batch で fail する、`AGENTS.md` §5)。修復は Step 4c の再スキャンか §10 の
   backfill で行い、修復できない欠落は data 側の問題として扱う (ゲートは外さない)。block の判定は
   現行 version の batch に限る (`incomplete_batches` / `missing_evaluations` は `execution_version` を
