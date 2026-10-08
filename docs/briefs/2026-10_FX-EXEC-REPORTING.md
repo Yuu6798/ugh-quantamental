@@ -39,7 +39,8 @@
       (`size × (pnl_live_bp − cost_live_bp)`、**live かつ取引行 `side != 0`** のみ)、`signed_bp_bar_mean/sd/t`
       (`size × (pnl_bar_bp − cost_bar_bp)`、全 entry_status の取引行)、`capture_bp` だけは単位サイズのまま、
       `pnl_jpy_live`, `pnl_jpy_bar`, `final_equity_jpy_live`, `final_equity_jpy_bar`,
-      `max_drawdown_live`, `max_drawdown_bar`, `profit_factor_live`, `cost_jpy_total`。資産曲線は spec §5.2 の式 (初期 3,000,000 円、複利、
+      `max_drawdown_live`, `max_drawdown_bar`, `profit_factor_live`, `cost_jpy_live`, `cost_jpy_bar`
+      (コスト合計は系列ごと: live 系列は live 行の、bar 系列は全行の資産曲線で発生した円コスト)。資産曲線は spec §5.2 の式 (初期 3,000,000 円、複利、
       `position_usd = equity × size / entry`) で、live 系列は `entry_status == live` の行のみ、
       bar 系列は全行 (`backfill_bar` を含む)。
 - [ ] 同関数が `benchmark_deltas` を層ごとに返す (`strata[version].benchmark_deltas`): `ugh_x1` と

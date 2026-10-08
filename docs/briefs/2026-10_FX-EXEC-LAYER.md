@@ -94,8 +94,13 @@
       `csv_utils` を再利用し、`make_daily_csv_stem` の命名に揃える。
 - [ ] `FxDailyAutomationConfig` に `run_execution_layer: bool = True` (new)、
       `FxDailyAutomationResult` に `execution_csv_path: str | None = None`、
-      `execution_evaluation_csv_path: str | None = None`、`execution_decisions_recorded: int = 0`、
-      `execution_evaluations_recorded: int = 0` (new) が追加され、既存テストは無変更で通る。
+      `execution_evaluation_csv_path: str | None = None` (スキャンで評価した窓のうち `as_of_jst` が
+      最新のものの staging path)、`execution_decisions_recorded: int = 0`、
+      `execution_evaluations_recorded: int = 0` (全窓の合計)、
+      `execution_evaluation_windows: tuple[ExecutionEvaluationWindowResult, ...] = ()` (new;
+      `automation_models.py` に `ExecutionEvaluationWindowResult` (`forecast_batch_id`, `as_of_jst`,
+      `evaluation_csv_path`, `evaluation_count`) を追加し、スキャンが評価した窓を `as_of_jst` 昇順で
+      全件返す。`catchup_windows` と同じ考え方) が追加され、既存テストは無変更で通る。
 - [ ] `run_fx_daily_protocol_once` が `config.write_csv_exports and config.run_execution_layer` の
       ときだけ次を行う (spec §7):
       - Step 3b: batch が存在し (`forecast_batch_id is not None`、作成直後でも既存でも) かつ

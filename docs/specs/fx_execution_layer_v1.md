@@ -162,8 +162,10 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
 | 5b / 6b | `execution.csv` / `execution_evaluation.csv` を `history/{date}/{batch}/` に書き、`latest/execution.csv` を更新する。既存の `execution.csv` は上書きしない (§3) |
 
 `FxDailyAutomationConfig` に `run_execution_layer: bool = True` (new) を追加。
-`FxDailyAutomationResult` に `execution_csv_path`, `execution_evaluation_csv_path`,
-`execution_decisions_recorded: int`, `execution_evaluations_recorded: int` (new) を追加。
+`FxDailyAutomationResult` に `execution_csv_path`, `execution_evaluation_csv_path` (評価した窓のうち
+最新のもの), `execution_decisions_recorded: int`, `execution_evaluations_recorded: int` (全窓の合計),
+`execution_evaluation_windows: tuple[ExecutionEvaluationWindowResult, ...]` (スキャンが評価した窓を
+全件、`forecast_batch_id` / `as_of_jst` / `evaluation_csv_path` / `evaluation_count`) (new) を追加。
 
 失敗分離: 執行層の例外は Step 8 と同じく non-fatal (warning ログ、結果に `None`)。予測・outcome・
 評価の記録を止めない。
