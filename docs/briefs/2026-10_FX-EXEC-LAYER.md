@@ -15,8 +15,9 @@
       の 6 つ、この順)、`ExecutionDecision`、`ExecutionEvaluation` (いずれも
       `ConfigDict(extra="forbid", frozen=True)`) があり、spec §5.1 / §5.2 の列をフィールドとして持つ。
       validator: `side ∈ {-1, 0, 1}`、`0.0 ≤ size ≤ 1.0`、`side == 0` と `size == 0.0` は同値、
-      `entry_status` は `Literal["live", "live_unavailable"]`、`entry_price_live` は
-      `entry_status == "live"` のときだけ非 None、`pnl_live_bp` は `entry_price_live` が None なら None。
+      `entry_status` は `Literal["live", "live_unavailable", "backfill_bar"]` (`backfill_bar` は
+      FX-EXEC-REPORTING の backfill 行用に今から予約)、`entry_price_live` は
+      `entry_status == "live"` のときだけ非 None (他 2 値では None)、`pnl_live_bp` は `entry_price_live` が None なら None。
       SQLAlchemy を import しない。
 - [ ] `src/ugh_quantamental/fx_protocol/execution.py` (new) が定数
       `EXECUTION_VERSION = "x1"`、`EXECUTION_INITIAL_EQUITY_JPY = 3_000_000`、
@@ -75,18 +76,24 @@
       `execution_evaluations_recorded: int = 0` (new) が追加され、既存テストは無変更で通る。
 - [ ] `run_fx_daily_protocol_once` が `config.write_csv_exports and config.run_execution_layer` の
       ときだけ次を行う (spec §7):
-      - Step 3b: `forecast_created` が True のときに限り、`FxForecastRepository.load_fx_forecast_batch`
-        で読んだ batch、`build_baseline_context(snapshot)`、`snapshot.completed_windows` の終値から
-        `build_execution_decisions` を呼ぶ。live spot は `fetch_live_spot_yahoo` を**1 回**呼び、
-        失敗時は warning ログ + `entry_status "live_unavailable"`。`forecast_created` が False の
-        run は判断を作らない。
+      - Step 3b: batch が存在し (`forecast_batch_id is not None`、作成直後でも既存でも) かつ
+        `history/{date}/{batch}/execution.csv` が**存在しない**ときに限り、
+        `FxForecastRepository.load_fx_forecast_batch` で読んだ batch、`build_baseline_context(snapshot)`、
+        `snapshot.completed_windows` の終値から `build_execution_decisions` を呼ぶ。通常は batch を作った
+        run がこれに当たる。前 run が判断の書き込みに失敗していれば次の run がこの経路で回復する
+        (live spot はその時刻で取り直す。`entry_time_utc` がそれを記録する)。既にファイルがあれば
+        何もしない (live spot も取り直さない)。live spot は `fetch_live_spot_yahoo` を**1 回**呼び、
+        失敗時は warning ログ + `entry_status "live_unavailable"`。
       - Step 4c: Step 4 で outcome が記録された窓 (`prior_batch_id`) と、Step 4b の catch-up で
         outcome が記録された各窓について、`history/{window date}/{batch}/execution.csv` が存在すれば
         それを読んで `evaluate_execution_decisions` を呼ぶ。存在しなければ何もしない (warning 不要)。
       - Step 5b / 6b: export と publish。`execution_evaluation.csv` は評価した窓の batch dir に書く
         (当日の dir ではない)。
       - 執行層の例外はすべて捕捉して warning ログにし、`FxDailyAutomationResult` の該当フィールドを
-        `None` / `0` のまま返す。予測・outcome・評価・CSV の既存 Step に影響しない。
+        `None` / `0` のまま返す。予測・outcome・評価・CSV の既存 Step に影響しない。判断の書き込みに
+        失敗した日は、上の「`execution.csv` が無ければ作る」経路により次の run (同日の retry または
+        翌日の run が同じ batch を見る場合) で再試行される。評価の書き込み失敗も同様で、Step 4c は
+        `execution_evaluation.csv` が無い窓を毎 run 再評価する (outcome が DB にある限り冪等)。
 - [ ] 全 Step で `datetime.now` を使う箇所は automation 側に限り、`execution.py` には入れない。
 - [ ] `docs/specs/fx_execution_layer_v1.md` の Status を `Implemented (v1, FX-EXEC-LAYER)` に更新し、
       逸脱があれば §12 に記す。`docs/specs/fx_daily_automation_v1.md` の Step 一覧に 3b / 4c / 5b / 6b を
@@ -152,8 +159,9 @@
   - exports: fieldnames が spec の列順、publish が既存 `execution.csv` を上書きしないこと、
     `latest/execution.csv` が更新されること (`tmp_path`)。
   - automation: (a) `forecast_created` の run が 6 行の `execution.csv` を書き
-    `execution_decisions_recorded == 6`、(b) 同日 2 回目の run (batch 既存) が判断を作らず既存
-    ファイルを変えない、(c) 翌日の run が `execution_evaluation.csv` 6 行を前日の batch dir に書き
+    `execution_decisions_recorded == 6`、(b) 同日 2 回目の run (batch 既存、`execution.csv` あり) が
+    判断を作らず既存ファイルを変えない (live spot も呼ばれない)、(b2) batch 既存で `execution.csv` が
+    無い run が判断を作る (回復経路)、(c) 翌日の run が `execution_evaluation.csv` 6 行を前日の batch dir に書き
     `execution_evaluations_recorded == 6`、(d) live 取得失敗で `entry_status live_unavailable` かつ
     run は成功、(e) `run_execution_layer=False` で何も書かない、(f) 執行層で例外を起こしても
     `forecast_created` と outcome 記録は保たれる。

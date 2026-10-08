@@ -59,9 +59,12 @@ run 実行時 (観測実績 18:00〜翌 03:00 JST) であり、**D 08:00 に約�
 持ち越しなし。従来の試算で使った「翌営業日足」方式は、live 価格が記録される v1 では廃止する
 (別仮説の検証になるため)。
 
-判断は **batch D を作成した run** (`FxDailyAutomationResult.forecast_created == True`) が 1 回だけ
-記録する。冪等な再実行 (同日の 2 本目以降の retry) は live spot を取り直さず、既存の
-`execution.csv` を上書きしない。繰り越し run (#130 / #135) は batch を作らないので判断も作らない。
+判断は、batch D が存在し、かつ `history/{D}/{batch}/execution.csv` が**未発行**の run が記録する。
+通常は batch D を作成した run がこれに当たる。同日の 2 本目以降の retry は、ファイルがあれば
+live spot を取り直さず何もしない。前 run が判断の書き込みに失敗していた場合だけ、次の run が
+その時刻の live spot で記録して回復する (`entry_time_utc` が実際の判断時刻)。既存ファイルは
+決して上書きしない。繰り越し run (#130 / #135) は batch を作らないが、既存 batch の `execution.csv`
+が欠けていれば同じ回復経路で記録する。
 
 ## 4. Books (事前登録、`execution_version = "x1"`)
 
@@ -99,7 +102,7 @@ run 実行時 (観測実績 18:00〜翌 03:00 JST) であり、**D 08:00 に約�
 | `side` | `1` / `-1` / `0` |
 | `size` | `[0.0, 1.0]`、`side == 0` なら `0.0` |
 | `skip_reason` | §4 の識別子、取引時は空 |
-| `entry_status` | `live` / `live_unavailable` |
+| `entry_status` | `live` / `live_unavailable` / `backfill_bar` (§10 の backfill 行。live 価格なし) |
 | `entry_price_live` | live spot、取得失敗時は空 |
 | `entry_time_utc` | live spot の取得時刻 (失敗時は判断時刻) |
 | `entry_vendor`, `entry_feed` | `yahoo_finance` / `chart/USDJPY=X` (§6) |
@@ -141,7 +144,7 @@ run 実行時 (観測実績 18:00〜翌 03:00 JST) であり、**D 08:00 に約�
 
 | Step | 内容 |
 |---|---|
-| 3b (Step 3 の直後) | `forecast_created` が True のとき: batch と `build_baseline_context(snapshot)` と snapshot から 6 件の `ExecutionDecision` を作る (純関数 `build_execution_decisions`)。live spot を取得して記録する |
+| 3b (Step 3 の直後) | batch が存在し `history/{date}/{batch}/execution.csv` が無いとき: batch と `build_baseline_context(snapshot)` と snapshot から 6 件の `ExecutionDecision` を作る (純関数 `build_execution_decisions`)。live spot を取得して記録する。ファイルがあれば何もしない (§3) |
 | 4c (Step 4 の直後) | 窓 D の outcome が記録されたとき: `history/{D}/{batch}/execution.csv` を読み、`ExecutionEvaluation` 6 件を作る (純関数 `evaluate_execution_decisions`)。Step 4b の catch-up で outcome が回収された窓も同様に評価する |
 | 5b / 6b | `execution.csv` / `execution_evaluation.csv` を `history/{date}/{batch}/` に書き、`latest/execution.csv` を更新する。既存の `execution.csv` は上書きしない (§3) |
 
@@ -154,14 +157,17 @@ run 実行時 (観測実績 18:00〜翌 03:00 JST) であり、**D 08:00 に約�
 
 ## 8. Aggregation (FX-EXEC-REPORTING)
 
-`execution_reporting.py` (new) が `history/*/*/execution_evaluation.csv` を `forecast_batch_id`
-で重複排除して読み、book ごとに次を出す:
+`execution_reporting.py` (new) が `history/*/*/execution_evaluation.csv` を `(forecast_batch_id,
+book_id)` で重複排除して読み、**6 book が揃わない batch は丸ごと除外** (件数と id を報告) した上で、
+book ごとに次を出す:
 
 - 判断数、取引数、見送り内訳、live 取得率
 - 方向的中率 (取引日)、capture bp (`Σ side × realized bp`、単位サイズ)、signed bp の平均・標準偏差・t 値
+  (live 系列 = `pnl_live_bp − cost_bp`、bar 系列 = `pnl_bar_bp − cost_bp` を別々に)
 - 損益 (円、live 系列と bar 系列)、最終資産、最大 DD、PF、コスト合計
 - ベンチマーク差: `ugh_x1` と `bench_gpt_m3` / `bench_long` の損益差と capture 差
-- 合格ゲート進捗 (§9)
+- 合格ゲート進捗 (§9)。ゲートの母集団は週次・月次の期間窓とは独立で、history 全体のうち
+  `execution_version` が現行値かつ `entry_status == live` の完全 batch の累積コホート
 
 出力先: `csv/analytics/execution/weekly/<YYYYMMDD>/execution_weekly.{md,csv,json}`
 (金曜最終 retry の weekly block と月曜の `run_fx_analysis_pipeline.py` weekly モード) と
@@ -174,9 +180,10 @@ run 実行時 (観測実績 18:00〜翌 03:00 JST) であり、**D 08:00 に約�
   本 spec の改訂、`x2` への bump、改訂日の記録を伴う。bump 前の行は旧版として残す。
 - 月次レビューは執行層の集計を**観測**し、`docs/engine_review_YYYY_MM_findings.md` に 1 節を
   設ける。途中でのパラメータ調整は禁止 (同じデータで選んだ変更は検証にならない)。
-- 合格ゲート (`ugh_x1` を実運用候補に進める条件、すべて live 系列):
+- 合格ゲート (`ugh_x1` を実運用候補に進める条件、すべて live 系列。母集団は現行 `execution_version`
+  の累積コホートで、版を bump したらコホートもゼロから始まる):
   1. 取引 100 回以上かつ観測 6 か月以上
-  2. コスト控除後の signed bp の t 値 ≥ 2.0
+  2. コスト控除後の live signed bp (`pnl_live_bp − cost_bp`) の t 値 ≥ 2.0
   3. 最大 DD ≤ 初期資産の 10%
   4. 同期間の `bench_gpt_m3` と `bench_long` の両方を損益で上回る
 - 不合格なら `x2` として設計し直し、観測を 1 からやり直す (期間を継ぎ足さない)。
