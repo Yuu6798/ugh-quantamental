@@ -206,7 +206,8 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
      (`observation_days`、評価済み窓の数) は情報として出すが閾値には使わない
   2. コスト控除後・size 加重の live 日次リターン (`size × (pnl_live_bp − cost_live_bp)`) の t 値 ≥ 2.0
      (標本標準偏差 `stdev`、n − 1 で割る。`pstdev` は使わない)
-  3. 最大 DD ≤ 初期資産の 10%
+  3. 最大 DD ≤ 10% (`max_drawdown_live` は正の大きさ `max_t (peak_t − equity_t) / peak_t`、0 以上 1 以下。
+     判定は `≤ 0.10`: ちょうど 10.00% は合格、10.01% は不合格)
   4. 同期間の `bench_gpt_m3` と `bench_long` の両方を損益で上回る
 - 現行 version の batch に 6 book 未満のもの (§8 の `incomplete_batches`)、または完全な `execution.csv`
   があるのに完全な `execution_evaluation.csv` が無い batch (`missing_evaluations`。期待コホートは判断
@@ -226,7 +227,8 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
 (評価と outcome は翌日の batch dir にあるため、`labeled_observations.collect_evaluated_forecast_rows`
 と同じく `forecast_id` でグローバルに引く)。方向は `forecast.csv` の `strategy_kind` /
 `forecast_direction`、outcome は `outcome.csv` の `outcome_id` / `window_start_jst` / `realized_open` /
-`realized_close`、snapshot は `history/{as_of}/{batch}/input_snapshot.json` から取る。2026-05-07 以前は予測が無いので対象外 (2026-10-08 の
+`realized_close`、snapshot はその batch 自身の `history/{as_of}/{forecast_batch_id}/input_snapshot.json`
+を直接解決する (日付だけで探さない。無ければその batch は skip)。2026-05-07 以前は予測が無いので対象外 (2026-10-08 の
 Jan〜Oct 再計算は分析であり、観測記録には入れない)。backfill 行は集計で bar 系列にのみ入り、
 ゲート判定 (live 系列) には入らない。完全な既存ファイルは上書きしない。`execution.csv` が完全で
 `execution_evaluation.csv` が無い (または不完全な) batch は前回の中断とみなし、既存の判断 6 行を

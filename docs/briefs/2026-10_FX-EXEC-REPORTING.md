@@ -73,8 +73,9 @@
       と同じく `forecast_id → evaluation`、`outcome_id → outcome` のグローバル索引を先に作り、
       `forecast_batch_id` ごとに (a) `forecast.csv` の 7 行の `strategy_kind` / `forecast_direction`、
       (b) その batch の評価行が指す `outcome.csv` の `outcome_id` / `window_start_jst` / `realized_open` /
-      `realized_close`、(c) `analyze_estar_lag.find_snapshot_path(fxdata_dir, as_of.date())` で見つけた
-      `input_snapshot.json` (`load_market_snapshot` で読み `build_baseline_context` へ) の 3 つが揃う batch
+      `realized_close`、(c) その batch 自身の `history/{as_of:%Y%m%d}/{forecast_batch_id}/input_snapshot.json`
+      (`forecast_batch_id` の dir を直接解決する。`find_snapshot_path` のような日付だけの探索は使わない。
+      `analyze_estar_lag.load_market_snapshot` で読み `build_baseline_context` へ) の 3 つが揃う batch
       だけを対象にし、`history/{as_of}/{batch}/execution.csv` が完全 (`is_complete_decision_file`)
       で**無い**場合は `entry_status = backfill_bar` の判断 6 行と評価 6 行を生成する
       (`build_execution_decisions` に `forecast_directions` の対応と `entry_status="backfill_bar"`,
@@ -108,7 +109,9 @@
   `size × (pnl_live_bp − cost_live_bp)` (live 行のみ)、bar 系列は `size × (pnl_bar_bp − cost_bar_bp)`。
   `capture_bp` は単位サイズの方向の価値、signed bp は売買方針の実リターンと役割を分ける。`n < 3` または `stdev == 0` なら None。
   ゲートは live 系列のみ。
-- 最大 DD は資産曲線のピーク比。資産曲線は行を `as_of_jst` 昇順で畳む。
+- 最大 DD は資産曲線のピーク比で**正の大きさ** (`max_drawdown_* = max_t (peak_t − equity_t) / peak_t`、
+  0 以上 1 以下)。ゲート条件 3 は `max_drawdown_live <= 0.10` (10.00% は合格、10.01% は不合格)。
+  資産曲線は行を `as_of_jst` 昇順で畳む。
 - md の数値書式は `weekly_report_exports._fmt_pct` / `_fmt_bp` に揃える。
 - backfill の `decided_at_utc` は `as_of_jst` を UTC に変換した値 (forecast.csv には
   `locked_at_utc` 列が無い)、`evaluated_at_utc` は `evaluation.csv` の `evaluated_at_utc` を使い、
@@ -124,7 +127,7 @@
     内訳・ゲートの各値を数値で固定 (詳細な数値検証は 3 book 分で十分だが fixture は 6 book を揃える)。
     重複 batch (同じ `forecast_batch_id` が 2 つの dir にある) が 1 回だけ数えられること。
   - ゲート: 4 条件の境界 (取引 99 と 100、暦日 181 と 182 (取引 100 回あっても 181 日なら不合格)、
-    t 1.99 と 2.00、DD −10% と −10.01%、ベンチマーク同額)、
+    t 1.99 と 2.00、DD 10.00% (合格) と 10.01% (不合格)、ベンチマーク同額)、
     期間窓を狭めてもコホートが変わらないこと、`execution_version` が違う行と backfill 行が
     コホートに入らないこと、6 book 未満の batch が集計とコホートの両方から除外され、かつその存在で
     `gate.passed` が False (`"incomplete_batches" in blocked_reasons`) になること、完全な `execution.csv`
