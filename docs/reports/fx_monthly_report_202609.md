@@ -118,8 +118,8 @@ UGH の方向は β 11/22 (50%)・α/γ 10/22 (45%)・δ 7/22 (32%)、Range は 
 | 9/23 | +59.7 | up | 0.69 | ✅ | 51 | 方向 ✅ だが大きさ過小 (+8) |
 | 9/24 | +34.7 | up | 0.43 | ✅ | 10 | |
 | 9/25 | **−99.5** | up | **0.75** | ❌ | **146** | **最悪 3 日の 3**。当局の円安けん制 |
-| 9/28 | +1.1 | up | 0.25 | ✅ | 16 | state `failure` |
-| 9/29 | −7.6 | flat | 0.64 | ❌ | 8 | |
+| 9/28 | +1.1 ※ | up | 0.25 | ✅ | 16 | state `failure`。※ outcome は yahoo bar (alpha_vantage 系列では +12.1) |
+| 9/29 | −7.6 | flat | 0.64 | ❌ | 8 | yahoo fallback の退化 bar (open ≈ close) で全戦略の magnitude が潰れた artefact。engine の判断ではない |
 | 9/30 | +4.4 | up | 0.50 | ✅ | 12 | v2.6 最後の発行 |
 
 ## 何が外れたか — 9/10・9/14・9/25
@@ -180,7 +180,7 @@ epsilon でも trailing 幅でもなく、**1 日の反発 (`price_implied_score
 | 金曜の最終 retry | 9/4・9/11 は JST 土曜に着地して **赤** (business-day guard)。PR #130 (9/13) の繰り越し経路で 9/18・9/25 (と 10/2) は完走 |
 | Saturday 付 weekly artifact | 9/5・9/12 は欠損 (上の赤と同根)、9/19・9/26・10/3 は自動生成 |
 | provider lag / fallback の記録 | 17 行 (28.8%) が月〜木の最終 retry の**偽 lag** (run の遅れを provider の遅れとして記録)。PR #135 で 10/1 から解消 |
-| provider | alpha_vantage 58 / yahoo_finance 1 (fallback 1 回、欠損なし) |
+| provider | alpha_vantage 58 / yahoo_finance 1 (fallback 1 回 = 9/29)。**yahoo の日足 bar は open ≈ close** で、窓内 close 変化の trailing 平均が 1.23bp に退化 → 9/29 batch 全 7 件の magnitude (UGH ×4 `flat`) と 9/28 窓の outcome (+1.1、alpha_vantage では +12.1) が汚染。欠測ではないがガードが無い (9/28 週報 持ち越し 7) |
 | スケジューラ遅延 | cron に対して +3h39〜+6h56 (週報の実測)。繰り越し経路により赤も偽 lag も出ない状態に |
 | OUTCOME-CATCHUP | 8/27 分を 8/31 に実地回収 (初運用成功)。再発行の二重計上 (週次 7 obs / 正 4、8 月 governance 入力汚染) を 9/5 に検出・修正 (PR #128)、書き側の再 publish を PR #131 で修正。9 月の重複 0 件 |
 | PRICE-ALERT | 9/2 の急落を Issue #126 で通知 (初運用)。月間 7 往復 + 9/25 発報 1 件 (157.594、−77.8bp) が月をまたぎ 9/28 に clear。連続スライドを 1 通知に畳む sticky 挙動は 9/25→9/28 で初めて実測 (安値 −119bp で 2 通目なし、設計どおり) |
