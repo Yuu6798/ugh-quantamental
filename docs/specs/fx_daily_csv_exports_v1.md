@@ -102,8 +102,10 @@ is spec §5.1 / §5.2 (`EXECUTION_FIELDNAMES` / `EXECUTION_EVALUATION_FIELDNAMES
 - `execution/{pair}_{YYYYMMDD}_execution.csv` and
   `execution/{pair}_{YYYYMMDD}_execution_evaluation.csv` are the staging files
   (`make_daily_csv_stem` naming); for evaluations `YYYYMMDD` is the evaluated window's
-  `as_of_jst` date. Their paths are returned in `FxDailyAutomationResult.execution_csv_path` /
-  `.execution_evaluation_csv_path`.
+  `as_of_jst` date (so two batches sharing a date overwrite each other's evaluation staging
+  file). `FxDailyAutomationResult.execution_csv_path` returns the decision staging path;
+  `.execution_evaluation_csv_path` and `.execution_evaluation_windows[*].evaluation_csv_path`
+  return the immutable archived `history/{date}/{batch}/execution_evaluation.csv` instead.
 
 ---
 
@@ -253,9 +255,11 @@ CSV values are loaded from persisted records only:
 - `outcome_id` is `None` (outcome not available for the run)
 
 CSV paths are returned in `FxDailyAutomationResult.forecast_csv_path`,
-`.outcome_csv_path`, `.evaluation_csv_path`. Execution-layer staging paths are returned
-in `.execution_csv_path` / `.execution_evaluation_csv_path` together with the row counts
-`.execution_decisions_recorded` / `.execution_evaluations_recorded` (§3, execution/ policy).
+`.outcome_csv_path`, `.evaluation_csv_path`. The execution layer returns the decision
+staging path in `.execution_csv_path`, the archived evaluation path of the newest evaluated
+window in `.execution_evaluation_csv_path` (per-window list: `.execution_evaluation_windows`),
+and the row counts `.execution_decisions_recorded` / `.execution_evaluations_recorded`
+(§3, execution/ policy).
 
 ---
 

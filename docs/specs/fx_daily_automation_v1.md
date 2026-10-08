@@ -252,7 +252,7 @@ One closed forecast window recovered by the outcome catch-up pass (§ Outcome ca
 | `manifest_path` | `str \| None` | Absolute path of `latest/manifest.json`, or `None` if CSV exports disabled |
 | `catchup_windows` | `tuple[CatchupWindowResult, ...]` | Windows recovered by the outcome catch-up pass this run (default `()`); see § Outcome catch-up |
 | `execution_csv_path` | `str \| None` | Staging path of the execution-decision CSV written for this run's batch (step 6a), or `None` when no decisions were recorded |
-| `execution_evaluation_csv_path` | `str \| None` | Staging path of the last execution-evaluation CSV written by the archive scan (step 6c), or `None` |
+| `execution_evaluation_csv_path` | `str \| None` | Archived path (`history/{date}/{batch}/execution_evaluation.csv`) of the newest window the archive scan (step 6c) evaluated this run, or `None`; the full per-window list is `execution_evaluation_windows` |
 | `execution_decisions_recorded` | `int` | Decision rows recorded this run (`6` or `0`) |
 | `execution_evaluations_recorded` | `int` | Evaluation rows recorded this run, summed over every window the scan evaluated (`6` per window) |
 

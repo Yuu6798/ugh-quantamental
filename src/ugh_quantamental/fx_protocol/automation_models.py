@@ -111,9 +111,10 @@ class FxDailyAutomationResult(BaseModel):
     # their defaults when the layer is disabled, skipped (decisions already
     # archived, window closed, outcome pending) or failed non-fatally.
     # ``execution_csv_path`` is the staging path of the decision CSV written
-    # for *this* run's batch; ``execution_evaluation_csv_path`` the staging
-    # path of the last evaluation CSV written by the archive scan (which may
-    # evaluate a window older than the immediately-preceding one).
+    # for *this* run's batch; ``execution_evaluation_csv_path`` the archived
+    # ``history/{date}/{batch}/execution_evaluation.csv`` of the newest window
+    # the archive scan evaluated (which may be older than the immediately-
+    # preceding one).
     execution_csv_path: str | None = None
     execution_evaluation_csv_path: str | None = None
     execution_decisions_recorded: int = 0
