@@ -12,8 +12,10 @@ No provider-specific SDK dependency; uses only stdlib urllib.
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
+import math
 import os
 import time
 import urllib.error
@@ -789,3 +791,115 @@ class HttpJsonFxMarketDataProvider:
             ) from exc
 
         return _parse_snapshot(payload, as_of_jst)
+
+
+# ---------------------------------------------------------------------------
+# Live spot (FX Execution Layer v1, spec §6)
+# ---------------------------------------------------------------------------
+
+_YF_LIVE_SPOT_RANGE = "5d"  # only ``meta`` is read; a short range keeps the payload small
+
+
+def _parse_yahoo_live_spot(payload: object) -> float:
+    """Extract ``chart.result[0].meta.regularMarketPrice`` from a Yahoo chart payload.
+
+    Every malformed shape raises ``FxDataFetchError`` naming the cause: a
+    non-object payload, a missing ``chart`` block, an ``error`` block (Yahoo
+    answers HTTP 200 with ``result: null`` for an unknown symbol), an empty or
+    null ``result`` list, a missing or non-numeric ``regularMarketPrice``, or a
+    spot that is not a finite positive number.
+    """
+    if not isinstance(payload, dict):
+        raise FxDataFetchError("Yahoo Finance live spot payload is not a JSON object")
+    chart = payload.get("chart")
+    if not isinstance(chart, dict):
+        raise FxDataFetchError("Yahoo Finance live spot response missing 'chart' object")
+    error = chart.get("error")
+    if error:
+        raise FxDataFetchError(
+            f"Yahoo Finance live spot response carries an error payload: {error!r}"
+        )
+    results = chart.get("result")
+    if not isinstance(results, list) or not results:
+        raise FxDataFetchError(
+            f"Yahoo Finance live spot response has no chart result (result={results!r})"
+        )
+    result = results[0]
+    if not isinstance(result, dict):
+        raise FxDataFetchError(
+            f"Yahoo Finance live spot chart result[0] is not an object: {result!r}"
+        )
+    meta = result.get("meta")
+    raw_spot = meta.get("regularMarketPrice") if isinstance(meta, dict) else None
+    if raw_spot is None:
+        raise FxDataFetchError(
+            "Yahoo Finance live spot response missing 'regularMarketPrice' in meta"
+        )
+    if isinstance(raw_spot, bool):
+        raise FxDataFetchError(f"Invalid regularMarketPrice for live spot: {raw_spot!r}")
+    try:
+        spot = float(raw_spot)
+    except (TypeError, ValueError) as exc:
+        raise FxDataFetchError(f"Invalid regularMarketPrice for live spot: {exc}") from exc
+    if not math.isfinite(spot) or spot <= 0:
+        raise FxDataFetchError(
+            f"regularMarketPrice must be a finite positive number; got {spot}"
+        )
+    return spot
+
+
+def fetch_live_spot_yahoo(*, timeout: int = 30) -> tuple[float, datetime]:
+    """Fetch the current USDJPY spot from the Yahoo Finance chart API (spec §6).
+
+    Same endpoint family as ``YahooFinanceFxMarketDataProvider``
+    (``chart/USDJPY=X``, interval ``1d``); only ``meta.regularMarketPrice`` is
+    read.  Called once per execution-layer judgment.
+
+    Returns ``(spot, retrieved_at_utc)`` where ``retrieved_at_utc`` is the
+    timezone-aware UTC wall-clock time at which the response was received.
+
+    Raises
+    ------
+    FxDataFetchError
+        On every failure: HTTP error status, network error or timeout, a
+        truncated response, non-200 status, invalid JSON, unexpected payload
+        shape, or a ``regularMarketPrice`` that is not a finite positive number.
+    """
+    url = (
+        f"{_YF_BASE_URL}/{_YF_SYMBOL}"
+        f"?interval={_YF_INTERVAL}&range={_YF_LIVE_SPOT_RANGE}"
+    )
+    headers = {
+        "Accept": "application/json",
+        # Yahoo Finance blocks requests without a recognisable User-Agent.
+        "User-Agent": "Mozilla/5.0 (compatible; ugh-quantamental/1.0)",
+    }
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            status = resp.status
+            body = resp.read()
+    except urllib.error.HTTPError as exc:
+        raise FxDataFetchError(
+            f"HTTP {exc.code} from Yahoo Finance live spot: {exc.reason}"
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise FxDataFetchError(
+            f"Network error fetching Yahoo Finance live spot: {exc.reason}"
+        ) from exc
+    except (OSError, http.client.HTTPException) as exc:
+        # Socket timeouts (TimeoutError) and truncated reads surface here.
+        raise FxDataFetchError(
+            f"Transport error fetching Yahoo Finance live spot: {exc}"
+        ) from exc
+    retrieved_at_utc = datetime.now(timezone.utc)
+
+    if status != 200:
+        raise FxDataFetchError(f"HTTP {status} from Yahoo Finance live spot")
+
+    try:
+        payload = json.loads(body)
+    except ValueError as exc:  # JSONDecodeError and UnicodeDecodeError
+        raise FxDataFetchError(f"Invalid JSON from Yahoo Finance live spot: {exc}") from exc
+
+    return _parse_yahoo_live_spot(payload), retrieved_at_utc

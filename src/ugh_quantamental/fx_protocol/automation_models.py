@@ -30,6 +30,11 @@ class FxDailyAutomationConfig(BaseModel):
     write_csv_exports: bool = True
     csv_output_dir: str = Field(default="./data/csv", min_length=1)
     outcome_catchup_days: int = Field(default=5, ge=0)
+    # FX Execution Layer v1 (docs/specs/fx_execution_layer_v1.md §7): record the
+    # six paper-trading book decisions for the day's batch and evaluate archived
+    # decisions once their window's outcome is persisted.  Only effective together
+    # with ``write_csv_exports`` (the CSV archive is the layer's sole persistence).
+    run_execution_layer: bool = True
 
 
 class CatchupWindowResult(BaseModel):
@@ -52,6 +57,26 @@ class CatchupWindowResult(BaseModel):
     evaluation_count: int
     outcome_csv_path: str | None = None
     evaluation_csv_path: str | None = None
+
+
+class ExecutionEvaluationWindowResult(BaseModel):
+    """One forecast window evaluated by the execution-layer archive scan (Step 4c).
+
+    Reported only for windows whose ``execution_evaluation.csv`` was written
+    during *this* run; a window already holding a complete evaluation file is
+    skipped silently and does not reappear here. Mirrors ``CatchupWindowResult``
+    so a backlog of several windows is reported in full rather than collapsed
+    into the singular ``execution_evaluation_csv_path`` field.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    forecast_batch_id: str
+    as_of_jst: datetime
+    # Absolute path of the archived history/{date}/{batch}/execution_evaluation.csv
+    # (immutable per batch; the date-only staging file is not unique per batch).
+    evaluation_csv_path: str
+    evaluation_count: int
 
 
 class FxDailyAutomationResult(BaseModel):
@@ -82,3 +107,19 @@ class FxDailyAutomationResult(BaseModel):
     # A tuple (never a plain list) so the frozen result cannot be mutated by
     # append/remove/reorder after construction.
     catchup_windows: tuple[CatchupWindowResult, ...] = ()
+    # FX Execution Layer v1 (automation Steps 3b / 4c / 5b / 6b). All four stay at
+    # their defaults when the layer is disabled, skipped (decisions already
+    # archived, window closed, outcome pending) or failed non-fatally.
+    # ``execution_csv_path`` is the staging path of the decision CSV written
+    # for *this* run's batch; ``execution_evaluation_csv_path`` the archived
+    # ``history/{date}/{batch}/execution_evaluation.csv`` of the newest window
+    # the archive scan evaluated (which may be older than the immediately-
+    # preceding one).
+    execution_csv_path: str | None = None
+    execution_evaluation_csv_path: str | None = None
+    execution_decisions_recorded: int = 0
+    execution_evaluations_recorded: int = 0
+    # Every window the Step 4c scan evaluated this run, ascending by as_of_jst;
+    # execution_evaluation_csv_path is the newest window's archived evaluation
+    # file (or None).
+    execution_evaluation_windows: tuple[ExecutionEvaluationWindowResult, ...] = ()

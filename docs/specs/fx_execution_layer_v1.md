@@ -1,6 +1,7 @@
 # FX Execution Layer v1 — UGH 売買エンジン (執行層) とベンチマーク観測スキーム
 
-Status: **Draft (design approved 2026-10-08, implementation via briefs FX-EXEC-LAYER / FX-EXEC-REPORTING)**
+Status: **Implemented (v1, FX-EXEC-LAYER — 判断の記録・評価・automation 配線; 集計・ゲート・backfill は
+FX-EXEC-REPORTING で実装予定)**
 Owner: Claude (design) / Codex (implementation)
 Related: `fx_daily_automation_v1.md` (Step 構成)、`fx_daily_csv_exports_v1.md` (CSV 規約)、
 `fx_ugh_engine_v2.md` (予測エンジン)、`fx_monthly_governance_v1.md` (統治)、
@@ -272,6 +273,30 @@ scripts/backfill_execution_history.py   # FX-EXEC-REPORTING
 `execution_models.py` は SQLAlchemy 非依存。
 
 ## 12. Open questions
+
+### 12.1 FX-EXEC-LAYER 実装時の逸脱・補足 (2026-10-08)
+
+- Step 5b / 6b (export と publish) は Step 3b / 4c の helper の中で実行する。判断の publish は
+  Step 4〜7 より前に走るため、後続 Step が fatal になって batch が rollback されても
+  `history/{date}/{batch}/execution.csv` と `latest/execution.csv` は残る (CI では workspace ごと
+  破棄されるので影響なし。ローカルの永続 dir では、再実行が同じ batch id を再生成し既存の判断を保持する)。
+- 窓内の回復経路 (判断ファイルが無い・不完全な場合の再記録) は archive の
+  `history/{date}/{batch}/input_snapshot.json` (`observability.load_input_snapshot`) から
+  `build_baseline_context` と closes を再導出する。archive が無い (元の run が CSV exports 無しだった)
+  場合だけ回復 run 自身の snapshot で代用し warning を出す (Codex round 21 を反映)。
+- live spot の失敗は `FxDataFetchError` に加え `ValueError` (`LiveEntry` の検証失敗) も
+  `live_unavailable` に落とす。取得 URL は provider と同じ chart endpoint で `range=5d`。
+- `latest/execution.csv` は判断を記録した run だけが書き、削除されない。同日 rerun で archive が完全なら
+  bytes が異なるときだけ archive から再同期する。窓が閉じた日・層が無効な日・失敗した日は前 batch の
+  まま残る (`fx_daily_csv_exports_v1.md` § execution/ policy)。
+- `FxDailyAutomationResult.execution_evaluation_windows` がスキャンで評価した窓を全件返し、
+  `execution_evaluation_csv_path` は最新窓、`execution_evaluations_recorded` は合計。
+- Step 4c は判断ファイルの行とディレクトリ (日付・batch id) が食い違う場合 warning で skip する。
+- `EXECUTION_ACTIVATION_AS_OF = 2026-10-08` は暫定。本番で最初に判断を記録した営業日と違えば
+  その日に合わせる (reporting の期待コホートの起点)。`EXECUTION_EXCLUDED_AS_OF` は空。
+- テスト規律: `tests/conftest.py` の autouse fixture が `automation.fetch_live_spot_yahoo` を
+  `FxDataFetchError` に差し替えるので、CSV exports 付きで `run_fx_daily_protocol_once` を回す既存テストは
+  `live_unavailable` の判断行を tmp dir に書く (観測可能な assertion は変えない)。
 
 - live spot の取得元を alpha_vantage の realtime endpoint に切り替えるか (API key 制限との兼ね合い)。
   v1 は yahoo のみ。

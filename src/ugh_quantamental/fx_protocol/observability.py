@@ -35,6 +35,7 @@ __all__ = [
     "build_run_summary",
     "build_scoreboard_rows",
     "collect_all_evaluations_from_history",
+    "load_input_snapshot",
     "publish_observability_to_layout",
     "write_csv_artifact",
     "write_json_artifact",
@@ -127,6 +128,53 @@ def build_input_snapshot(
         "newest_completed_window_end_jst": newest_end.isoformat() if newest_end else None,
         "generated_at_utc": generated_at_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
+
+
+def load_input_snapshot(path: str) -> "FxProtocolMarketSnapshot":
+    """Read an ``input_snapshot.json`` back into an ``FxProtocolMarketSnapshot``.
+
+    Read-back counterpart of :func:`build_input_snapshot`: every field written
+    there is consumed here and nothing is recomputed.  Used by the execution
+    layer's in-window recovery path (automation Step 3b) so a retry derives its
+    decision inputs from the forecast-time market data rather than from the
+    retry's own provider fetch.  Raises ``OSError`` / ``ValueError`` /
+    ``KeyError`` on an unreadable or malformed file.
+    """
+    from ugh_quantamental.fx_protocol.data_models import (
+        FxCompletedWindow,
+        FxProtocolMarketSnapshot,
+    )
+    from ugh_quantamental.fx_protocol.models import CurrencyPair, MarketDataProvenance
+
+    with open(path, encoding="utf-8") as fh:
+        raw = json.load(fh)
+    windows = tuple(
+        FxCompletedWindow(
+            window_start_jst=w["window_start_jst"],
+            window_end_jst=w["window_end_jst"],
+            open_price=w["open_price"],
+            high_price=w["high_price"],
+            low_price=w["low_price"],
+            close_price=w["close_price"],
+        )
+        for w in raw["completed_windows"]
+    )
+    prov = raw["market_data_provenance"]
+    provenance = MarketDataProvenance(
+        vendor=prov["vendor"],
+        feed_name=prov["feed_name"],
+        price_type=prov["price_type"],
+        resolution=prov["resolution"],
+        timezone=prov["timezone"],
+        retrieved_at_utc=prov["retrieved_at_utc"],
+    )
+    return FxProtocolMarketSnapshot(
+        pair=CurrencyPair(raw["pair"]),
+        as_of_jst=raw["as_of_jst"],
+        current_spot=raw["current_spot"],
+        completed_windows=windows,
+        market_data_provenance=provenance,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -237,9 +285,7 @@ def build_daily_report_md(
     lines.append("## Today's Forecasts")
     lines.append("")
     if forecasts:
-        lines.append(
-            "| Strategy | Direction | Expected Change (bp) | Dominant State |"
-        )
+        lines.append("| Strategy | Direction | Expected Change (bp) | Dominant State |")
         lines.append("|---|---|---|---|")
         for fc in sorted(forecasts, key=lambda r: r.strategy_kind.value):
             state = fc.dominant_state.value if fc.dominant_state else "-"
@@ -289,9 +335,7 @@ def build_daily_report_md(
         for ev in sorted(evaluations, key=lambda r: r.strategy_kind.value):
             range_hit = str(ev.range_hit) if ev.range_hit is not None else "-"
             close_err = f"{ev.close_error_bp:.1f}" if ev.close_error_bp is not None else "-"
-            mag_err = (
-                f"{ev.magnitude_error_bp:.1f}" if ev.magnitude_error_bp is not None else "-"
-            )
+            mag_err = f"{ev.magnitude_error_bp:.1f}" if ev.magnitude_error_bp is not None else "-"
             disconf = "Yes" if ev.disconfirmer_explained else "No"
             lines.append(
                 f"| {ev.strategy_kind.value} "
@@ -328,9 +372,7 @@ def build_daily_report_md(
         baseline_hits = [
             e for e in evaluations if e.direction_hit and not is_ugh_kind(e.strategy_kind)
         ]
-        lines.append(
-            f"- Baseline direction hits: {len(baseline_hits)}/3"
-        )
+        lines.append(f"- Baseline direction hits: {len(baseline_hits)}/3")
     else:
         lines.append("No observations to report.")
     lines.append("")
@@ -386,28 +428,30 @@ def build_scoreboard_rows(
         median_close = _median(close_errors) if close_errors else None
         mean_mag = sum(mag_errors) / len(mag_errors) if mag_errors else None
 
-        rows.append({
-            "strategy_kind": strategy,
-            "observation_count": n,
-            "direction_hit_count": dir_hits,
-            "direction_hit_rate": round(dir_hits / n, 4) if n > 0 else "",
-            "range_hit_count": range_hits if range_evaluable else "",
-            "range_hit_rate": (
-                round(range_hits / len(range_evaluable), 4) if range_evaluable else ""
-            ),
-            "state_proxy_hit_count": state_hits if state_evaluable else "",
-            "state_proxy_hit_rate": (
-                round(state_hits / len(state_evaluable), 4) if state_evaluable else ""
-            ),
-            "state_correctness_hit_count": stc_hits if stc_evaluable else "",
-            "state_correctness_hit_rate": (
-                round(stc_hits / len(stc_evaluable), 4) if stc_evaluable else ""
-            ),
-            "mean_close_error_bp": round(mean_close, 2) if mean_close is not None else "",
-            "median_close_error_bp": round(median_close, 2) if median_close is not None else "",
-            "mean_magnitude_error_bp": round(mean_mag, 2) if mean_mag is not None else "",
-            "last_updated_utc": ts,
-        })
+        rows.append(
+            {
+                "strategy_kind": strategy,
+                "observation_count": n,
+                "direction_hit_count": dir_hits,
+                "direction_hit_rate": round(dir_hits / n, 4) if n > 0 else "",
+                "range_hit_count": range_hits if range_evaluable else "",
+                "range_hit_rate": (
+                    round(range_hits / len(range_evaluable), 4) if range_evaluable else ""
+                ),
+                "state_proxy_hit_count": state_hits if state_evaluable else "",
+                "state_proxy_hit_rate": (
+                    round(state_hits / len(state_evaluable), 4) if state_evaluable else ""
+                ),
+                "state_correctness_hit_count": stc_hits if stc_evaluable else "",
+                "state_correctness_hit_rate": (
+                    round(stc_hits / len(stc_evaluable), 4) if stc_evaluable else ""
+                ),
+                "mean_close_error_bp": round(mean_close, 2) if mean_close is not None else "",
+                "median_close_error_bp": round(median_close, 2) if median_close is not None else "",
+                "mean_magnitude_error_bp": round(mean_mag, 2) if mean_mag is not None else "",
+                "last_updated_utc": ts,
+            }
+        )
 
     return rows
 
@@ -447,9 +491,7 @@ def build_provider_health_row(
         "generated_at_utc": generated_at_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "provider_name": provider_name,
         "newest_completed_window_end_jst": (
-            newest_completed_window_end_jst.isoformat()
-            if newest_completed_window_end_jst
-            else ""
+            newest_completed_window_end_jst.isoformat() if newest_completed_window_end_jst else ""
         ),
         "snapshot_lag_business_days": snapshot_lag_business_days,
         "used_fallback_adjustment": used_fallback_adjustment,
@@ -526,9 +568,7 @@ def publish_observability_to_layout(
             shutil.copy2(src_path, latest_file)
             shutil.copy2(src_path, os.path.join(history_dir, filename))
             result[f"latest_{key}"] = f"latest/{filename}"
-            result[f"history_{key}"] = (
-                f"history/{date_str}/{forecast_batch_id}/{filename}"
-            )
+            result[f"history_{key}"] = f"history/{date_str}/{forecast_batch_id}/{filename}"
         else:
             if os.path.exists(latest_file):
                 os.remove(latest_file)

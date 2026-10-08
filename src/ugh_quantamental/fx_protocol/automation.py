@@ -9,6 +9,7 @@ SQLAlchemy is required at call time; the module itself is importable without it.
 from __future__ import annotations
 
 import csv
+import glob
 import logging
 import os
 import shutil
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING
 
 from ugh_quantamental.fx_protocol.automation_models import (
     CatchupWindowResult,
+    ExecutionEvaluationWindowResult,
     FxDailyAutomationConfig,
     FxDailyAutomationResult,
 )
@@ -25,10 +27,20 @@ from ugh_quantamental.fx_protocol.calendar import (
     is_protocol_business_day,
     prev_as_of_jst,
 )
-from ugh_quantamental.fx_protocol.data_sources import FxMarketDataProvider
+from ugh_quantamental.fx_protocol.data_sources import (
+    FxDataFetchError,
+    FxMarketDataProvider,
+    fetch_live_spot_yahoo,
+)
+from ugh_quantamental.fx_protocol.execution import (
+    build_execution_decisions,
+    evaluate_execution_decisions,
+)
+from ugh_quantamental.fx_protocol.execution_models import LiveEntry
 from ugh_quantamental.fx_protocol.ids import make_forecast_batch_id, make_outcome_id
-from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE
+from ugh_quantamental.fx_protocol.models import EXPECTED_DAILY_BATCH_SIZE, _to_aware_utc
 from ugh_quantamental.fx_protocol.request_builders import (
+    build_baseline_context,
     build_daily_forecast_request,
     build_daily_outcome_request,
     build_outcome_request_for_window,
@@ -38,6 +50,9 @@ from ugh_quantamental.fx_protocol.request_builders import (
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
+
+    from ugh_quantamental.fx_protocol.data_models import FxProtocolMarketSnapshot
+    from ugh_quantamental.fx_protocol.execution_models import EntryStatus
 
 logger = logging.getLogger(__name__)
 
@@ -323,6 +338,280 @@ def _has_complete_forecast_batch(
     return batch is not None and len(batch.forecasts) == EXPECTED_DAILY_BATCH_SIZE
 
 
+# ---------------------------------------------------------------------------
+# FX Execution Layer v1 (docs/specs/fx_execution_layer_v1.md §7)
+# ---------------------------------------------------------------------------
+
+#: Provenance of the live spot written on every decision row (spec §5.1 / §6).
+_LIVE_SPOT_VENDOR: str = "yahoo_finance"
+_LIVE_SPOT_FEED: str = "chart/USDJPY=X"
+
+
+def _record_execution_decisions(
+    session: "Session",
+    config: FxDailyAutomationConfig,
+    snapshot: "FxProtocolMarketSnapshot",
+    forecast_batch_id: str,
+    as_of_jst: datetime,
+    now_utc: datetime,
+    *,
+    forecast_created: bool,
+) -> tuple[str | None, int]:
+    """Automation Step 3b (with Steps 5b / 6b for decisions): record the six book decisions.
+
+    Returns ``(staging_csv_path, decision_count)``.  ``(None, 0)`` means nothing
+    was recorded, which happens in two cases that are both silent for the
+    caller's result fields:
+
+    - ``history/{date}/{batch}/execution.csv`` already holds one verified row
+      per book (``is_complete_decision_file``).  The archive is never
+      overwritten and the live spot is **not** fetched again (same-day retry,
+      spec §3).  A missing, header-only or truncated file counts as absent and
+      is recorded now, with the live spot of *this* run (recovery path).
+    - The forecast window has already closed: ``now_utc >= window_end_jst``
+      (next business day 08:00 JST).  A live price taken at or after the
+      window end is not an execution price, so the batch is left to the
+      ``backfill_bar`` backfill (spec §3) and one warning is logged.
+
+    Otherwise the batch is reloaded from the DB.  When this run did not create
+    the batch (``forecast_created`` False: the in-window recovery path), the
+    deterministic inputs come from the batch's archived
+    ``history/{date}/{batch}/input_snapshot.json`` (the forecast-time market
+    data, spec §3) rather than from this run's provider fetch, which may carry
+    revised bars; if that archive is missing the run snapshot is used and a
+    warning is logged.  Then the live spot is fetched exactly once (a ``FxDataFetchError`` degrades to ``entry_status =
+    "live_unavailable"`` with a warning, never an exception), the decisions
+    are built by the pure :func:`build_execution_decisions` with
+    ``decided_at_utc = now_utc``, exported to the staging CSV and published to
+    ``history/{date}/{batch}/execution.csv`` + ``latest/execution.csv``.  Any
+    other exception propagates: the caller treats it as non-fatal.
+    """
+    from ugh_quantamental.fx_protocol.execution_exports import (
+        export_execution_csv,
+        is_complete_decision_file,
+        publish_execution_csvs,
+        sync_latest_execution_csv,
+    )
+    from ugh_quantamental.fx_protocol.observability import load_input_snapshot
+    from ugh_quantamental.persistence.repositories import FxForecastRepository
+
+    date_str = as_of_jst.strftime("%Y%m%d")
+    history_execution = os.path.join(
+        os.path.abspath(config.csv_output_dir),
+        "history",
+        date_str,
+        forecast_batch_id,
+        "execution.csv",
+    )
+    if is_complete_decision_file(history_execution):
+        # Already recorded: no rebuild, no live fetch.  Only make sure latest/
+        # mirrors the archive, in case an earlier publish wrote the archive and
+        # failed before refreshing latest/ (no-op when the bytes already match).
+        if sync_latest_execution_csv(config.csv_output_dir, history_execution):
+            logger.warning(
+                "Execution layer: latest/execution.csv refreshed from the archived decisions "
+                "of batch %s.",
+                forecast_batch_id,
+            )
+        return None, 0
+
+    batch = FxForecastRepository.load_fx_forecast_batch(session, forecast_batch_id)
+    if batch is None or len(batch.forecasts) != EXPECTED_DAILY_BATCH_SIZE:
+        raise ValueError(
+            "execution layer requires a complete persisted forecast batch; "
+            f"{forecast_batch_id} is missing or partial"
+        )
+    first_forecast = batch.forecasts[0]
+    window_end_jst = first_forecast.window_end_jst
+    if _to_aware_utc(now_utc) >= _to_aware_utc(window_end_jst):
+        logger.warning(
+            "Execution layer: window for batch %s already closed at run time "
+            "(window_end_jst=%s, now_utc=%s); decision left to backfill (non-fatal).",
+            forecast_batch_id,
+            window_end_jst.isoformat(),
+            now_utc.isoformat(),
+        )
+        return None, 0
+
+    # Deterministic inputs first (spec §4): the batch's directions, the
+    # snapshot's baseline statistics and its completed closes (oldest -> newest).
+    # On the recovery path the snapshot is the archived forecast-time one.
+    inputs_snapshot = snapshot
+    if not forecast_created:
+        archived_snapshot = os.path.join(os.path.dirname(history_execution), "input_snapshot.json")
+        if os.path.isfile(archived_snapshot):
+            inputs_snapshot = load_input_snapshot(archived_snapshot)
+        else:
+            logger.warning(
+                "Execution layer: no archived input_snapshot.json for batch %s; recovering "
+                "decisions from this run's market snapshot.",
+                forecast_batch_id,
+            )
+    forecast_directions = {f.strategy_kind: f.forecast_direction for f in batch.forecasts}
+    baseline_context = build_baseline_context(inputs_snapshot)
+    completed_closes = tuple(w.close_price for w in inputs_snapshot.completed_windows)
+
+    # Live spot: exactly one fetch per judgment (spec §6).  A failed fetch is
+    # recorded as ``live_unavailable``, never raised.
+    entry_status: "EntryStatus" = "live"
+    live_entry: LiveEntry | None
+    try:
+        spot, retrieved_at_utc = fetch_live_spot_yahoo()
+        live_entry = LiveEntry(
+            price=spot,
+            retrieved_at_utc=retrieved_at_utc,
+            vendor=_LIVE_SPOT_VENDOR,
+            feed=_LIVE_SPOT_FEED,
+        )
+    except (FxDataFetchError, ValueError) as exc:
+        logger.warning(
+            "Execution layer: live spot unavailable for batch %s (%s); "
+            "recording entry_status=live_unavailable.",
+            forecast_batch_id,
+            exc,
+        )
+        entry_status = "live_unavailable"
+        live_entry = None
+
+    decisions = build_execution_decisions(
+        forecast_directions=forecast_directions,
+        baseline_context=baseline_context,
+        completed_closes=completed_closes,
+        as_of_jst=first_forecast.as_of_jst,
+        window_end_jst=window_end_jst,
+        forecast_batch_id=forecast_batch_id,
+        entry_status=entry_status,
+        live_entry=live_entry,
+        decided_at_utc=now_utc,
+    )
+
+    # Steps 5b / 6b (decisions): staging export, then history/ + latest/ publication.
+    staging_path = export_execution_csv(
+        decisions, first_forecast.as_of_jst, config.pair.value, config.csv_output_dir
+    )
+    publish_execution_csvs(config.csv_output_dir, date_str, forecast_batch_id, staging_path, None)
+    return staging_path, len(decisions)
+
+
+def _evaluate_execution_archive(
+    session: "Session",
+    config: FxDailyAutomationConfig,
+    now_utc: datetime,
+) -> tuple[ExecutionEvaluationWindowResult, ...]:
+    """Automation Step 4c (with Steps 5b / 6b for evaluations): archive-wide evaluation scan.
+
+    Walks every ``history/*/*/execution.csv`` under ``config.csv_output_dir``
+    (sorted, so the order is deterministic).  For each complete decision file
+    (``is_complete_decision_file``) whose sibling ``execution_evaluation.csv``
+    is not complete (``is_complete_evaluation_file``), the window's outcome is
+    looked up in the DB under ``make_outcome_id`` recomputed from the decision
+    rows' own ``as_of_jst`` / ``window_end_jst`` (never from the directory
+    name).  A window whose outcome is not persisted (today's pending window)
+    is skipped silently.  Otherwise the six evaluations are built by the pure
+    :func:`evaluate_execution_decisions` with ``evaluated_at_utc = now_utc``,
+    exported to the staging CSV and published into the **evaluated** window's
+    batch directory, not the current run's.
+
+    The scan has no lookback bound, so the immediately-preceding window
+    (Step 4), catch-up windows (Step 4b) and any window whose earlier
+    evaluation write failed are all covered by the same pass, and the pass is
+    idempotent given the persisted outcome.  One window's failure is logged
+    and does not stop the scan.
+
+    Returns one ``ExecutionEvaluationWindowResult`` per window evaluated in
+    this pass, ascending by ``as_of_jst`` (empty when nothing was evaluated).
+    """
+    from ugh_quantamental.fx_protocol.execution_exports import (
+        export_execution_evaluation_csv,
+        is_complete_decision_file,
+        is_complete_evaluation_file,
+        load_execution_decisions_csv,
+        publish_execution_csvs,
+    )
+    from ugh_quantamental.persistence.repositories import FxOutcomeEvaluationRepository
+
+    pattern = os.path.join(
+        glob.escape(os.path.abspath(config.csv_output_dir)), "history", "*", "*", "execution.csv"
+    )
+    windows: list[ExecutionEvaluationWindowResult] = []
+    for decision_file in sorted(glob.glob(pattern)):
+        evaluation_file = os.path.join(os.path.dirname(decision_file), "execution_evaluation.csv")
+        try:
+            if not is_complete_decision_file(decision_file):
+                continue
+            if is_complete_evaluation_file(evaluation_file):
+                continue
+            decisions = load_execution_decisions_csv(decision_file)
+            first = decisions[0]
+            batch_dir = os.path.dirname(decision_file)
+            expected_dir = (
+                first.as_of_jst.strftime("%Y%m%d"),
+                first.forecast_batch_id,
+            )
+            actual_dir = (
+                os.path.basename(os.path.dirname(batch_dir)),
+                os.path.basename(batch_dir),
+            )
+            if actual_dir != expected_dir:
+                # A decision file whose rows do not belong to its directory
+                # (copied or renamed out of band) would be re-evaluated and
+                # re-published elsewhere on every run; leave it alone.
+                logger.warning(
+                    "Execution layer: %s holds decisions for %s/%s; skipping (non-fatal).",
+                    decision_file,
+                    *expected_dir,
+                )
+                continue
+            outcome_id = make_outcome_id(
+                config.pair, first.as_of_jst, first.window_end_jst, config.schema_version
+            )
+            outcome = FxOutcomeEvaluationRepository.load_fx_outcome_record(session, outcome_id)
+            if outcome is None:
+                # Window still open, or its outcome not recorded yet: pending.
+                continue
+            evaluations = evaluate_execution_decisions(
+                decisions,
+                outcome_id=outcome.outcome_id,
+                window_start_jst=outcome.window_start_jst,
+                realized_open=outcome.realized_open,
+                realized_close=outcome.realized_close,
+                evaluated_at_utc=now_utc,
+            )
+            staging_path = export_execution_evaluation_csv(
+                evaluations, first.as_of_jst, config.pair.value, config.csv_output_dir
+            )
+            published = publish_execution_csvs(
+                config.csv_output_dir,
+                first.as_of_jst.strftime("%Y%m%d"),
+                first.forecast_batch_id,
+                None,
+                staging_path,
+            )
+            history_relative = published["history_execution_evaluation"]
+            assert history_relative is not None  # publish always writes the evaluation copy
+            windows.append(
+                ExecutionEvaluationWindowResult(
+                    forecast_batch_id=first.forecast_batch_id,
+                    as_of_jst=first.as_of_jst,
+                    # The immutable archive copy, not the date-only staging file
+                    # (which two batches sharing a date would overwrite).
+                    evaluation_csv_path=os.path.join(
+                        os.path.abspath(config.csv_output_dir), history_relative
+                    ),
+                    evaluation_count=len(evaluations),
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "Execution layer evaluation step failed for %s (non-fatal): %s",
+                decision_file,
+                exc,
+                exc_info=True,
+            )
+            continue
+    return tuple(sorted(windows, key=lambda w: w.as_of_jst))
+
+
 def run_fx_daily_protocol_once(
     config: FxDailyAutomationConfig,
     provider: FxMarketDataProvider,
@@ -343,9 +632,14 @@ def run_fx_daily_protocol_once(
     2. Fetch one USDJPY snapshot from the provider.
     3. If ``config.run_forecast_generation``: build and run the forecast workflow
        (idempotent — rerunning the same window returns the existing batch).
+    3b. If ``config.write_csv_exports and config.run_execution_layer``: record the
+       execution-layer decisions for that batch (non-fatal; see
+       ``_record_execution_decisions``).
     4. If ``config.run_outcome_evaluation`` and the newest completed window matches
        the immediately-previous protocol window: build and run the outcome/evaluation
        workflow (idempotent).
+    4c. Same gate as 3b: evaluate every archived execution decision whose window
+       outcome is persisted (non-fatal; see ``_evaluate_execution_archive``).
     5. Return a typed ``FxDailyAutomationResult``.
 
     Parameters
@@ -542,6 +836,35 @@ def run_fx_daily_protocol_once(
             result = run_daily_forecast_workflow(session, forecast_request)
             forecast_batch_id = result.forecast_batch_id
             forecast_created = True
+
+    # --- Step 3b: execution-layer decisions (non-fatal) ---
+    # Record the six paper-trading book decisions for the batch Step 3 created
+    # or found (docs/specs/fx_execution_layer_v1.md §7).  The CSV archive under
+    # history/{date}/{batch}/ is the layer's only persistence (Steps 5b / 6b
+    # happen inside the helper), so the layer runs only with CSV exports on.
+    # Skipped without a live-spot fetch when a complete execution.csv already
+    # exists or when the forecast window has already closed.  Any exception is
+    # logged and leaves the result fields at their defaults: the outcome,
+    # evaluation and CSV steps below are unaffected.
+    execution_csv_path: str | None = None
+    execution_decisions_recorded = 0
+    if config.write_csv_exports and config.run_execution_layer and forecast_batch_id is not None:
+        try:
+            execution_csv_path, execution_decisions_recorded = _record_execution_decisions(
+                session,
+                config,
+                snapshot,
+                forecast_batch_id,
+                as_of_jst,
+                now_utc,
+                forecast_created=forecast_created,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Execution layer decision step failed (non-fatal): %s", exc, exc_info=True
+            )
+            execution_csv_path = None
+            execution_decisions_recorded = 0
 
     # --- Step 4: outcome/evaluation ---
     outcome_id: str | None = None
@@ -784,6 +1107,32 @@ def run_fx_daily_protocol_once(
                     exc_info=True,
                 )
                 continue
+
+    # --- Step 4c: execution-layer evaluation scan (non-fatal) ---
+    # Archive-wide and independent of Steps 4 / 4b: every complete
+    # history/*/*/execution.csv without a complete sibling
+    # execution_evaluation.csv is evaluated as soon as its window's outcome is
+    # in the DB.  The immediately-preceding window, catch-up windows and any
+    # window whose earlier evaluation write failed are all covered by this one
+    # scan, with no lookback bound; a pending window is skipped silently.
+    # Evaluations land in the evaluated window's own batch directory (Steps
+    # 5b / 6b inside the helper).  Failures are non-fatal, per window and as a
+    # whole.
+    execution_evaluation_windows: tuple[ExecutionEvaluationWindowResult, ...] = ()
+    if config.write_csv_exports and config.run_execution_layer:
+        try:
+            execution_evaluation_windows = _evaluate_execution_archive(session, config, now_utc)
+        except Exception as exc:
+            logger.warning(
+                "Execution layer evaluation step failed (non-fatal): %s", exc, exc_info=True
+            )
+            execution_evaluation_windows = ()
+    execution_evaluation_csv_path = (
+        execution_evaluation_windows[-1].evaluation_csv_path
+        if execution_evaluation_windows
+        else None
+    )
+    execution_evaluations_recorded = sum(w.evaluation_count for w in execution_evaluation_windows)
 
     # --- Step 5: CSV exports ---
     forecast_csv_path: str | None = None
@@ -1057,4 +1406,9 @@ def run_fx_daily_protocol_once(
         provider_health_path=provider_health_path,
         annotation_analytics=annotation_analytics if annotation_analytics else None,
         catchup_windows=tuple(catchup_results),
+        execution_csv_path=execution_csv_path,
+        execution_evaluation_csv_path=execution_evaluation_csv_path,
+        execution_decisions_recorded=execution_decisions_recorded,
+        execution_evaluations_recorded=execution_evaluations_recorded,
+        execution_evaluation_windows=execution_evaluation_windows,
     )
