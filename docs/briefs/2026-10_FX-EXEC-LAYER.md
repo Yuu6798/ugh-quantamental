@@ -98,7 +98,11 @@
         run がこれに当たる。前 run が判断の書き込みに失敗していれば次の run がこの経路で回復する
         (live spot はその時刻で取り直す。`entry_time_utc` がそれを記録する)。既にファイルがあれば
         何もしない (live spot も取り直さない)。live spot は `fetch_live_spot_yahoo` を**1 回**呼び、
-        失敗時は warning ログ + `entry_status "live_unavailable"`。
+        失敗時は warning ログ + `entry_status "live_unavailable"`。さらに **`now_utc` が
+        `window_end_jst` (翌営業日 08:00 JST) 以降なら判断を作らない** (warning 1 行、live spot も
+        呼ばない): 窓が閉じた batch (前営業日 fallback で翌朝に作られた batch、前日の全 run が書き込みに
+        失敗した batch) の live 観測は失われたものとし、FX-EXEC-REPORTING の backfill が `backfill_bar`
+        で埋める (ゲート対象外)。persisted batch 全体を走査する回復経路は設けない (spec §3)。
       - Step 4c (Step 4b の後): **archive 全体の独立スキャン**。`history/*/*/execution.csv` を列挙し
         (`glob`、ディレクトリ名から日付 D と batch id を取る)、完全な判断ファイルで、同 dir に完全な
         `execution_evaluation.csv` (6 book 揃い) が無く、`make_outcome_id(pair, D, next_as_of_jst(D),
@@ -184,7 +188,8 @@
     `latest/execution.csv` が更新されること (`tmp_path`)。
   - automation: (a) `forecast_created` の run が 6 行の `execution.csv` を書き
     `execution_decisions_recorded == 6`、(b) 同日 2 回目の run (batch 既存、`execution.csv` あり) が
-    判断を作らず既存ファイルを変えない (live spot も呼ばれない)、(b2) batch 既存で `execution.csv` が
+    判断を作らず既存ファイルを変えない (live spot も呼ばれない)、(b3) `now_utc` が `window_end_jst` 以降の run (前営業日 fallback) は判断を作らず live spot も
+    呼ばない、(b2) batch 既存で `execution.csv` が
     無い run が判断を作る (回復経路)、(c) 翌日の run が `execution_evaluation.csv` 6 行を前日の batch dir に書き
     `execution_evaluations_recorded == 6`、(c2) `outcome_catchup_days + 3` 営業日前の窓の
     `execution_evaluation.csv` を消して run すると (outcome は DB にある) スキャンが書き直す、(c3) 既に

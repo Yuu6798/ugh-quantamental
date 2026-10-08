@@ -66,7 +66,12 @@ run 実行時 (観測実績 18:00〜翌 03:00 JST) であり、**D 08:00 に約�
 live spot を取り直さず何もしない。前 run が判断の書き込みに失敗していた場合だけ、次の run が
 その時刻の live spot で記録して回復する (`entry_time_utc` が実際の判断時刻)。既存ファイルは
 決して上書きしない。繰り越し run (#130 / #135) は batch を作らないが、既存 batch の `execution.csv`
-が欠けていれば同じ回復経路で記録する。
+が欠けていれば同じ回復経路で記録する。ただし判断を作るのは **run 時刻 (`now_utc`) が窓の終了
+`window_end_jst` (翌営業日 08:00 JST) より前**のときだけ。窓が閉じた batch (前営業日 fallback で
+翌朝に作られた batch、前日の全 run が書き込みに失敗した batch) には live 判断を作らない — 窓の終わりに
+取った live 価格は約定価格として意味を持たないため。その日の live 観測は失われたものとして受け入れ、
+§10 の backfill が `backfill_bar` 行で埋める (bar 系列のみ、ゲート対象外)。persisted batch 全体を
+走査して判断を作り直す回復経路は設けない。
 
 ## 4. Books (事前登録、`execution_version = "x1"`)
 
@@ -152,7 +157,7 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
 
 | Step | 内容 |
 |---|---|
-| 3b (Step 3 の直後) | batch が存在し `history/{date}/{batch}/execution.csv` が無いとき: batch と `build_baseline_context(snapshot)` と snapshot から 6 件の `ExecutionDecision` を作る (純関数 `build_execution_decisions`)。live spot を取得して記録する。ファイルがあれば何もしない (§3) |
+| 3b (Step 3 の直後) | batch が存在し `history/{date}/{batch}/execution.csv` が無く、`now_utc < window_end_jst` のとき: batch と `build_baseline_context(snapshot)` と snapshot から 6 件の `ExecutionDecision` を作る (純関数 `build_execution_decisions`)。live spot を取得して記録する。ファイルがあれば何もしない (§3) |
 | 4c (Step 4b の直後) | **archive 全体の独立スキャン**: `history/*/*/execution.csv` のうち完全なもので、同 dir に完全な `execution_evaluation.csv` が無い batch を列挙し、その窓の outcome が DB にある (`make_outcome_id` で id を再計算して `load_fx_outcome_record`) ものだけ `ExecutionEvaluation` 6 件を作る (純関数 `evaluate_execution_decisions`)。outcome が無い窓 (当日の pending) は skip。候補は通常 0〜1 件なので全走査でも軽い。Step 4 の直前窓と Step 4b の catch-up 窓はこのスキャンに含まれるので個別の配線は不要。評価の書き込みに失敗した窓は、`outcome_catchup_days` の外に出ても次 run のスキャンで再試行される |
 | 5b / 6b | `execution.csv` / `execution_evaluation.csv` を `history/{date}/{batch}/` に書き、`latest/execution.csv` を更新する。既存の `execution.csv` は上書きしない (§3) |
 
@@ -192,11 +197,16 @@ book ごとに次を出す:
 - 月次レビューは執行層の集計を**観測**し、`docs/engine_review_YYYY_MM_findings.md` に 1 節を
   設ける。途中でのパラメータ調整は禁止 (同じデータで選んだ変更は検証にならない)。
 - 合格ゲート (`ugh_x1` を実運用候補に進める条件、すべて live 系列。母集団は現行 `execution_version`
-  の累積コホートで、版を bump したらコホートもゼロから始まる):
-  1. 取引 100 回以上かつ観測 6 か月以上
+  の累積コホートで、版を bump したらコホートもゼロから始まる。取引数・t 値・DD は **`ugh_x1` の行だけ**
+  から計算し、ベンチマーク book は条件 4 の比較にのみ使う):
+  1. `ugh_x1` の取引 (`side != 0`) 100 回以上かつ観測 6 か月以上
   2. コスト控除後・size 加重の live 日次リターン (`size × (pnl_live_bp − cost_live_bp)`) の t 値 ≥ 2.0
+     (標本標準偏差 `stdev`、n − 1 で割る。`pstdev` は使わない)
   3. 最大 DD ≤ 初期資産の 10%
   4. 同期間の `bench_gpt_m3` と `bench_long` の両方を損益で上回る
+- 現行 version の batch に 6 book 未満のもの (§8 の `incomplete_batches`) が 1 つでもあれば、条件の
+  現在値は出すがゲートは **blocked** (`passed = False`、理由 `incomplete_batches`)。欠けた archive を
+  黙って短くした上で合格にはしない (昇格証拠は欠落・部分 batch で fail する、`AGENTS.md` §5)。
 - 不合格なら `x2` として設計し直し、観測を 1 からやり直す (期間を継ぎ足さない)。
 - ゲート通過後も実弾の判断は人が行う (本 spec の対象外)。
 

@@ -39,8 +39,12 @@
       行のうち `execution_version == execution.EXECUTION_VERSION` かつ `entry_status == live` の
       完全 batch (backfill 行と他 version は除外)。`gate.cohort` に `execution_version`,
       `first_as_of_jst`, `last_as_of_jst`, `trade_count`, `observation_days` を、`gate.criteria` に
-      spec §9 の 4 条件それぞれの現在値・閾値・充足可否を、`gate.passed: bool` を返す。t 値は
-      `signed_bp_live` (= `size × (pnl_live_bp − cost_live_bp)`) から計算し、bar 系列はゲートに使わない。
+      spec §9 の 4 条件それぞれの現在値・閾値・充足可否を、`gate.passed: bool` を返す。取引数・t 値・
+      DD は **`ugh_x1` の行だけ**から計算し (`trade_count` は `ugh_x1` の `side != 0` 行数)、ベンチマーク
+      book は条件 4 の比較にだけ使う。t 値は `signed_bp_live` (= `size × (pnl_live_bp − cost_live_bp)`)
+      から計算し、bar 系列はゲートに使わない。現行 `execution_version` の batch に `incomplete_batches`
+      が 1 つでもあれば `gate.passed = False` かつ `gate.blocked_reason = "incomplete_batches"` (new;
+      通常は None) — 欠けた archive を黙って短くして合格にはしない。
 - [ ] `export_execution_report_artifacts(report, csv_output_dir, scope, date_str)` が
       `csv/analytics/execution/{scope}/{date_str}/execution_{scope}.md|.csv|.json` (scope は
       `weekly` / `monthly`) を書く。md は book 別の表 1 つ、ベンチマーク差の表 1 つ、ゲート進捗の
@@ -90,9 +94,10 @@
 ## Implementation Hints
 - 週窓の解決は `report_window.resolve_business_day_window` (weekly_reports_v2 が使うもの) を
   使う (金曜 block は `report_date = as_of + 1 日`)。
-- t 値は取引行 (`side != 0`) の `mean / (pstdev / sqrt(n))`。live 系列は
+- t 値は取引行 (`side != 0`) の `mean / (stdev / sqrt(n))` (`statistics.stdev`、n − 1。`pstdev` は
+  使わない)。live 系列は
   `size × (pnl_live_bp − cost_live_bp)` (live 行のみ)、bar 系列は `size × (pnl_bar_bp − cost_bar_bp)`。
-  `capture_bp` は単位サイズの方向の価値、signed bp は売買方針の実リターンと役割を分ける。`n < 3` または `pstdev == 0` なら None。
+  `capture_bp` は単位サイズの方向の価値、signed bp は売買方針の実リターンと役割を分ける。`n < 3` または `stdev == 0` なら None。
   ゲートは live 系列のみ。
 - 最大 DD は資産曲線のピーク比。資産曲線は行を `as_of_jst` 昇順で畳む。
 - md の数値書式は `weekly_report_exports._fmt_pct` / `_fmt_bp` に揃える。
@@ -111,7 +116,9 @@
     重複 batch (同じ `forecast_batch_id` が 2 つの dir にある) が 1 回だけ数えられること。
   - ゲート: 4 条件の境界 (取引 99 と 100、t 1.99 と 2.00、DD −10% と −10.01%、ベンチマーク同額)、
     期間窓を狭めてもコホートが変わらないこと、`execution_version` が違う行と backfill 行が
-    コホートに入らないこと、6 book 未満の batch が集計とコホートの両方から除外されること。
+    コホートに入らないこと、6 book 未満の batch が集計とコホートの両方から除外され、かつその存在で
+    `gate.passed` が False (`blocked_reason == "incomplete_batches"`) になること、`trade_count` が
+    `ugh_x1` の取引行数だけを数えること (他 book の取引は数えない)。
   - export: 3 形式が書かれること、`latest/execution_summary.json` が累積 report から書かれ、
     期間窓を変えても内容が変わらないこと (`tmp_path`)。
   - backfill: 完全な既存 `execution.csv` を上書きしないこと、`execution.csv` だけある batch で評価
