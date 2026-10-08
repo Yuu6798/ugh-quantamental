@@ -1159,3 +1159,34 @@ def test_forecast_rows_of_another_window_are_a_partial_forecast(tmp_path: Path) 
     assert summary.written_decisions_and_evaluations == 1  # the catch-up window only
     assert not (_batch_dir(layout.csv_root, _D1) / "execution.csv").exists()
     assert _counter_sum(summary) == summary.batches
+
+
+def test_complete_files_of_another_batch_are_contradictory_not_already_complete(
+    tmp_path: Path,
+) -> None:
+    """Two complete-by-book-count files whose rows belong to another batch are a contradiction
+    (logged, counted, exit 1), not an already recorded unit."""
+    layout = _build_checkout(tmp_path)
+    first, _lines = _run(layout)
+    assert first.written_decisions_and_evaluations == 2
+
+    def relabel_rows(rows: list[dict[str, str]]) -> None:
+        for row in rows:
+            row["forecast_batch_id"] = _batch_id(_D2)
+
+    own = _batch_dir(layout.csv_root, _D1)
+    _edit_csv(own / "execution.csv", relabel_rows)
+    _edit_csv(own / "execution_evaluation.csv", relabel_rows)
+    before = _batch_files(layout.csv_root, _D1)
+
+    second, lines = _run(layout)
+
+    assert second.contradictory_archive == 1
+    assert second.already_complete == 2  # the catch-up and repaired windows, as recorded
+    assert second.written_decisions_and_evaluations == 0
+    assert any(_batch_id(_D1) in line and "contradicts itself" in line for line in lines)
+    assert _batch_files(layout.csv_root, _D1) == before  # left untouched
+    assert _counter_sum(second) == second.batches
+    with pytest.raises(SystemExit) as excinfo:
+        backfill.main(["--fxdata-dir", str(layout.root)])
+    assert excinfo.value.code == 1

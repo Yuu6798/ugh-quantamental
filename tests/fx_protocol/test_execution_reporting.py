@@ -1366,6 +1366,31 @@ class TestArchiveRobustness:
         assert set(report["strata"]) == {"x0", "x1"}
         assert report["gate"]["cohort"]["trade_count"] == 1  # only days[0] is x1 evidence
 
+    @pytest.mark.parametrize(
+        ("field", "value"), [("outcome_id", "oc_other"), ("realized_close", "123.456")]
+    )
+    def test_evaluation_rows_mixing_outcomes_are_not_a_usable_batch(
+        self, tmp_path, monkeypatch, field: str, value: str
+    ) -> None:
+        """Six valid rows evaluated against different outcomes are not one evaluation batch:
+        the collector reports the batch incomplete and the decision file stays unevaluated."""
+        root = str(tmp_path / "csv")
+        days = _business_days(date(2026, 3, 2), date(2026, 3, 3))
+        _activate(monkeypatch, days[0])
+        _write_day(root, days[0], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
+        batch_dir = _write_day(root, days[1], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
+        _set_cell(os.path.join(batch_dir, "execution_evaluation.csv"), -1, field, value)
+        generated_at = _after_close(days[1])
+        collected = _collect(root, generated_at)
+
+        assert [m.forecast_batch_id for m in collected.incomplete_batches] == [_batch_id(days[1])]
+        assert collected.incomplete_batches[0].inconsistent_fields == (field,)
+        assert [m.forecast_batch_id for m in collected.missing_evaluations] == [_batch_id(days[1])]
+        assert {r["forecast_batch_id"] for r in collected.rows} == {_batch_id(days[0])}
+        gate = _report(root, generated_at)["gate"]
+        assert set(gate["blocked_reasons"]) == {"incomplete_batches", "missing_evaluations"}
+        assert gate["cohort"]["trade_count"] == 1
+
     def test_naive_generated_at_is_treated_as_utc(
         self, aggregation_root: tuple[str, datetime]
     ) -> None:

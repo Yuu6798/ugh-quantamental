@@ -102,9 +102,14 @@ from ugh_quantamental.fx_protocol.execution_exports import (
     is_complete_decision_file,
     is_complete_evaluation_file,
     load_execution_decisions_csv,
+    load_execution_evaluations_csv,
     publish_execution_csvs,
 )
-from ugh_quantamental.fx_protocol.execution_models import EntryStatus, ExecutionDecision
+from ugh_quantamental.fx_protocol.execution_models import (
+    EntryStatus,
+    ExecutionDecision,
+    ExecutionEvaluation,
+)
 from ugh_quantamental.fx_protocol.models import (
     EXPECTED_DAILY_BATCH_SIZE,
     CurrencyPair,
@@ -505,10 +510,19 @@ def _load_snapshot(path: str, unit: _Unit, log: Log) -> FxProtocolMarketSnapshot
         return None
 
 
-def _decisions_belong(decisions: tuple[ExecutionDecision, ...], unit: _Unit) -> bool:
-    """True when a complete ``execution.csv``'s rows carry the date and batch id of their
-    directory (the guard of automation Step 4c)."""
-    first = decisions[0]
+def _rows_belong(
+    rows: tuple[ExecutionDecision, ...] | tuple[ExecutionEvaluation, ...], unit: _Unit
+) -> bool:
+    """True when every row of a complete archive file is one batch's row for *unit*'s directory:
+    all rows share one ``(forecast_batch_id, execution_version, as_of_jst, window_end_jst)``
+    and that batch id / date are the directory's (automation Step 4c's guard, on every row)."""
+    keys = {
+        (row.forecast_batch_id, row.execution_version, row.as_of_jst, row.window_end_jst)
+        for row in rows
+    }
+    if len(keys) != 1:
+        return False
+    first = rows[0]
     return (first.as_of_jst.strftime("%Y%m%d"), first.forecast_batch_id) == (
         unit.date_str,
         unit.forecast_batch_id,
@@ -613,7 +627,18 @@ def _process_unit(
     evaluations_complete = is_complete_evaluation_file(evaluation_file)
 
     if decisions_complete and evaluations_complete:
-        return ALREADY_COMPLETE, ()
+        # Complete by book count; still both files must be this batch's rows (and nothing
+        # else's) before the unit is left alone as already recorded.
+        if _rows_belong(load_execution_decisions_csv(decision_file), unit) and _rows_belong(
+            load_execution_evaluations_csv(evaluation_file), unit
+        ):
+            return ALREADY_COMPLETE, ()
+        log(
+            f"[WARN] {unit.label}: execution.csv / execution_evaluation.csv hold rows of another "
+            "batch, version or window; the archive contradicts itself and is left untouched "
+            "(fix it by hand, then rerun)"
+        )
+        return CONTRADICTORY_ARCHIVE, ()
     if evaluations_complete:
         log(
             f"[WARN] {unit.label}: execution_evaluation.csv is complete but execution.csv is "
@@ -627,12 +652,13 @@ def _process_unit(
         if decisions_complete:
             # Repair path: existing decisions, evaluations only.  Needs (b) alone.
             decisions = load_execution_decisions_csv(decision_file)
-            if not _decisions_belong(decisions, unit):
+            if not _rows_belong(decisions, unit):
                 first = decisions[0]
                 log(
                     f"[WARN] {unit.label}: execution.csv holds decisions for "
-                    f"{first.as_of_jst:%Y%m%d} {first.forecast_batch_id}; the archive "
-                    "contradicts itself and is left untouched (fix it by hand, then rerun)"
+                    f"{first.as_of_jst:%Y%m%d} {first.forecast_batch_id} (or rows of more than "
+                    "one batch, version or window); the archive contradicts itself and is left "
+                    "untouched (fix it by hand, then rerun)"
                 )
                 return CONTRADICTORY_ARCHIVE, ()
             outcome, skip = _resolve_outcome(unit, unit.forecast, indexes, log)

@@ -125,8 +125,15 @@ _EXPECTED_BOOK_SET: frozenset[BookId] = frozenset(EXECUTION_BOOK_ORDER)
 EXECUTION_REPORT_SCOPES: tuple[str, ...] = ("weekly", "monthly")
 #: ``date_str`` of an artifact directory: ``YYYYMMDD`` (weekly) or ``YYYYMM`` (monthly).
 _DATE_STR_PATTERN: re.Pattern[str] = re.compile(r"\d{6}|\d{8}")
-#: Row fields the six rows of one evaluation batch must agree on.
-_BATCH_METADATA_FIELDS: tuple[str, ...] = ("execution_version", "as_of_jst")
+#: Row fields the six rows of one evaluation batch must agree on: the batch identity and the
+#: one outcome the batch was evaluated against (``as_of_jst`` is compared as an instant).
+_BATCH_METADATA_FIELDS: tuple[str, ...] = (
+    "execution_version",
+    "as_of_jst",
+    "outcome_id",
+    "realized_open",
+    "realized_close",
+)
 #: Decimal places the gate compares at: float noise from the equity fold cannot flip an exact
 #: boundary case (a 10.00% drawdown, t = 2.00) while 10.01% / 1.99 keep their verdict.
 _GATE_DECIMALS: int = 9
@@ -354,10 +361,13 @@ def _row_as_of_jst(row: dict[str, str]) -> datetime:
 def _inconsistent_batch_fields(rows: Sequence[dict[str, str]]) -> tuple[str, ...]:
     """The ``_BATCH_METADATA_FIELDS`` whose values differ across *rows* (one batch's rows)."""
     inconsistent: list[str] = []
-    if len({row["execution_version"] for row in rows}) > 1:
-        inconsistent.append("execution_version")
-    if len({_row_as_of_jst(row) for row in rows}) > 1:
-        inconsistent.append("as_of_jst")
+    for field in _BATCH_METADATA_FIELDS:
+        if field == "as_of_jst":
+            values: set[object] = {_row_as_of_jst(row) for row in rows}
+        else:
+            values = {row.get(field, "") for row in rows}
+        if len(values) > 1:
+            inconsistent.append(field)
     return tuple(inconsistent)
 
 
@@ -387,9 +397,18 @@ def _scan_batch_dir(
                 (ev.forecast_batch_id, ev.execution_version, ev.as_of_jst, ev.window_end_jst)
                 for ev in evaluations
             }
-            # Only a six-book file whose rows agree on their batch metadata evaluates anything;
-            # a mixed file is reported by the collector, never credited to a decision file.
-            if len(keys) == 1 and _is_complete_book_set(ev.book_id for ev in evaluations):
+            outcomes = {
+                (ev.outcome_id, ev.realized_open, ev.realized_close, ev.evaluated_at_utc)
+                for ev in evaluations
+            }
+            # Only a six-book file whose rows agree on their batch metadata *and* were
+            # evaluated against one outcome evaluates anything; a mixed file is reported by
+            # the collector, never credited to a decision file.
+            if (
+                len(keys) == 1
+                and len(outcomes) == 1
+                and _is_complete_book_set(ev.book_id for ev in evaluations)
+            ):
                 complete_evaluation_keys.update(keys)
 
     decision_path = os.path.join(batch_path, _DECISION_FILENAME)

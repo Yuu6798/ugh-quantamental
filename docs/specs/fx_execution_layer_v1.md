@@ -191,8 +191,8 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
   (6 book が揃う) かつ **重複でない** batch の行。`(as_of_jst, forecast_batch_id, book 順)` で整列。
 - `incomplete_batches` (`forecast_batch_id`, `execution_version`, `as_of_jst`, `missing_books`,
   `inconsistent_fields`): 6 book が揃わない `forecast_batch_id`、または 6 行が `execution_version` /
-  `as_of_jst` で食い違う batch (版境界・部分コピー。`inconsistent_fields` に列名、先頭行の値に黙って
-  丸めない。block / report の振り分けは最も遅い `as_of_jst` と、1 行でも現行版なら現行版で行う)。
+  `as_of_jst` / `outcome_id` / `realized_open` / `realized_close` で食い違う batch (版境界・部分コピー・
+  別 outcome の行の混入。`inconsistent_fields` に列名、先頭行の値に黙って丸めない。block / report の振り分けは最も遅い `as_of_jst` と、1 行でも現行版なら現行版で行う)。
   集計にもゲートにも入れない。
 - `incomplete_decision_batches` (`history/{date}/{batch}` 相対 path): `execution.csv` はあるが完全で
   ない dir。完全 = 6 book 1 行ずつが検証付きで読め、`forecast_batch_id` / `execution_version` /
@@ -200,7 +200,8 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
   不完全。先頭行の値に丸めない)。
 - `missing_evaluations` (`forecast_batch_id`, `execution_version`, `as_of_jst`, `window_end_jst`):
   完全な `execution.csv` で、同じ batch id **かつ同じ `execution_version` / `as_of_jst` /
-  `window_end_jst`** の完全な評価ファイル (6 行がその 4 つで一致するもの) が archive のどこにも無く、
+  `window_end_jst`** の完全な評価ファイル (6 行がその 4 つと、評価対象の outcome (`outcome_id` /
+  `realized_open` / `realized_close` / `evaluated_at_utc`) で一致するもの) が archive のどこにも無く、
   `window_end_jst <= generated_at_utc` のもの。pending 窓は入れない。版や窓が違う評価ファイルは
   別 batch の評価であって、この判断ファイルの評価にはならない。
 - `duplicate_batches` (日付): 同じ `(execution_version, as_of_jst の日付)` に完全 batch (判断
@@ -401,7 +402,7 @@ forecast 行の無い `execution.csv` dir も unit に入れ、`missing_forecast
 
 | batch の状態 | 結果 (summary のカウンタ) |
 |---|---|
-| `execution.csv` と `execution_evaluation.csv` が両方完全 | `already_complete`。何もしない (完全な既存ファイルは一切上書きしない) |
+| `execution.csv` と `execution_evaluation.csv` が両方完全で、両方の全行が dir の日付・batch id を持ち 1 つの (batch id, 版, 窓) を共有する | `already_complete`。何もしない (完全な既存ファイルは一切上書きしない)。どちらかの行が別 batch・版・窓なら `contradictory_archive` (`[WARN]`、触れずに次へ、summary 後に exit 1) |
 | 評価は完全だが判断が不完全 | `contradictory_archive` (archive の自己矛盾)。`[WARN]` を出してその batch には触れず、**次の batch に進む**。summary を出した後に exit 1 (手で直して再実行) |
 | その batch の forecast 行が archive のどこにも無い | `missing_forecast` (outcome を forecast_id 経由で引けないため、判断ファイルの有無によらず) |
 | `execution.csv` が完全、評価ファイルが無い・不完全 (前回の中断、日次 run の評価失敗) | 修復経路: 既存の判断 6 行を `load_execution_decisions_csv` で読み (行の日付・batch id が dir と食い違えば `contradictory_archive`: `[WARN]` + 触れずに次へ、summary 後に exit 1)、(b) の outcome だけで評価 6 行を書く → `written_evaluations_only`。forecast が 7 行揃っていなくても、snapshot が無くても進む |
