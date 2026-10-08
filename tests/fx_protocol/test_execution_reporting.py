@@ -13,15 +13,21 @@ import csv
 import json
 import os
 import shutil
+import subprocess
+import sys
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from ugh_quantamental.fx_protocol import execution_reporting as reporting
-from ugh_quantamental.fx_protocol.calendar import next_as_of_jst
+from ugh_quantamental.fx_protocol.calendar import is_protocol_business_day, next_as_of_jst
 from ugh_quantamental.fx_protocol.csv_exports import FORECAST_FIELDNAMES, write_csv_rows
-from ugh_quantamental.fx_protocol.execution import evaluate_execution_decisions
+from ugh_quantamental.fx_protocol.execution import (
+    EXECUTION_ACTIVATION_AS_OF,
+    EXECUTION_EXCLUDED_AS_OF,
+    evaluate_execution_decisions,
+)
 from ugh_quantamental.fx_protocol.execution_exports import (
     EXECUTION_EVALUATION_FIELDNAMES,
     EXECUTION_FIELDNAMES,
@@ -55,6 +61,13 @@ _JST = ZoneInfo("Asia/Tokyo")
 _UTC = timezone.utc
 _PAIR = "USDJPY"
 _ENTRY = 100.0  # live entry price on every fixture day (cost_live_bp = 0.01 / 100 × 1e4 = 1.0 bp)
+
+#: This checkout's ``src`` (tests/fx_protocol/<file> → repo root → src), for the subprocess test.
+_SRC_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "src"
+)
+#: Bytes no UTF-8 decoder accepts: planted in a sibling file to simulate a corrupt archive.
+_CORRUPT_BYTES = b"\xff\xfe\x00\x80not,utf8\n"
 
 Leg = tuple[int, float, str | None]
 
@@ -240,6 +253,35 @@ def _write_header_only_decisions(root: str, day: date) -> str:
     with open(os.path.join(batch_dir, "execution.csv"), "w", encoding="utf-8", newline="") as fh:
         fh.write(",".join(EXECUTION_FIELDNAMES) + "\n")
     return batch_dir
+
+
+def _write_decision_rows(root: str, day: date, count: int) -> str:
+    """Publish an ``execution.csv`` holding only the first *count* of the six decision rows."""
+    batch_id = _batch_id(day)
+    decisions = tuple(
+        _decision(
+            day,
+            book,
+            _trade(1),
+            entry_status="live",
+            entry_price=_ENTRY,
+            version="x1",
+            batch_id=batch_id,
+        )
+        for book in EXECUTION_BOOK_ORDER[:count]
+    )
+    staging = os.path.join(root, "staging", batch_id)
+    decision_path = export_execution_csv(decisions, _as_of(day), _PAIR, staging)
+    date_str = day.strftime("%Y%m%d")
+    publish_execution_csvs(root, date_str, batch_id, decision_path, None)
+    return os.path.join(root, "history", date_str, batch_id)
+
+
+def _write_corrupt_bytes(path: str) -> None:
+    """Plant a file that is not valid UTF-8 (directories created)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "wb") as fh:
+        fh.write(_CORRUPT_BYTES)
 
 
 def _write_header_only_evaluations(batch_dir: str) -> None:
@@ -534,7 +576,7 @@ class TestAggregationNumbers:
             for f in files
         )
         assert before == after  # nothing written
-        encoded = json.dumps(report)
+        encoded = json.dumps(report, allow_nan=False)  # strict: no NaN, no coerced datetimes
         assert json.loads(encoded)["gate"]["blocked_reasons"] == ["missing_live"]
         assert report["generated_at_utc"] == generated_at.isoformat()
         assert report["window"] == {"start_as_of_jst": None, "end_as_of_jst": None}
@@ -1147,6 +1189,101 @@ class TestBlockingInventory:
 
 
 # ---------------------------------------------------------------------------
+# Corrupt / partial sibling files and input normalisation
+# ---------------------------------------------------------------------------
+
+
+class TestArchiveRobustness:
+    """Corrupt or partial sibling files become inventory entries; the report always completes."""
+
+    def test_corrupt_forecast_csv_does_not_break_the_lookup(self, tmp_path, monkeypatch) -> None:
+        root = str(tmp_path / "csv")
+        days = _business_days(date(2026, 3, 2), date(2026, 3, 3))
+        _activate(monkeypatch, days[0])
+        _write_corrupt_bytes(
+            os.path.join(root, "history", "20260302", _batch_id(days[0]), "forecast.csv")
+        )
+        _write_day(root, days[1], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
+        generated_at = _after_close(days[1])
+        collected = _collect(root, generated_at)
+
+        assert collected.missing_decisions == (
+            MissingExecutionDecision(as_of_jst=_as_of(days[0]), forecast_batch_id=None),
+        )
+        report = _report(root, generated_at)
+        assert report["gate"]["blocked_reasons"] == ("missing_decisions", "missing_live")
+        assert report["inventory"]["missing_decisions"]["items"][0]["forecast_batch_id"] is None
+        paths = export_execution_report_artifacts(report, root, "weekly", "20260303")
+        assert all(os.path.isfile(p) for p in paths.values())
+
+    @pytest.mark.parametrize("kind", ["partial", "corrupt"])
+    def test_partial_or_unreadable_decision_file_is_incomplete(
+        self, tmp_path, monkeypatch, kind: str
+    ) -> None:
+        root = str(tmp_path / "csv")
+        days = _business_days(date(2026, 3, 2), date(2026, 3, 3))
+        _activate(monkeypatch, days[0])
+        _write_day(root, days[0], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
+        if kind == "partial":
+            _write_decision_rows(root, days[1], 3)
+        else:
+            _write_corrupt_bytes(
+                os.path.join(root, "history", "20260303", _batch_id(days[1]), "execution.csv")
+            )
+        generated_at = _before_close(days[1])  # pending window: only the broken file blocks
+        collected = _collect(root, generated_at)
+
+        assert collected.incomplete_decision_batches == (f"history/20260303/{_batch_id(days[1])}",)
+        assert collected.blocked_reasons() == ("incomplete_decisions",)
+        assert _report(root, generated_at)["gate"]["blocked_reasons"] == ("incomplete_decisions",)
+
+    def test_pre_activation_incomplete_decision_file_is_archive_only(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        root = str(tmp_path / "csv")
+        days = _business_days(date(2026, 3, 2), date(2026, 3, 3))
+        _activate(monkeypatch, days[1])  # days[0] is before the marker
+        _write_decision_rows(root, days[0], 3)
+        _write_day(root, days[1], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
+        generated_at = _after_close(days[1])
+        collected = _collect(root, generated_at)
+
+        assert collected.incomplete_decision_batches == ()
+        assert collected.archive_defects.incomplete_decision_batches == (
+            f"history/20260302/{_batch_id(days[0])}",
+        )
+        assert collected.blocked_reasons() == ()
+        assert _report(root, generated_at)["gate"]["blocked_reasons"] == ()
+
+    def test_unreadable_evaluation_file_is_a_missing_evaluation(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        root = str(tmp_path / "csv")
+        days = _business_days(date(2026, 3, 2), date(2026, 3, 3))
+        _activate(monkeypatch, days[0])
+        _write_day(root, days[0], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
+        batch_dir = _write_day(root, days[1], {BookId.ugh_x1: _trade(1)}, evaluations=False)
+        _write_corrupt_bytes(os.path.join(batch_dir, "execution_evaluation.csv"))
+        generated_at = _after_close(days[1])
+        collected = _collect(root, generated_at)
+
+        assert [m.forecast_batch_id for m in collected.missing_evaluations] == [_batch_id(days[1])]
+        assert {r["forecast_batch_id"] for r in collected.rows} == {_batch_id(days[0])}
+        assert collected.incomplete_batches == ()
+        gate = _report(root, generated_at)["gate"]
+        assert gate["blocked_reasons"] == ("missing_evaluations",)
+
+    def test_naive_generated_at_is_treated_as_utc(
+        self, aggregation_root: tuple[str, datetime]
+    ) -> None:
+        root, generated_at = aggregation_root
+        assert generated_at.tzinfo is _UTC
+        naive = generated_at.replace(tzinfo=None)
+        assert _collect(root, naive) == _collect(root, generated_at)
+        assert _report(root, naive) == _report(root, generated_at)
+
+
+# ---------------------------------------------------------------------------
 # Activation / version split and calendar cohort, tested directly
 # ---------------------------------------------------------------------------
 
@@ -1197,6 +1334,31 @@ class TestActivationSplit:
             "missing_live",
             "duplicate_batches",
         )
+
+    def test_excluded_as_of_entries_are_cohort_candidates(self) -> None:
+        """A typo'd exclusion (weekend, or before the marker) would remove nothing: fail CI instead.
+
+        Checks the real constants of ``execution.py`` (not the patched module attributes).
+        """
+        for day in EXECUTION_EXCLUDED_AS_OF:
+            assert day >= EXECUTION_ACTIVATION_AS_OF, day
+            assert is_protocol_business_day(_as_of(day)), day
+
+    def test_excluded_days_outside_the_cohort_are_not_counted(self, tmp_path, monkeypatch) -> None:
+        root = str(tmp_path / "csv")
+        marker = date(2026, 3, 5)  # Thursday
+        before_marker, saturday, friday = date(2026, 3, 3), date(2026, 3, 7), date(2026, 3, 6)
+        _activate(monkeypatch, marker, excluded=(before_marker, saturday, friday))
+        _write_day(root, marker, {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
+        generated_at = datetime(2026, 3, 9, 0, 0, tzinfo=_UTC)  # Friday's window has closed
+
+        expected, excluded = expected_decision_days(generated_at)
+        assert expected == (marker,)
+        assert excluded == (friday,)
+        report = _report(root, generated_at)
+        assert report["gate"]["cohort"]["excluded_days"] == 1
+        assert report["gate"]["cohort"]["excluded_as_of_jst"] == ["2026-03-06"]
+        assert report["gate"]["blocked_reasons"] == ()
 
 
 # ---------------------------------------------------------------------------
@@ -1288,6 +1450,52 @@ class TestExport:
         with pytest.raises(ValueError, match="scope"):
             export_execution_report_artifacts(report, root, "weekly/../x", "20260309")
 
+    @pytest.mark.parametrize("date_str", ["20260309", "202603"])
+    def test_valid_date_str_accepted(
+        self, aggregation_root: tuple[str, datetime], date_str: str
+    ) -> None:
+        root, generated_at = aggregation_root
+        paths = export_execution_report_artifacts(
+            _report(root, generated_at), root, "weekly", date_str
+        )
+        expected_dir = os.path.join(root, "analytics", "execution", "weekly", date_str)
+        assert all(os.path.dirname(p) == expected_dir for p in paths.values())
+
+    @pytest.mark.parametrize(
+        "date_str", ["../../escaped", "2026-03-09", "2026030", "202603a", "", "2026030912"]
+    )
+    def test_invalid_date_str_rejected(
+        self, aggregation_root: tuple[str, datetime], date_str: str
+    ) -> None:
+        root, generated_at = aggregation_root
+        report = _report(root, generated_at)
+        with pytest.raises(ValueError, match="date_str"):
+            export_execution_report_artifacts(report, root, "weekly", date_str)
+        assert not os.path.exists(os.path.join(root, "analytics"))  # nothing written anywhere
+
+    def test_two_strata_render_two_book_tables(self, tmp_path, monkeypatch) -> None:
+        root = str(tmp_path / "csv")
+        days = _business_days(date(2026, 3, 2), date(2026, 3, 3))
+        _activate(monkeypatch, days[0])
+        _write_day(root, days[0], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
+        _write_day(root, days[1], {BookId.ugh_x1: _trade(1)}, realized_close=102.0, version="x0")
+        report = _report(root, _after_close(days[1]))
+        paths = export_execution_report_artifacts(report, root, "monthly", "202603")
+
+        with open(paths["execution_monthly_md"], encoding="utf-8") as fh:
+            md = fh.read()
+        assert md.count("## Stratum execution_version=") == 2
+        assert md.count("### Books") == 2
+        assert md.count("### Benchmark deltas") == 2
+        assert md.count("## Acceptance gate") == 1
+        assert md.index("execution_version=x0") < md.index("execution_version=x1")
+        with open(paths["execution_monthly_csv"], newline="", encoding="utf-8") as fh:
+            rows = list(csv.DictReader(fh))
+        assert len(rows) == 12
+        assert [r["execution_version"] for r in rows] == ["x0"] * 6 + ["x1"] * 6
+        assert [r["book_id"] for r in rows[:6]] == [b.value for b in EXECUTION_BOOK_ORDER]
+        assert [r["book_id"] for r in rows[6:]] == [b.value for b in EXECUTION_BOOK_ORDER]
+
     def test_empty_archive_exports(self, tmp_path, monkeypatch) -> None:
         root = str(tmp_path / "csv")
         _activate(monkeypatch, date(2026, 3, 2))
@@ -1300,7 +1508,25 @@ class TestExport:
         assert report["gate"]["passed"] is False
 
 
-def test_module_is_sqlalchemy_free() -> None:
-    for value in vars(reporting).values():
-        origin = getattr(value, "__module__", None) or getattr(value, "__name__", "")
-        assert not str(origin).startswith("sqlalchemy"), value
+def test_module_importable_without_sqlalchemy() -> None:
+    """The module must import when SQLAlchemy is absent (CLAUDE.md import isolation).
+
+    Same idea as the replay import-isolation tests, but in a fresh interpreter so
+    no cached module can mask a transitive import: ``sys.modules["sqlalchemy"] =
+    None`` makes any ``import sqlalchemy`` raise ``ImportError``.  ``PYTHONPATH``
+    points at this checkout's ``src`` so an editable install of another checkout
+    is not what gets imported; the printed ``__file__`` verifies that.
+    """
+    code = (
+        "import sys; sys.modules['sqlalchemy'] = None; "
+        "import ugh_quantamental.fx_protocol.execution_reporting as m; print(m.__file__)"
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": _SRC_DIR},
+    )
+    expected = os.path.join(_SRC_DIR, "ugh_quantamental", "fx_protocol", "execution_reporting.py")
+    assert result.stdout.strip() == expected

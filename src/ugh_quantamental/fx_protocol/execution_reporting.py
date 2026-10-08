@@ -22,6 +22,7 @@ import json
 import logging
 import math
 import os
+import re
 import statistics
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
@@ -120,6 +121,11 @@ _FORECAST_FILENAME: str = "forecast.csv"
 _DIR_DATE_FORMAT: str = "%Y%m%d"
 _BENCHMARK_BOOKS: tuple[BookId, ...] = (BookId.bench_gpt_m3, BookId.bench_long)
 _EXPECTED_BOOK_SET: frozenset[BookId] = frozenset(EXECUTION_BOOK_ORDER)
+#: ``date_str`` of an artifact directory: ``YYYYMMDD`` (weekly) or ``YYYYMM`` (monthly).
+_DATE_STR_PATTERN: re.Pattern[str] = re.compile(r"\d{6}|\d{8}")
+#: Decimal places the gate compares at: float noise from the equity fold cannot flip an exact
+#: boundary case (a 10.00% drawdown, t = 2.00) while 10.01% / 1.99 keep their verdict.
+_GATE_DECIMALS: int = 9
 
 
 # ---------------------------------------------------------------------------
@@ -257,7 +263,9 @@ def expected_decision_days(generated_at_utc: datetime) -> tuple[tuple[date, ...]
     Expected days are the protocol business days from ``EXECUTION_ACTIVATION_AS_OF``
     whose window has closed by *generated_at_utc* (``next_as_of_jst(D) <= generated_at_utc``),
     minus ``EXECUTION_EXCLUDED_AS_OF``.  The second tuple holds the excluded days
-    that fall inside that range, so the report can show how many were removed.
+    that fall inside that range, so the report can show how many were removed;
+    an exclusion that is not a candidate (before the marker, on a weekend, or
+    whose window has not closed yet) removes nothing and is not counted.
     Naive *generated_at_utc* is treated as UTC.
     """
     generated = _to_aware_utc(generated_at_utc)
@@ -420,7 +428,9 @@ def _lookup_forecast_batch_id(history_dir: str, day: date) -> str | None:
             continue
         try:
             rows = _read_raw_rows(forecast_path)
-        except (OSError, csv.Error):
+        except (OSError, ValueError, csv.Error):
+            # Best-effort id lookup only: an unreadable forecast.csv (a UnicodeDecodeError is a
+            # ValueError) must not break the report; the day is still reported as missing.
             continue
         for row in rows:
             as_of = row.get("as_of_jst") or ""
@@ -868,6 +878,11 @@ def _build_strata(rows: Sequence[_EvalRow]) -> dict[str, dict[str, Any]]:
     return strata
 
 
+def _gate_value(value: float) -> float:
+    """Round a gate statistic to ``_GATE_DECIMALS`` before it is compared with its threshold."""
+    return round(value, _GATE_DECIMALS)
+
+
 def _build_gate(
     all_rows: Sequence[_EvalRow],
     collected: CollectedExecutionEvaluations,
@@ -914,12 +929,12 @@ def _build_gate(
         "t_stat_live": {
             "current": stats.t,
             "threshold": GATE_MIN_T_STAT,
-            "met": stats.t is not None and stats.t >= GATE_MIN_T_STAT,
+            "met": stats.t is not None and _gate_value(stats.t) >= GATE_MIN_T_STAT,
         },
         "max_drawdown_live": {
             "current": max_drawdown,
             "threshold": GATE_MAX_DRAWDOWN,
-            "met": max_drawdown is not None and max_drawdown <= GATE_MAX_DRAWDOWN,
+            "met": max_drawdown is not None and _gate_value(max_drawdown) <= GATE_MAX_DRAWDOWN,
         },
         "beats_benchmarks": {
             "current": x1_pnl,
@@ -1099,7 +1114,7 @@ def _inventory_lines(inventory: dict[str, dict[str, Any]]) -> list[str]:
     for name in ExecutionDefectInventory.model_fields:
         entry = inventory[name]
         rendered = ", ".join(
-            item if isinstance(item, str) else json.dumps(item, ensure_ascii=False, default=str)
+            item if isinstance(item, str) else json.dumps(item, ensure_ascii=False, allow_nan=False)
             for item in entry["items"]
         )
         suffix = f": {rendered}" if rendered else ""
@@ -1210,9 +1225,10 @@ def _book_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _write_json(report: dict[str, Any], path: str) -> str:
+    """Write *report* as strict JSON: a stray datetime or a NaN raises instead of being coerced."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
-        json.dump(report, fh, ensure_ascii=False, indent=2, default=str)
+        json.dump(report, fh, ensure_ascii=False, indent=2, allow_nan=False)
         fh.write("\n")
     return os.path.abspath(path)
 
@@ -1226,7 +1242,7 @@ def export_execution_report_artifacts(
     """Write ``analytics/execution/{scope}/{date_str}/execution_{scope}.{md,csv,json}``.
 
     *scope* is ``weekly`` or ``monthly``; *date_str* the ``YYYYMMDD`` / ``YYYYMM``
-    label of the window.  The layout mirrors
+    label of the window (anything else raises ``ValueError``).  The layout mirrors
     ``weekly_report_exports.export_weekly_report_artifacts`` under
     *csv_output_dir* (the ``csv/`` root).  Nothing under ``latest/`` is
     touched here — see :func:`export_execution_latest_summary`.
@@ -1236,6 +1252,10 @@ def export_execution_report_artifacts(
     """
     if not scope or os.sep in scope or "/" in scope:
         raise ValueError(f"invalid execution report scope {scope!r}")
+    if _DATE_STR_PATTERN.fullmatch(date_str) is None:
+        raise ValueError(
+            f"invalid execution report date_str {date_str!r}: expected YYYYMMDD or YYYYMM"
+        )
     base = os.path.abspath(csv_output_dir)
     out_dir = os.path.join(base, "analytics", "execution", scope, date_str)
     os.makedirs(out_dir, exist_ok=True)
