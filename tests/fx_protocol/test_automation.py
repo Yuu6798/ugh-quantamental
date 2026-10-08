@@ -1296,3 +1296,537 @@ def _build_windows_raw(n: int) -> tuple[FxCompletedWindow, ...]:
         start = end
         count += 1
     return tuple(windows)
+
+
+# ---------------------------------------------------------------------------
+# FX Execution Layer v1 — automation Steps 3b / 4c / 5b / 6b (brief FX-EXEC-LAYER)
+# ---------------------------------------------------------------------------
+
+_LIVE_SPOT_PRICE = 150.25
+_LIVE_SPOT_RETRIEVED_AT = datetime(2026, 2, 2, 9, 0, 0, tzinfo=timezone.utc)
+_EXECUTION_BOOK_COUNT = 6
+# OHLC every ``_build_windows_raw`` window carries: the realized window closes up.
+_WINDOW_OPEN = 149.5
+_WINDOW_CLOSE = 150.5
+
+
+class TestExecutionLayerModelFields:
+    """Config / result field additions (spec §7); importable without SQLAlchemy."""
+
+    def test_config_default_enables_the_layer(self) -> None:
+        assert FxDailyAutomationConfig().run_execution_layer is True
+        assert FxDailyAutomationConfig(run_execution_layer=False).run_execution_layer is False
+
+    def test_result_defaults(self) -> None:
+        result = FxDailyAutomationResult(as_of_jst=datetime(2026, 2, 2, 8, 0, 0, tzinfo=_JST))
+        assert result.execution_csv_path is None
+        assert result.execution_evaluation_csv_path is None
+        assert result.execution_decisions_recorded == 0
+        assert result.execution_evaluations_recorded == 0
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="SQLAlchemy not installed")
+class TestExecutionLayerAutomation:
+    """End-to-end wiring of the execution layer into ``run_fx_daily_protocol_once``.
+
+    Day indexing follows ``_build_windows_raw``: a snapshot with ``n`` windows
+    runs on business day ``bd[n]`` (``bd[0]`` = Monday 2026-01-05), so ``n=20``
+    is 2026-02-02 and ``n=21`` the next business day.  ``now_utc`` is placed
+    well after that day's 08:00 JST fixing, so the run clock resolves to the
+    snapshot's own ``as_of_jst`` without patching the calendar.  The live spot
+    is stubbed in ``automation``'s namespace by the ``live_spot`` fixture (the
+    package-level autouse guard already refuses the real fetch).
+    """
+
+    _make_session = TestRunFxDailyProtocolOnce._make_session
+    _make_provider = TestRunFxDailyProtocolOnce._make_provider
+
+    @pytest.fixture
+    def live_spot(self, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+        mock = MagicMock(return_value=(_LIVE_SPOT_PRICE, _LIVE_SPOT_RETRIEVED_AT))
+        monkeypatch.setattr("ugh_quantamental.fx_protocol.automation.fetch_live_spot_yahoo", mock)
+        return mock
+
+    @staticmethod
+    def _snapshot_for_day(n_windows: int) -> FxProtocolMarketSnapshot:
+        wins = _build_windows_raw(n_windows)
+        return FxProtocolMarketSnapshot(
+            pair=CurrencyPair.USDJPY,
+            as_of_jst=wins[-1].window_end_jst,
+            current_spot=150.0,
+            completed_windows=wins,
+            market_data_provenance=MarketDataProvenance(
+                vendor="test",
+                feed_name="feed",
+                price_type="mid",
+                resolution="1d",
+                timezone="Asia/Tokyo",
+                retrieved_at_utc=datetime(2026, 2, 2, 0, 0, 0, tzinfo=timezone.utc),
+            ),
+        )
+
+    @staticmethod
+    def _config(tmp_path, **overrides) -> FxDailyAutomationConfig:
+        fields: dict[str, object] = {
+            "run_outcome_evaluation": True,
+            "run_forecast_generation": True,
+            "write_csv_exports": True,
+            "csv_output_dir": str(tmp_path),
+        }
+        fields.update(overrides)
+        return FxDailyAutomationConfig(**fields)
+
+    @staticmethod
+    def _run_clock(as_of_jst: datetime, hours_after_fixing: int = 10) -> datetime:
+        """Aware-UTC run clock *hours_after_fixing* hours past the day's 08:00 JST fixing."""
+        return (as_of_jst + timedelta(hours=hours_after_fixing)).astimezone(timezone.utc)
+
+    def _run(
+        self,
+        session,
+        cfg: FxDailyAutomationConfig,
+        n_windows: int,
+        *,
+        now_utc: datetime | None = None,
+        hours_after_fixing: int = 10,
+    ):
+        from ugh_quantamental.fx_protocol.automation import run_fx_daily_protocol_once
+
+        snap = self._snapshot_for_day(n_windows)
+        if now_utc is None:
+            now_utc = self._run_clock(snap.as_of_jst, hours_after_fixing)
+        result = run_fx_daily_protocol_once(
+            cfg, self._make_provider(snap), session, now_utc=now_utc
+        )
+        return snap, result
+
+    @staticmethod
+    def _batch_dir(tmp_path, as_of_jst: datetime, forecast_batch_id: str):
+        return tmp_path / "history" / as_of_jst.strftime("%Y%m%d") / forecast_batch_id
+
+    # (a) ------------------------------------------------------------------
+    def test_a_run_creating_the_batch_records_six_live_decisions(self, tmp_path, live_spot) -> None:
+        from ugh_quantamental.fx_protocol.execution_exports import load_execution_decisions_csv
+        from ugh_quantamental.fx_protocol.execution_models import EXECUTION_BOOK_ORDER
+
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path)
+            snap, result = self._run(session, cfg, 20)
+
+            assert result.forecast_created is True
+            assert result.execution_decisions_recorded == _EXECUTION_BOOK_COUNT
+            assert result.execution_csv_path == str(
+                tmp_path / "execution" / "USDJPY_20260202_execution.csv"
+            )
+            history_file = (
+                self._batch_dir(tmp_path, snap.as_of_jst, result.forecast_batch_id)
+                / "execution.csv"
+            )
+            assert history_file.is_file()
+            decisions = load_execution_decisions_csv(str(history_file))
+            assert len(decisions) == _EXECUTION_BOOK_COUNT
+            assert [d.book_id for d in decisions] == list(EXECUTION_BOOK_ORDER)
+            for d in decisions:
+                assert d.entry_status == "live"
+                assert d.entry_price_live == _LIVE_SPOT_PRICE
+                assert d.entry_time_utc == _LIVE_SPOT_RETRIEVED_AT
+                assert d.entry_vendor == "yahoo_finance"
+                assert d.entry_feed == "chart/USDJPY=X"
+                assert d.forecast_batch_id == result.forecast_batch_id
+                assert d.as_of_jst == snap.as_of_jst
+            # latest/ mirrors the archived decisions; the batch dir is the one
+            # the forecast archive uses.
+            latest_file = tmp_path / "latest" / "execution.csv"
+            assert latest_file.read_bytes() == history_file.read_bytes()
+            assert (history_file.parent / "forecast.csv").is_file()
+            live_spot.assert_called_once_with()
+            # Today's window is still open: nothing to evaluate yet.
+            assert result.execution_evaluations_recorded == 0
+            assert result.execution_evaluation_csv_path is None
+            assert not (history_file.parent / "execution_evaluation.csv").exists()
+        finally:
+            session.close()
+
+    # (b) ------------------------------------------------------------------
+    def test_b_same_day_rerun_keeps_archive_and_skips_live_spot(self, tmp_path, live_spot) -> None:
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path)
+            snap, r1 = self._run(session, cfg, 20)
+            session.commit()
+            history_file = (
+                self._batch_dir(tmp_path, snap.as_of_jst, r1.forecast_batch_id) / "execution.csv"
+            )
+            latest_file = tmp_path / "latest" / "execution.csv"
+            before = history_file.read_bytes()
+            before_mtime = history_file.stat().st_mtime_ns
+            latest_before = latest_file.read_bytes()
+            assert live_spot.call_count == 1
+
+            _, r2 = self._run(session, cfg, 20, hours_after_fixing=12)
+
+            assert r2.forecast_created is False
+            assert r2.forecast_batch_id == r1.forecast_batch_id
+            assert live_spot.call_count == 1
+            assert history_file.read_bytes() == before
+            assert history_file.stat().st_mtime_ns == before_mtime
+            assert latest_file.read_bytes() == latest_before
+            assert r2.execution_decisions_recorded == 0
+            assert r2.execution_csv_path is None
+        finally:
+            session.close()
+
+    # (b2) -----------------------------------------------------------------
+    def test_b2_missing_archive_is_recovered_by_the_next_run(self, tmp_path, live_spot) -> None:
+        from ugh_quantamental.fx_protocol.execution_exports import load_execution_decisions_csv
+
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path)
+            snap, r1 = self._run(session, cfg, 20)
+            session.commit()
+            history_file = (
+                self._batch_dir(tmp_path, snap.as_of_jst, r1.forecast_batch_id) / "execution.csv"
+            )
+            history_file.unlink()
+
+            _, r2 = self._run(session, cfg, 20, hours_after_fixing=12)
+
+            assert r2.forecast_created is False
+            assert r2.execution_decisions_recorded == _EXECUTION_BOOK_COUNT
+            assert r2.execution_csv_path is not None
+            assert live_spot.call_count == 2
+            decisions = load_execution_decisions_csv(str(history_file))
+            assert len(decisions) == _EXECUTION_BOOK_COUNT
+            assert all(d.entry_status == "live" for d in decisions)
+        finally:
+            session.close()
+
+    # (b3) -----------------------------------------------------------------
+    @pytest.mark.parametrize("minutes_after_window_end", [0, 90])
+    def test_b3_closed_window_records_no_decision_and_no_live_spot(
+        self, tmp_path, live_spot, caplog, minutes_after_window_end: int
+    ) -> None:
+        from ugh_quantamental.fx_protocol.calendar import next_as_of_jst
+
+        session = self._make_session()
+        try:
+            # Day bd[20]: decisions recorded normally (one live fetch).
+            cfg_on = self._config(tmp_path)
+            snap1, r1 = self._run(session, cfg_on, 20)
+            session.commit()
+            assert live_spot.call_count == 1
+
+            # Day bd[21]: batch created with the layer off, so no execution.csv
+            # exists for it; bd[20]'s outcome is recorded by Step 4.
+            cfg_off = self._config(tmp_path, run_execution_layer=False)
+            snap2, r2 = self._run(session, cfg_off, 21)
+            session.commit()
+            assert r2.outcome_recorded is True
+            batch2_dir = self._batch_dir(tmp_path, snap2.as_of_jst, r2.forecast_batch_id)
+            assert not (batch2_dir / "execution.csv").exists()
+
+            # A run whose clock is at/after bd[21]'s window end (bd[22] 08:00 JST)
+            # while the provider's newest window still ends at bd[21]: the
+            # one-day fallback rewrites as_of back to bd[21], whose batch exists
+            # but carries no decisions.  The window is closed, so none are made.
+            window_end = next_as_of_jst(snap2.as_of_jst)
+            now_utc = (window_end + timedelta(minutes=minutes_after_window_end)).astimezone(
+                timezone.utc
+            )
+            with caplog.at_level("WARNING", logger="ugh_quantamental.fx_protocol.automation"):
+                _, r3 = self._run(session, cfg_on, 21, now_utc=now_utc)
+
+            assert r3.as_of_jst == snap2.as_of_jst
+            assert r3.forecast_batch_id == r2.forecast_batch_id
+            assert r3.forecast_created is False
+            assert r3.outcome_recorded is True  # Step 4 (idempotent) is unaffected
+            assert r3.execution_decisions_recorded == 0
+            assert r3.execution_csv_path is None
+            assert live_spot.call_count == 1
+            assert not (batch2_dir / "execution.csv").exists()
+            assert any("already closed" in rec.getMessage() for rec in caplog.records)
+            # The archive scan still evaluates bd[20]'s decisions, whose outcome
+            # was persisted on bd[21] while the layer was off.
+            assert r3.execution_evaluations_recorded == _EXECUTION_BOOK_COUNT
+            assert (
+                self._batch_dir(tmp_path, snap1.as_of_jst, r1.forecast_batch_id)
+                / "execution_evaluation.csv"
+            ).is_file()
+        finally:
+            session.close()
+
+    # (c) ------------------------------------------------------------------
+    def test_c_next_day_run_evaluates_the_previous_window(self, tmp_path, live_spot) -> None:
+        from ugh_quantamental.fx_protocol.execution_exports import load_execution_evaluations_csv
+        from ugh_quantamental.fx_protocol.execution_models import EXECUTION_BOOK_ORDER, BookId
+        from ugh_quantamental.fx_protocol.ids import make_outcome_id
+
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path)
+            snap1, r1 = self._run(session, cfg, 20)
+            session.commit()
+            snap2, r2 = self._run(session, cfg, 21)
+            session.commit()
+
+            assert r2.outcome_recorded is True
+            assert r2.outcome_id == make_outcome_id(
+                CurrencyPair.USDJPY, snap1.as_of_jst, snap2.as_of_jst, cfg.schema_version
+            )
+            assert r2.execution_decisions_recorded == _EXECUTION_BOOK_COUNT  # bd[21]'s own
+            assert r2.execution_evaluations_recorded == _EXECUTION_BOOK_COUNT
+            # Staging file is dated by the EVALUATED window's as_of, not today's.
+            assert r2.execution_evaluation_csv_path == str(
+                tmp_path / "execution" / "USDJPY_20260202_execution_evaluation.csv"
+            )
+            prev_dir = self._batch_dir(tmp_path, snap1.as_of_jst, r1.forecast_batch_id)
+            evaluations = load_execution_evaluations_csv(str(prev_dir / "execution_evaluation.csv"))
+            assert len(evaluations) == _EXECUTION_BOOK_COUNT
+            assert [e.book_id for e in evaluations] == list(EXECUTION_BOOK_ORDER)
+            expected_clock = self._run_clock(snap2.as_of_jst)
+            for ev in evaluations:
+                assert ev.outcome_id == r2.outcome_id
+                assert ev.forecast_batch_id == r1.forecast_batch_id
+                assert ev.as_of_jst == snap1.as_of_jst
+                assert ev.window_end_jst == snap2.as_of_jst
+                assert ev.realized_open == _WINDOW_OPEN
+                assert ev.realized_close == _WINDOW_CLOSE
+                assert ev.entry_status == "live"
+                assert ev.entry_price_live == _LIVE_SPOT_PRICE
+                assert ev.evaluated_at_utc == expected_clock
+                if ev.side == 0:
+                    assert ev.hit is None
+                else:
+                    assert ev.hit == (ev.side * (_WINDOW_CLOSE - _WINDOW_OPEN) > 0)
+                    assert ev.pnl_live_bp == pytest.approx(
+                        ev.side * (_WINDOW_CLOSE - _LIVE_SPOT_PRICE) / _LIVE_SPOT_PRICE * 1e4
+                    )
+            # bench_long is always long and the window closed up: a hit.
+            assert evaluations[-1].book_id == BookId.bench_long
+            assert evaluations[-1].hit is True
+            # Evaluations are filed in the evaluated window's batch dir, not today's.
+            today_dir = self._batch_dir(tmp_path, snap2.as_of_jst, r2.forecast_batch_id)
+            assert (today_dir / "execution.csv").is_file()
+            assert not (today_dir / "execution_evaluation.csv").exists()
+        finally:
+            session.close()
+
+    # (c2) -----------------------------------------------------------------
+    def test_c2_archive_scan_rewrites_deleted_evaluation_beyond_the_catchup_bound(
+        self, tmp_path, live_spot
+    ) -> None:
+        from ugh_quantamental.fx_protocol.execution_exports import load_execution_evaluations_csv
+
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path)
+            snap1, r1 = self._run(session, cfg, 20)
+            session.commit()
+            _, r2 = self._run(session, cfg, 21)
+            session.commit()
+            eval_file = (
+                self._batch_dir(tmp_path, snap1.as_of_jst, r1.forecast_batch_id)
+                / "execution_evaluation.csv"
+            )
+            assert eval_file.is_file()
+            eval_file.unlink()
+
+            later_day = 20 + cfg.outcome_catchup_days + 3
+            _, r3 = self._run(session, cfg, later_day)
+
+            # bd[20]'s window is outside the catch-up bound, and today's
+            # preceding window has no batch: Steps 4 / 4b do nothing.
+            assert r3.catchup_windows == ()
+            assert r3.outcome_recorded is False
+            # The archive scan has no bound: the outcome is in the DB, so the
+            # evaluation is rewritten.  bd[21]'s decisions stay pending (no
+            # outcome for its window) and are skipped silently.
+            assert r3.execution_evaluations_recorded == _EXECUTION_BOOK_COUNT
+            assert r3.execution_evaluation_csv_path is not None
+            evaluations = load_execution_evaluations_csv(str(eval_file))
+            assert len(evaluations) == _EXECUTION_BOOK_COUNT
+            assert {e.outcome_id for e in evaluations} == {r2.outcome_id}
+            assert {e.forecast_batch_id for e in evaluations} == {r1.forecast_batch_id}
+        finally:
+            session.close()
+
+    # (c3) -----------------------------------------------------------------
+    def test_c3_complete_evaluation_is_not_reevaluated(self, tmp_path, live_spot) -> None:
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path)
+            snap1, r1 = self._run(session, cfg, 20)
+            session.commit()
+            _, r2 = self._run(session, cfg, 21)
+            session.commit()
+            eval_file = (
+                self._batch_dir(tmp_path, snap1.as_of_jst, r1.forecast_batch_id)
+                / "execution_evaluation.csv"
+            )
+            before = eval_file.read_bytes()
+            before_mtime = eval_file.stat().st_mtime_ns
+
+            # Same-day rerun with a later clock: a re-evaluation would change
+            # evaluated_at_utc, hence the bytes.
+            _, r3 = self._run(session, cfg, 21, hours_after_fixing=12)
+
+            assert r3.outcome_recorded is True
+            assert r3.execution_evaluations_recorded == 0
+            assert r3.execution_evaluation_csv_path is None
+            assert r3.execution_decisions_recorded == 0  # bd[21]'s decisions already archived
+            assert eval_file.read_bytes() == before
+            assert eval_file.stat().st_mtime_ns == before_mtime
+        finally:
+            session.close()
+
+    # (c4) -----------------------------------------------------------------
+    def test_c4_header_only_archive_is_rebuilt(self, tmp_path, live_spot) -> None:
+        from ugh_quantamental.fx_protocol.execution_exports import (
+            EXECUTION_FIELDNAMES,
+            load_execution_decisions_csv,
+        )
+
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path)
+            snap, r1 = self._run(session, cfg, 20)
+            session.commit()
+            history_file = (
+                self._batch_dir(tmp_path, snap.as_of_jst, r1.forecast_batch_id) / "execution.csv"
+            )
+            history_file.write_text(",".join(EXECUTION_FIELDNAMES) + "\r\n", encoding="utf-8")
+            assert live_spot.call_count == 1
+
+            _, r2 = self._run(session, cfg, 20, hours_after_fixing=12)
+
+            assert r2.execution_decisions_recorded == _EXECUTION_BOOK_COUNT
+            assert r2.execution_csv_path is not None
+            assert live_spot.call_count == 2
+            decisions = load_execution_decisions_csv(str(history_file))
+            assert len(decisions) == _EXECUTION_BOOK_COUNT
+        finally:
+            session.close()
+
+    # (d) ------------------------------------------------------------------
+    def test_d_live_spot_failure_records_live_unavailable(self, tmp_path, live_spot) -> None:
+        import csv
+
+        from ugh_quantamental.fx_protocol.execution_exports import load_execution_decisions_csv
+
+        live_spot.side_effect = FxDataFetchError("yahoo down")
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path)
+            snap, result = self._run(session, cfg, 20)
+
+            assert result.forecast_created is True
+            assert result.execution_decisions_recorded == _EXECUTION_BOOK_COUNT
+            assert result.execution_csv_path is not None
+            assert live_spot.call_count == 1
+            history_file = (
+                self._batch_dir(tmp_path, snap.as_of_jst, result.forecast_batch_id)
+                / "execution.csv"
+            )
+            decisions = load_execution_decisions_csv(str(history_file))
+            assert len(decisions) == _EXECUTION_BOOK_COUNT
+            for d in decisions:
+                assert d.entry_status == "live_unavailable"
+                assert d.entry_price_live is None
+                assert d.entry_vendor is None
+                assert d.entry_feed is None
+                assert d.entry_time_utc == self._run_clock(snap.as_of_jst)
+            with open(history_file, newline="", encoding="utf-8") as fh:
+                raw_rows = list(csv.DictReader(fh))
+            assert [row["entry_price_live"] for row in raw_rows] == [""] * _EXECUTION_BOOK_COUNT
+            assert (tmp_path / "latest" / "execution.csv").is_file()
+        finally:
+            session.close()
+
+    # (e) ------------------------------------------------------------------
+    @pytest.mark.parametrize(
+        "overrides",
+        [{"run_execution_layer": False}, {"write_csv_exports": False}],
+        ids=["layer_off", "csv_exports_off"],
+    )
+    def test_e_disabled_layer_writes_nothing(self, tmp_path, live_spot, overrides: dict) -> None:
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path, **overrides)
+            _, r1 = self._run(session, cfg, 20)
+            session.commit()
+            _, r2 = self._run(session, cfg, 21)
+            session.commit()
+
+            assert r1.forecast_created is True
+            assert r2.outcome_recorded is True
+            for result in (r1, r2):
+                assert result.execution_csv_path is None
+                assert result.execution_evaluation_csv_path is None
+                assert result.execution_decisions_recorded == 0
+                assert result.execution_evaluations_recorded == 0
+            assert live_spot.call_count == 0
+            assert not (tmp_path / "latest" / "execution.csv").exists()
+            assert not (tmp_path / "execution").exists()
+            assert list(tmp_path.glob("history/*/*/execution*.csv")) == []
+        finally:
+            session.close()
+
+    # (f) ------------------------------------------------------------------
+    def test_f_decision_failure_is_isolated_from_the_run(self, tmp_path, live_spot) -> None:
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path)
+            with patch(
+                "ugh_quantamental.fx_protocol.automation.build_execution_decisions",
+                side_effect=RuntimeError("decision rule exploded"),
+            ):
+                snap, result = self._run(session, cfg, 20)
+
+            assert result.forecast_created is True
+            assert result.forecast_batch_id is not None
+            assert result.forecast_csv_path is not None
+            assert result.manifest_path is not None
+            assert result.execution_decisions_recorded == 0
+            assert result.execution_csv_path is None
+            batch_dir = self._batch_dir(tmp_path, snap.as_of_jst, result.forecast_batch_id)
+            assert (batch_dir / "forecast.csv").is_file()
+            assert not (batch_dir / "execution.csv").exists()
+            assert not (tmp_path / "latest" / "execution.csv").exists()
+        finally:
+            session.close()
+
+    def test_f_evaluation_failure_is_isolated_and_retried_next_run(
+        self, tmp_path, live_spot
+    ) -> None:
+        session = self._make_session()
+        try:
+            cfg = self._config(tmp_path)
+            snap1, r1 = self._run(session, cfg, 20)
+            session.commit()
+            eval_file = (
+                self._batch_dir(tmp_path, snap1.as_of_jst, r1.forecast_batch_id)
+                / "execution_evaluation.csv"
+            )
+
+            with patch(
+                "ugh_quantamental.fx_protocol.automation.evaluate_execution_decisions",
+                side_effect=RuntimeError("evaluation exploded"),
+            ):
+                _, r2 = self._run(session, cfg, 21)
+            session.commit()
+
+            assert r2.outcome_recorded is True
+            assert r2.evaluation_count == 7
+            assert r2.execution_evaluations_recorded == 0
+            assert r2.execution_evaluation_csv_path is None
+            assert r2.execution_decisions_recorded == _EXECUTION_BOOK_COUNT  # 3b independent of 4c
+            assert not eval_file.exists()
+
+            # The next run's archive scan retries the evaluation (outcome in the DB).
+            _, r3 = self._run(session, cfg, 21, hours_after_fixing=12)
+            assert r3.execution_evaluations_recorded == _EXECUTION_BOOK_COUNT
+            assert eval_file.is_file()
+        finally:
+            session.close()

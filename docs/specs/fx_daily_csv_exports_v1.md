@@ -42,16 +42,22 @@ CSV files are written under `csv_output_dir`.  In GitHub Actions, this is set to
 │   ├── manifest.json                         ← machine-readable run metadata (always)
 │   ├── forecast.csv                          ← latest forecast (always)
 │   ├── outcome.csv                           ← latest outcome (only when generated)
-│   └── evaluation.csv                        ← latest evaluation (only when generated)
+│   ├── evaluation.csv                        ← latest evaluation (only when generated)
+│   └── execution.csv                         ← latest execution-layer decisions (updated when recorded; never deleted)
 ├── history/
 │   └── {YYYYMMDD}/
 │       └── {forecast_batch_id}/              ← one dir per run (deterministic batch ID)
 │           ├── forecast.csv
 │           ├── outcome.csv                   ← only when generated
-│           └── evaluation.csv               ← only when generated
+│           ├── evaluation.csv               ← only when generated
+│           ├── execution.csv                ← execution-layer decisions, 6 rows (never overwritten once complete)
+│           └── execution_evaluation.csv     ← execution-layer evaluations, 6 rows (once the window's outcome is persisted)
 ├── forecasts/{pair}_{YYYYMMDD}_forecast.csv  ← legacy staging path (backward-compat)
 ├── outcomes/{pair}_{YYYYMMDD}_outcome.csv
-└── evaluations/{pair}_{YYYYMMDD}_evaluation.csv
+├── evaluations/{pair}_{YYYYMMDD}_evaluation.csv
+└── execution/                                ← execution-layer staging (FX Execution Layer v1)
+    ├── {pair}_{YYYYMMDD}_execution.csv
+    └── {pair}_{YYYYMMDD}_execution_evaluation.csv  ← YYYYMMDD = the evaluated window's as_of date
 ```
 
 `YYYYMMDD` is the date of `as_of_jst` in JST.
@@ -71,6 +77,32 @@ CSV files are written under `csv_output_dir`.  In GitHub Actions, this is set to
   protocol_version)` triple, a same-day rerun lands in the same directory and
   overwrites it — this is the intended behaviour.
 - `outcome.csv` and `evaluation.csv` appear only when generated.
+
+### execution/ policy (FX Execution Layer v1)
+
+`execution.csv` / `execution_evaluation.csv` are written by `execution_exports.py`
+(`export_execution_csv`, `export_execution_evaluation_csv`, `publish_execution_csvs`)
+from automation Steps 3b / 4c (`docs/specs/fx_execution_layer_v1.md` §7). Column order
+is spec §5.1 / §5.2 (`EXECUTION_FIELDNAMES` / `EXECUTION_EVALUATION_FIELDNAMES`).
+
+- `history/{YYYYMMDD}/{forecast_batch_id}/execution.csv` holds the six book decisions of
+  that batch and is the **sole persistence** of the execution layer (no DB table). A
+  complete file (one verified row per book, `is_complete_decision_file`) is **never
+  overwritten**, not even by a same-day rerun; a missing, header-only or truncated file
+  is treated as absent and replaced. Writes are atomic (temp file + `os.replace`).
+- `history/{YYYYMMDD}/{forecast_batch_id}/execution_evaluation.csv` holds the six
+  evaluations of the same batch and sits in the **evaluated** window's directory, not
+  the directory of the run that evaluated it. Overwrite is allowed (idempotent given the
+  persisted outcome); `is_complete_evaluation_file` gates re-evaluation.
+- `latest/execution.csv` is the copy of the most recently **recorded** decisions. It is
+  updated only when a run records decisions and is never deleted, so it can lag
+  `latest/forecast.csv` by a day after a run that recorded none (archive already
+  complete, window closed, layer disabled or failed).
+- `execution/{pair}_{YYYYMMDD}_execution.csv` and
+  `execution/{pair}_{YYYYMMDD}_execution_evaluation.csv` are the staging files
+  (`make_daily_csv_stem` naming); for evaluations `YYYYMMDD` is the evaluated window's
+  `as_of_jst` date. Their paths are returned in `FxDailyAutomationResult.execution_csv_path` /
+  `.execution_evaluation_csv_path`.
 
 ---
 
@@ -220,7 +252,9 @@ CSV values are loaded from persisted records only:
 - `outcome_id` is `None` (outcome not available for the run)
 
 CSV paths are returned in `FxDailyAutomationResult.forecast_csv_path`,
-`.outcome_csv_path`, `.evaluation_csv_path`.
+`.outcome_csv_path`, `.evaluation_csv_path`. Execution-layer staging paths are returned
+in `.execution_csv_path` / `.execution_evaluation_csv_path` together with the row counts
+`.execution_decisions_recorded` / `.execution_evaluations_recorded` (§3, execution/ policy).
 
 ---
 
@@ -241,6 +275,7 @@ CSV paths are returned in `FxDailyAutomationResult.forecast_csv_path`,
 | File | Purpose |
 |---|---|
 | `src/ugh_quantamental/fx_protocol/csv_exports.py` | Deterministic flattening, CSV write, layout publication, and manifest helpers |
+| `src/ugh_quantamental/fx_protocol/execution_exports.py` | Execution-layer CSV flattening, atomic `history/` + `latest/` publication, loaders and completeness predicates (§3, execution/ policy) |
 | Updated `automation_models.py` | Config/result field additions (`write_csv_exports`, `csv_output_dir`, `manifest_path`) |
 | Updated `automation.py` | Post-run CSV export, layout publication, and manifest generation |
 | Updated `scripts/run_fx_daily_protocol.py` | Env var wiring, fail-fast path guard, and summary printing |

@@ -219,6 +219,7 @@ All values are clamped to their declared Pydantic field bounds. The same snapsho
 | `write_csv_exports` | `bool` | Whether to write CSV exports after each run (default: `True`) |
 | `csv_output_dir` | `str` | Root directory for CSV output files (default: `./data/csv`) |
 | `outcome_catchup_days` | `int` | Max protocol business days of closed-but-unevaluated forecast windows to recover per run, oldest first (default: `5`, `ge=0`; `0` disables catch-up entirely) |
+| `run_execution_layer` | `bool` | Whether to run the FX execution layer — decision recording and the archive evaluation scan (steps 6a / 6c below) — effective only together with `write_csv_exports` (default: `True`) |
 
 ### `CatchupWindowResult` (`automation_models.py`)
 
@@ -250,6 +251,10 @@ One closed forecast window recovered by the outcome catch-up pass (§ Outcome ca
 | `evaluation_csv_path` | `str \| None` | Absolute path of the written evaluation CSV (staging), or `None` if skipped |
 | `manifest_path` | `str \| None` | Absolute path of `latest/manifest.json`, or `None` if CSV exports disabled |
 | `catchup_windows` | `tuple[CatchupWindowResult, ...]` | Windows recovered by the outcome catch-up pass this run (default `()`); see § Outcome catch-up |
+| `execution_csv_path` | `str \| None` | Staging path of the execution-decision CSV written for this run's batch (step 6a), or `None` when no decisions were recorded |
+| `execution_evaluation_csv_path` | `str \| None` | Staging path of the last execution-evaluation CSV written by the archive scan (step 6c), or `None` |
+| `execution_decisions_recorded` | `int` | Decision rows recorded this run (`6` or `0`) |
+| `execution_evaluations_recorded` | `int` | Evaluation rows recorded this run, summed over every window the scan evaluated (`6` per window) |
 
 ### `run_fx_daily_protocol_once(config, provider, session) -> FxDailyAutomationResult`
 
@@ -270,15 +275,50 @@ Orchestration function in `automation.py`:
 4. Build `FullWorkflowRequest` (UGH inputs) from the snapshot via `build_ugh_request_from_snapshot`
 5. Build `DailyForecastWorkflowRequest` using request builders (injects UGH request + baseline context)
 6. If `config.run_forecast_generation`: call `run_daily_forecast_workflow`; idempotent
+6a. **Execution-layer decisions** (`automation.py` Step 3b; only when `config.write_csv_exports and config.run_execution_layer` and a batch id is known): if `history/{date}/{batch}/execution.csv` is not complete (`is_complete_decision_file`: missing, header-only or truncated) **and** the run clock is still inside the forecast window (`now_utc < window_end_jst`), fetch the live spot once (`fetch_live_spot_yahoo`; a `FxDataFetchError` degrades to `entry_status = "live_unavailable"`) and record the six `ExecutionDecision` rows via the pure `build_execution_decisions`. A complete archive is left untouched without re-fetching; a closed window is left to the backfill with one warning. Non-fatal. See § Execution layer below
 6. If `config.run_outcome_evaluation` and prior window data is available in snapshot: call `run_daily_outcome_evaluation_workflow` for the **immediately preceding window only** (`previous_window_matches` + `_prior_batch_ready`, unchanged); idempotent
 6b. **Outcome catch-up** (if `config.run_outcome_evaluation` and `config.outcome_catchup_days > 0`): recover older closed-but-unevaluated windows — see § Outcome catch-up below; reported via `catchup_windows`, never mutates the singular `outcome_id` / `outcome_recorded` / `evaluation_count` / `outcome_csv_path` / `evaluation_csv_path` fields from step 6
+6c. **Execution-layer evaluation scan** (`automation.py` Step 4c; same gate as 6a): archive-wide and independent of 6 / 6b — every complete `history/*/*/execution.csv` whose sibling `execution_evaluation.csv` is not complete (`is_complete_evaluation_file`) and whose window outcome is in the DB (`make_outcome_id` recomputed from the decision rows' `as_of_jst` / `window_end_jst`) gets its six `ExecutionEvaluation` rows via the pure `evaluate_execution_decisions`; a pending window is skipped silently; no lookback bound. Non-fatal, per window and as a whole
 7. If `config.write_csv_exports`: write forecast / outcome / evaluation CSVs under `config.csv_output_dir`; skipped gracefully when the relevant batch or outcome ID is `None`
-8. If `config.write_csv_exports` and forecast CSV was written: **publish to `latest/` and `history/` layout** via `publish_csv_to_layout`; absent outcome/evaluation files are **deleted** from `latest/`; **write `latest/manifest.json`** via `write_latest_manifest`
-9. Return `FxDailyAutomationResult` (includes `manifest_path`, `catchup_windows`)
+8. If `config.write_csv_exports` and forecast CSV was written: **publish to `latest/` and `history/` layout** via `publish_csv_to_layout`; absent outcome/evaluation files are **deleted** from `latest/`; **write `latest/manifest.json`** via `write_latest_manifest`. **Execution-layer files** (`automation.py` Steps 5b / 6b) are exported and published inside steps 6a / 6c themselves through `publish_execution_csvs`: `history/{date}/{batch}/execution.csv` (+ `latest/execution.csv`) at decision time, `history/{date}/{batch}/execution_evaluation.csv` in the **evaluated** window's batch directory at evaluation time; a complete `execution.csv` is never overwritten
+9. Return `FxDailyAutomationResult` (includes `manifest_path`, `catchup_windows`, `execution_csv_path`, `execution_evaluation_csv_path`, `execution_decisions_recorded`, `execution_evaluations_recorded`)
 
 Idempotency: rerunning the same `as_of_jst` must not duplicate records. Both workflows are already idempotent per Milestones 14 and 15. CSV exports overwrite the same deterministic paths on each rerun. Outcome catch-up (step 6b) reuses the same idempotent `run_daily_outcome_evaluation_workflow` and additionally short-circuits before calling it once a window's evaluation is already complete, so a recovered window is never re-processed or re-reported on a later run.
 
 ---
+
+## Execution layer (Steps 3b / 4c / 5b / 6b)
+
+The FX execution layer (`docs/specs/fx_execution_layer_v1.md`) records six paper-trading
+book decisions per forecast batch and evaluates them once the window's outcome is known.
+It is wired into `run_fx_daily_protocol_once` as steps 6a / 6c above; `automation.py`
+labels them Step 3b (right after forecast generation) and Step 4c (right after outcome
+catch-up), with the CSV export / publication (Steps 5b / 6b) performed inside the same
+helpers (`_record_execution_decisions`, `_evaluate_execution_archive`).
+
+- **Gate**: `config.write_csv_exports and config.run_execution_layer`. The CSV archive is
+  the layer's only persistence (no ORM table), so it cannot run without CSV exports.
+- **Timing**: a decision is recorded only while the forecast window is open
+  (`now_utc < window_end_jst`, the next business day's 08:00 JST). A batch whose window
+  has already closed when the run reaches Step 3b — a batch created by the one-day
+  provider fallback the next morning, or one whose every run failed to write — gets no
+  live decision (one warning); the backfill fills such days with `backfill_bar` rows.
+- **Once per batch**: a complete `execution.csv` is never overwritten and the live spot
+  is not fetched again on a same-day retry. A missing, header-only or truncated file is
+  treated as absent and recorded by the next run inside the window (recovery path, with
+  that run's live spot and `entry_time_utc`).
+- **Evaluation**: the Step 4c scan is archive-wide and keyed only on the completeness
+  predicates (`is_complete_decision_file` / `is_complete_evaluation_file`) plus the
+  presence of the window's `OutcomeRecord`; it therefore covers the immediately-preceding
+  window, catch-up windows and any window whose earlier evaluation write failed, without
+  an `outcome_catchup_days` bound, and is idempotent given the persisted outcome.
+  `execution_evaluation.csv` lands in the evaluated window's own batch directory.
+- **Failure isolation**: every exception in Step 3b or 4c is caught and logged as a
+  warning (per window inside the scan, and around each step as a whole); the result's
+  `execution_*` fields stay at their defaults and forecast generation, outcome
+  recording, evaluation and the existing CSV steps are unaffected.
+- **Clock**: `now_utc` (the run clock resolved in step 1) is both `decided_at_utc` and
+  `evaluated_at_utc`; the pure functions in `execution.py` never read the clock.
 
 ## Outcome catch-up (bounded backward recovery)
 

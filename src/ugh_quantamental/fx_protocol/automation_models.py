@@ -30,6 +30,11 @@ class FxDailyAutomationConfig(BaseModel):
     write_csv_exports: bool = True
     csv_output_dir: str = Field(default="./data/csv", min_length=1)
     outcome_catchup_days: int = Field(default=5, ge=0)
+    # FX Execution Layer v1 (docs/specs/fx_execution_layer_v1.md §7): record the
+    # six paper-trading book decisions for the day's batch and evaluate archived
+    # decisions once their window's outcome is persisted.  Only effective together
+    # with ``write_csv_exports`` (the CSV archive is the layer's sole persistence).
+    run_execution_layer: bool = True
 
 
 class CatchupWindowResult(BaseModel):
@@ -82,3 +87,14 @@ class FxDailyAutomationResult(BaseModel):
     # A tuple (never a plain list) so the frozen result cannot be mutated by
     # append/remove/reorder after construction.
     catchup_windows: tuple[CatchupWindowResult, ...] = ()
+    # FX Execution Layer v1 (automation Steps 3b / 4c / 5b / 6b). All four stay at
+    # their defaults when the layer is disabled, skipped (decisions already
+    # archived, window closed, outcome pending) or failed non-fatally.
+    # ``execution_csv_path`` is the staging path of the decision CSV written
+    # for *this* run's batch; ``execution_evaluation_csv_path`` the staging
+    # path of the last evaluation CSV written by the archive scan (which may
+    # evaluate a window older than the immediately-preceding one).
+    execution_csv_path: str | None = None
+    execution_evaluation_csv_path: str | None = None
+    execution_decisions_recorded: int = 0
+    execution_evaluations_recorded: int = 0
