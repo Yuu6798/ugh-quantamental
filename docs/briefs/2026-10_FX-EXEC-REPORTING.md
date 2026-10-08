@@ -12,7 +12,10 @@
 
 ## Acceptance Criteria
 - [ ] `src/ugh_quantamental/fx_protocol/execution_reporting.py` (new) に
-      `collect_execution_evaluation_rows(history_dir) -> list[dict[str, str]]` があり、
+      `collect_execution_evaluation_rows(history_dir) -> CollectedExecutionEvaluations` (new、frozen
+      dataclass または Pydantic model: `rows: tuple[dict[str, str], ...]` と
+      `incomplete_batches: tuple[IncompleteExecutionBatch, ...]`、後者は `forecast_batch_id` と
+      `missing_books: tuple[str, ...]`) があり、
       `history/*/*/execution_evaluation.csv` を読んで `(forecast_batch_id, book_id)` で重複排除し、
       **6 book が揃わない `forecast_batch_id` は丸ごと除外**して `incomplete_batches`
       (batch id と欠けた book の一覧) として返す (集計にもゲートにも入れない)。走査規約は
@@ -22,7 +25,7 @@
       book ごとに spec §8 の指標を返す: `decision_count`, `trade_count`, `skip_counts` (skip_reason 別),
       `live_coverage_rate`, `direction_hit_rate`, `capture_bp` (`Σ side × (realized_close −
       realized_open) / realized_open × 1e4`、単位サイズ)、`signed_bp_live_mean/sd/t`
-      (`pnl_live_bp − cost_bp`、live 行のみ)、`signed_bp_bar_mean/sd/t` (`pnl_bar_bp − cost_bp`、全行)、
+      (`pnl_live_bp − cost_live_bp`、live 行のみ)、`signed_bp_bar_mean/sd/t` (`pnl_bar_bp − cost_bar_bp`、全行)、
       `pnl_jpy_live`, `pnl_jpy_bar`, `final_equity_jpy_live`, `final_equity_jpy_bar`,
       `max_drawdown_live`, `max_drawdown_bar`, `profit_factor_live`, `cost_jpy_total`。資産曲線は spec §5.2 の式 (初期 3,000,000 円、複利、
       `position_usd = equity × size / entry`) で、live 系列は `entry_status == live` の行のみ、
@@ -34,7 +37,7 @@
       完全 batch (backfill 行と他 version は除外)。`gate.cohort` に `execution_version`,
       `first_as_of_jst`, `last_as_of_jst`, `trade_count`, `observation_days` を、`gate.criteria` に
       spec §9 の 4 条件それぞれの現在値・閾値・充足可否を、`gate.passed: bool` を返す。t 値は
-      `signed_bp_live` (= `pnl_live_bp − cost_bp`) から計算し、bar 系列はゲートに使わない。
+      `signed_bp_live` (= `pnl_live_bp − cost_live_bp`) から計算し、bar 系列はゲートに使わない。
 - [ ] `export_execution_report_artifacts(report, csv_output_dir, scope, date_str)` が
       `csv/analytics/execution/{scope}/{date_str}/execution_{scope}.md|.csv|.json` (scope は
       `weekly` / `monthly`) と `latest/execution_summary.json` を書く。md は book 別の表 1 つ、
@@ -45,12 +48,17 @@
 - [ ] `scripts/run_fx_analysis_pipeline.py` の weekly / monthly モードで、既存の weekly / monthly の
       直後に執行層の weekly / monthly artifact を生成する (monthly は月窓全体、`FX_REPORT_DATE` と
       同じ窓解決を使う)。失敗は non-fatal。
-- [ ] `scripts/backfill_execution_history.py` (new) が `--fxdata-dir` の `history/` を走査し、
-      `forecast.csv` が 7 行あり `outcome.csv` / `evaluation.csv` が揃う batch について、
-      `execution.csv` が**無い**場合だけ `entry_status = backfill_bar` の判断 6 行と評価 6 行を
-      生成する (live なし、`pnl_live_bp` 空)。判断は `build_execution_decisions` を、入力は
-      `input_snapshot.json` (`analyze_estar_lag.load_market_snapshot` で読める) と
-      `build_baseline_context(snapshot)` と `forecast.csv` の行から復元した `ForecastRecord` を使う。
+- [ ] `scripts/backfill_execution_history.py` (new) が `--fxdata-dir` の `history/` を**横断 join** で
+      走査する: 評価と outcome は翌日の batch dir にあるので、`labeled_observations.collect_evaluated_forecast_rows`
+      と同じく `forecast_id → evaluation`、`outcome_id → outcome` のグローバル索引を先に作り、
+      `forecast_batch_id` ごとに (a) `forecast.csv` の 7 行の `strategy_kind` / `forecast_direction`、
+      (b) その batch の評価行が指す `outcome.csv` の `outcome_id` / `window_start_jst` / `realized_open` /
+      `realized_close`、(c) `analyze_estar_lag.find_snapshot_path(fxdata_dir, as_of.date())` で見つけた
+      `input_snapshot.json` (`load_market_snapshot` で読み `build_baseline_context` へ) の 3 つが揃う batch
+      だけを対象にし、`history/{as_of}/{batch}/execution.csv` が**無い**場合だけ
+      `entry_status = backfill_bar` の判断 6 行と評価 6 行を生成する (`build_execution_decisions` に
+      `forecast_directions` の対応と `entry_status="backfill_bar"`, `live_entry=None` を渡す。
+      `ForecastRecord` / `OutcomeRecord` は復元しない)。揃わない batch は理由別に件数を出して skip。
       既存ファイルは一切上書きしない。`--dry-run` で件数だけ出す。`fx-daily-data` には push しない
       (ローカル checkout に書き、push は人が行う)。
 - [ ] `docs/specs/fx_execution_layer_v1.md` §8〜§10 を実装に合わせて更新 (Status は
@@ -73,8 +81,8 @@
 ## Implementation Hints
 - 週窓の解決は `report_window.resolve_business_day_window` (weekly_reports_v2 が使うもの) を
   使う (金曜 block は `report_date = as_of + 1 日`)。
-- t 値は取引行 (`side != 0`) の `mean / (pstdev / sqrt(n))`。live 系列は `pnl_live_bp − cost_bp`
-  (live 行のみ)、bar 系列は `pnl_bar_bp − cost_bp`。`n < 3` または `pstdev == 0` なら None。
+- t 値は取引行 (`side != 0`) の `mean / (pstdev / sqrt(n))`。live 系列は `pnl_live_bp − cost_live_bp`
+  (live 行のみ)、bar 系列は `pnl_bar_bp − cost_bar_bp`。`n < 3` または `pstdev == 0` なら None。
   ゲートは live 系列のみ。
 - 最大 DD は資産曲線のピーク比。資産曲線は行を `as_of_jst` 昇順で畳む。
 - md の数値書式は `weekly_report_exports._fmt_pct` / `_fmt_bp` に揃える。

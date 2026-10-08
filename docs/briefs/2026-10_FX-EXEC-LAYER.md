@@ -17,19 +17,26 @@
       validator: `side ∈ {-1, 0, 1}`、`0.0 ≤ size ≤ 1.0`、`side == 0` と `size == 0.0` は同値、
       `entry_status` は `Literal["live", "live_unavailable", "backfill_bar"]` (`backfill_bar` は
       FX-EXEC-REPORTING の backfill 行用に今から予約)、`entry_price_live` は
-      `entry_status == "live"` のときだけ非 None (他 2 値では None)、`pnl_live_bp` は `entry_price_live` が None なら None。
+      `entry_status == "live"` のときだけ非 None (他 2 値では None)、`ExecutionEvaluation` の
+      `pnl_live_bp` と `cost_live_bp` は `entry_price_live` が None のときだけ None (`cost_bar_bp` は常に
+      float)。
       SQLAlchemy を import しない。
 - [ ] `src/ugh_quantamental/fx_protocol/execution.py` (new) が定数
       `EXECUTION_VERSION = "x1"`、`EXECUTION_INITIAL_EQUITY_JPY = 3_000_000`、
       `EXECUTION_ROUND_TRIP_COST_JPY_PER_USD = 0.01`、`UGH_X1_TARGET_BP = 30.0`、
       `UGH_X1_SHOCK_MULTIPLIER = 2.5`、`CONSENSUS_PARTIAL_SIZE = 0.5` を `__all__` 付きで公開する。
-- [ ] `build_execution_decisions(*, forecasts, baseline_context, completed_closes, as_of_jst,
-      window_end_jst, forecast_batch_id, live_entry, decided_at_utc) -> tuple[ExecutionDecision, ...]`
-      が純関数で、`BookId` の順に**ちょうど 6 件**返す。`forecasts` に `EXPECTED_DAILY_BATCH_SIZE`
-      (= 7) 件がない、または `ugh_v2_alpha` / `ugh_v2_beta` / `ugh_v2_gamma` / `ugh_v2_delta` /
-      `baseline_simple_technical` のいずれかが欠けるときは `ValueError` を raise する
-      (メッセージは new: `"execution layer requires a complete daily forecast batch"` で始める)。
-      `completed_closes` は直近完了窓の終値を**古い順**に並べたタプルで、5 件未満なら `ValueError`。
+- [ ] `build_execution_decisions(*, forecast_directions: Mapping[StrategyKind, ForecastDirection],
+      baseline_context, completed_closes, as_of_jst, window_end_jst, forecast_batch_id,
+      entry_status: EntryStatus, live_entry: LiveEntry | None, decided_at_utc)
+      -> tuple[ExecutionDecision, ...]` が純関数で、`BookId` の順に**ちょうど 6 件**返す。
+      `ForecastRecord` ではなく方向の対応を受け取る (CSV からの backfill でも同じ関数を使うため)。
+      `ugh_v2_alpha` / `ugh_v2_beta` / `ugh_v2_gamma` / `ugh_v2_delta` / `baseline_simple_technical`
+      のいずれかが欠けるときは `ValueError` を raise する (メッセージは new:
+      `"execution layer requires a complete daily forecast batch"` で始める)。
+      `entry_status == "live"` と `live_entry is not None` が食い違えば `ValueError`。
+      `live_unavailable` / `backfill_bar` では `entry_price_live` / `entry_vendor` / `entry_feed` は None、
+      `entry_time_utc = decided_at_utc`。`completed_closes` は直近完了窓の終値を**古い順**に並べた
+      タプルで、5 件未満なら `ValueError`。
 - [ ] 判断規則が spec §4 の表どおり (すべて parametrized test で固定):
       - `ugh_x1`: β が `flat` → `side 0, skip_reason "flat"`。
         `abs(previous_close_change_bp) > 2.5 × trailing_mean_abs_close_change_bp` → `side 0,
@@ -48,11 +55,13 @@
       監査列 (`beta_direction`, `consensus_up_count`, `consensus_down_count`, `technical_direction`,
       `momentum_3d`, `trailing_mean_abs_close_change_bp`, `previous_close_change_bp`) は 6 行すべてに
       同じ値を書く。
-- [ ] `evaluate_execution_decisions(decisions, outcome, *, evaluated_at_utc)
-      -> tuple[ExecutionEvaluation, ...]` が純関数で、spec §5.2 の式どおりに
-      `pnl_live_bp` / `pnl_bar_bp` / `cost_bp` / `hit` を計算する。`decisions` の
-      `forecast_batch_id` が揃っていない、または `outcome.window_start_jst != decisions[0].as_of_jst`
-      のときは `ValueError`。`side == 0` の行は `pnl_bar_bp 0.0`、`cost_bp 0.0`、`hit None`。
+- [ ] `evaluate_execution_decisions(decisions, *, outcome_id, window_start_jst, realized_open,
+      realized_close, evaluated_at_utc) -> tuple[ExecutionEvaluation, ...]` が純関数で
+      (`OutcomeRecord` ではなく outcome.csv にもある 4 値を受け取る)、spec §5.2 の式どおりに
+      `pnl_live_bp` / `pnl_bar_bp` / `cost_live_bp` / `cost_bar_bp` / `hit` を計算する。`decisions` が
+      空、`forecast_batch_id` が揃っていない、`window_start_jst != decisions[0].as_of_jst`、価格が
+      非有限または 0 以下のときは `ValueError`。`side == 0` の行は `pnl_bar_bp 0.0`、`cost_bar_bp 0.0`、
+      `hit None` (live 価格があれば `pnl_live_bp 0.0` / `cost_live_bp 0.0`、無ければ両方 None)。
 - [ ] `src/ugh_quantamental/fx_protocol/data_sources.py` に `fetch_live_spot_yahoo(*, timeout: int = 30)
       -> tuple[float, datetime]` (new) があり、`YahooFinanceFxMarketDataProvider` と同じ
       `https://query2.finance.yahoo.com/v8/finance/chart/USDJPY=X` から `meta.regularMarketPrice` を
@@ -84,9 +93,14 @@
         (live spot はその時刻で取り直す。`entry_time_utc` がそれを記録する)。既にファイルがあれば
         何もしない (live spot も取り直さない)。live spot は `fetch_live_spot_yahoo` を**1 回**呼び、
         失敗時は warning ログ + `entry_status "live_unavailable"`。
-      - Step 4c: Step 4 で outcome が記録された窓 (`prior_batch_id`) と、Step 4b の catch-up で
-        outcome が記録された各窓について、`history/{window date}/{batch}/execution.csv` が存在すれば
-        それを読んで `evaluate_execution_decisions` を呼ぶ。存在しなければ何もしない (warning 不要)。
+      - Step 4c (Step 4b の後): **独立した有界スキャン**。`as_of_jst` から `prev_as_of_jst` で
+        `config.outcome_catchup_days + 1` 営業日さかのぼり、各窓 D について
+        `history/{D:%Y%m%d}/{make_forecast_batch_id(pair, D, protocol_version)}/execution.csv` が存在し、
+        同 dir に `execution_evaluation.csv` が無く、`make_outcome_id(pair, D, next_as_of_jst(D),
+        schema_version)` の outcome が `FxOutcomeEvaluationRepository.load_fx_outcome_record` で読める
+        ときだけ、判断行を読んで `evaluate_execution_decisions` を呼ぶ。条件を満たさない窓は何もしない
+        (warning 不要)。Step 4 の直前窓も Step 4b の catch-up 窓もこのスキャンに含まれるので、個別の
+        配線はしない。評価の書き込みに失敗した窓は次 run のスキャンで再試行される。
       - Step 5b / 6b: export と publish。`execution_evaluation.csv` は評価した窓の batch dir に書く
         (当日の dir ではない)。
       - 執行層の例外はすべて捕捉して warning ログにし、`FxDailyAutomationResult` の該当フィールドを
@@ -116,15 +130,17 @@
 
 ## Implementation Hints
 - 判断の入力: batch は `PersistedDailyForecastBatch.forecasts` (`forecast_models.py`)、各行は
-  `ForecastRecord` (`strategy_kind`, `forecast_direction`, `as_of_jst`, `window_end_jst`,
-  `forecast_batch_id`)。β は `StrategyKind.ugh_v2_beta`、単純テクニカルは
+  `ForecastRecord`。automation は `{f.strategy_kind: f.forecast_direction for f in batch.forecasts}` を
+  `forecast_directions` に渡す。β は `StrategyKind.ugh_v2_beta`、単純テクニカルは
   `StrategyKind.baseline_simple_technical`。
 - `BaselineContext` (`forecast_models.py`) の `previous_close_change_bp: float | None` と
   `trailing_mean_abs_close_change_bp: float` をそのまま使う。`build_baseline_context(snapshot)` は
   `request_builders.py:37`。
-- 評価の入力: `OutcomeRecord` (`models.py`) の `window_start_jst`, `realized_open`, `realized_close`,
-  `outcome_id`。Step 4 では `FxOutcomeEvaluationRepository.load_fx_outcome_record(session, outcome_id)`
-  で取れる。catch-up 窓は `CatchupWindowResult.outcome_id` から同様に読める。
+- 評価の入力: `OutcomeRecord` (`models.py`) の `outcome_id`, `window_start_jst`, `realized_open`,
+  `realized_close` をスカラーで渡す。Step 4c のスキャンは `make_outcome_id(config.pair, D,
+  next_as_of_jst(D), config.schema_version)` (`ids.py`、Step 4 と同じ引数規約) で id を再計算し
+  `FxOutcomeEvaluationRepository.load_fx_outcome_record(session, outcome_id)` で読む (None なら skip)。
+  `prev_as_of_jst` / `next_as_of_jst` は `calendar.py`。
 - Step 4c で読む判断行は CSV から `ExecutionDecision` に復元する (型変換は `csv_exports` の
   `_blank` 規約に揃える: 空文字は None)。
 - `publish_csv_to_history_only` (`csv_exports.py:426`) が history/ だけに書く既存パターン。
@@ -151,9 +167,11 @@
   - 判断規則: 6 book × (flat / shock / 4-4 / 3-1 flat / 3-1 反対 / 2-2 / divergence 一致・不一致 /
     momentum 正・負・ゼロ) を parametrized で固定。サイズ式 (`trailing 60bp → 0.5`、`20bp → 1.0`、
     `0bp → 1.0`)。batch 欠落・variant 欠落・closes 不足の `ValueError`。出力順が `BookId` 順。
-  - 評価式: live あり / live なし / side 0 の 3 ケースで `pnl_live_bp` / `pnl_bar_bp` / `cost_bp` /
-    `hit` を数値で固定 (例: entry 150.00、close 150.30、side +1 → `pnl_live_bp 20.0`、
-    `cost_bp ≈ 0.667`)。batch id 不一致と窓不一致の `ValueError`。
+  - 評価式: live あり / live なし / side 0 の 3 ケースで `pnl_live_bp` / `pnl_bar_bp` / `cost_live_bp` /
+    `cost_bar_bp` / `hit` を数値で固定 (例: entry live 150.00、`realized_open` 150.10、close 150.30、
+    side +1 → `pnl_live_bp 20.0`、`pnl_bar_bp ≈ 13.32`、`cost_live_bp ≈ 0.6667`、`cost_bar_bp ≈ 0.6662`)。
+    空・batch id 不一致・窓不一致・価格 0 以下の `ValueError`。`backfill_bar` の判断行を評価した
+    ケース (live 系列が None)。
   - `fetch_live_spot_yahoo`: 正常 payload、`result` 空、`regularMarketPrice` 欠落、HTTP 例外の
     4 ケース (後者 3 つは `FxDataFetchError`)。ネットワークは monkeypatch。
   - exports: fieldnames が spec の列順、publish が既存 `execution.csv` を上書きしないこと、
@@ -162,7 +180,9 @@
     `execution_decisions_recorded == 6`、(b) 同日 2 回目の run (batch 既存、`execution.csv` あり) が
     判断を作らず既存ファイルを変えない (live spot も呼ばれない)、(b2) batch 既存で `execution.csv` が
     無い run が判断を作る (回復経路)、(c) 翌日の run が `execution_evaluation.csv` 6 行を前日の batch dir に書き
-    `execution_evaluations_recorded == 6`、(d) live 取得失敗で `entry_status live_unavailable` かつ
+    `execution_evaluations_recorded == 6`、(c2) 2 営業日前の窓の `execution_evaluation.csv` を消して
+    run すると (outcome は DB にある) スキャンが書き直す、(c3) 既に `execution_evaluation.csv` がある窓は
+    再評価されない、(d) live 取得失敗で `entry_status live_unavailable` かつ
     run は成功、(e) `run_execution_layer=False` で何も書かない、(f) 執行層で例外を起こしても
     `forecast_created` と outcome 記録は保たれる。
   - 既存テストは無変更で通る。
