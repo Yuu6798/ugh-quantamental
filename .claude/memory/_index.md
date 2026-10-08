@@ -17,6 +17,7 @@
 - 2026-10-01: 2026-09 月次レビュー — 9 月の RW 比 +141bp は 3 日 (conviction 上限の順張り反転 × v2.5 拡張項) に集中。replay で拡張項無効化が 6 か月すべて改善 → **engine v2.7** (#134)、fixing 前着地の繰り越し (#135)、findings + briefs + replay script (#133、Codex 9 rounds / 13 件)、policy encode (#136)。
 - 2026-10-08: UGH の売買価値の切り分け (方向 60% は実在、conviction 逆相関で magnitude が打ち消す、合議は最悪部分集合、順位は政策ショック 8 日) と仮想売買試算 (合議・GPT-M3・Fable-VR1・1 月拡張・v2.7 再計算)。執行層 v1 の spec + brief FX-EXEC-LAYER / FX-EXEC-REPORTING を起草。9/29 yahoo 退化 bar を発見・訂正。
 - 2026-10-08: (Session 2) PR #138 merge (Codex 21 rounds / 50 件、ユーザー判断で締切) → FX-EXEC-LAYER を並列 agent 3 体 + レビュー agent 2 体で実装、PR #139 (Codex 2 rounds / 1 件、merge)。REPORTING brief はゲート整合性 (期待日 = 営業日 − 明示除外、live 欠落は除外まで block) に収束。follow-up: labeled_observations の版列、/new-brief の欠落経路 checklist。
+- 2026-10-08: (Session 3) FX-EXEC-REPORTING を同じ体制 (並列 agent 3 体 + レビュー agent 2 体 + 実データ copy の smoke test) で実装、PR #140 (Codex 4 rounds / 12 件、採用 10・変更なし 2、merge)。backfill は copy で 107 batch 生成。follow-up: archive 検証モード (評価の再導出 diff)、activation 日の照合、backfill 本番実行と data push は人手。
 
 <!--
 新規エントリのテンプレート:

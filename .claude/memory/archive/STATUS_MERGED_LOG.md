@@ -80,3 +80,7 @@
 ## 2026-10-08 (PR #139 merge sweep overflow)
 
 - **PR #134 / engine v2.7 — v2.5 ボラ拡張項の無効化** (2026-10-01) - Claude 実装、ユーザー承認 (10/1) 後。`volatility_expansion_max` default 1.8→1.0 (乗数 ≡ 1.0、v2.4 magnitude に復帰、式・不変量不変)、engine_version 3 箇所 sync、spec §5.1.3.1 (根拠 + rollback trigger)、v2.5 経路 test は 1.8 を明示。replay (4〜9 月 120 日 × 4 variant、164 件 bit-identical) で平均誤差 −1.33bp・中央値 −2.66bp・6 か月すべて改善・方向/FLAT 不変。Codex 0 件。
+
+## 2026-10-08 (PR #140 merge sweep overflow)
+
+- **PR #135 / FX-ASOF-FIXING** (2026-10-01) - Claude 実装。08:00 fixing 前に着地した run (月〜木の遅延 retry が JST 翌日 00:xx) を、前営業日 batch 完備時に #130 の繰り越し経路へ (後退拒否・`requested_as_of_jst` 基準 lag=0 を流用、フラグ名 `carried_over` に一般化)。batch 不在は従来 fallback で救済、部分 batch は既存 `partial forecast batch exists` で fail。`run_fx_daily_protocol_once(now_utc=)` を test 注入用に追加。test 4 本、spec Step 1 更新。Codex 0 件。
