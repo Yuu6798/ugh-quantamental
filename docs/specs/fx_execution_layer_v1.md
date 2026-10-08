@@ -172,7 +172,8 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
 
 `execution_reporting.py` (new) が `history/*/*/execution_evaluation.csv` を `(forecast_batch_id,
 book_id)` で重複排除して読み、**6 book が揃わない batch は丸ごと除外** (件数と id を報告) した上で、
-book ごとに次を出す:
+`execution_version` ごとの層に分けて (版を跨いで足さない。`x2` 以降が混在する境界の週・月と累積
+サマリは版ごとに別の表になる) book ごとに次を出す:
 
 - 判断数、取引数、見送り内訳 (評価行の `skip_reason` 別)、live 取得率
 - 方向的中率 (取引日)、capture bp (`Σ side × realized bp`、単位サイズ)、size 加重の日次リターン
@@ -204,9 +205,13 @@ book ごとに次を出す:
      (標本標準偏差 `stdev`、n − 1 で割る。`pstdev` は使わない)
   3. 最大 DD ≤ 初期資産の 10%
   4. 同期間の `bench_gpt_m3` と `bench_long` の両方を損益で上回る
-- 現行 version の batch に 6 book 未満のもの (§8 の `incomplete_batches`) が 1 つでもあれば、条件の
-  現在値は出すがゲートは **blocked** (`passed = False`、理由 `incomplete_batches`)。欠けた archive を
-  黙って短くした上で合格にはしない (昇格証拠は欠落・部分 batch で fail する、`AGENTS.md` §5)。
+- 現行 version の batch に 6 book 未満のもの (§8 の `incomplete_batches`)、または完全な `execution.csv`
+  があるのに完全な `execution_evaluation.csv` が無い batch (`missing_evaluations`。期待コホートは判断
+  ファイルの棚卸しから導く。`window_end_jst` が集計時刻より後の pending 窓は除く) が 1 つでもあれば、
+  条件の現在値は出すがゲートは **blocked** (`passed = False`、`blocked_reasons` に
+  `incomplete_batches` / `missing_evaluations`)。欠けた archive を黙って短くした上で合格にはしない
+  (昇格証拠は欠落・部分 batch で fail する、`AGENTS.md` §5)。修復は Step 4c の再スキャンか §10 の
+  backfill で行い、修復できない欠落は data 側の問題として扱う (ゲートは外さない)。
 - 不合格なら `x2` として設計し直し、観測を 1 からやり直す (期間を継ぎ足さない)。
 - ゲート通過後も実弾の判断は人が行う (本 spec の対象外)。
 

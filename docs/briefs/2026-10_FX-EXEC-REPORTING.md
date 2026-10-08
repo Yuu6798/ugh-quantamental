@@ -14,16 +14,21 @@
 - [ ] `src/ugh_quantamental/fx_protocol/execution_reporting.py` (new) に
       `collect_execution_evaluation_rows(history_dir) -> CollectedExecutionEvaluations` (new、frozen
       dataclass または Pydantic model: `rows: tuple[dict[str, str], ...]` と
-      `incomplete_batches: tuple[IncompleteExecutionBatch, ...]`、後者は `forecast_batch_id` と
-      `missing_books: tuple[str, ...]`) があり、
+      `incomplete_batches: tuple[IncompleteExecutionBatch, ...]` (後者は `forecast_batch_id` と
+      `missing_books: tuple[str, ...]`) と `missing_evaluations: tuple[MissingExecutionEvaluation, ...]`
+      (`forecast_batch_id`, `execution_version`, `as_of_jst`, `window_end_jst`)) があり、
       `history/*/*/execution_evaluation.csv` を読んで `(forecast_batch_id, book_id)` で重複排除し、
       **6 book が揃わない `forecast_batch_id` は丸ごと除外**して `incomplete_batches`
-      (batch id と欠けた book の一覧) として返す (集計にもゲートにも入れない)。走査規約は
+      (batch id と欠けた book の一覧) として返す (集計にもゲートにも入れない)。さらに
+      `history/*/*/execution.csv` を棚卸しし (`is_complete_decision_file` が True のもの)、同 dir に完全な
+      `execution_evaluation.csv` が無い batch を `missing_evaluations` として返す (期待コホート = 判断
+      ファイルの存在。評価ファイルが丸ごと無い・header のみの batch もここで捕捉する)。走査規約は
       `labeled_observations.collect_evaluated_forecast_rows` と同じ。
 - [ ] `run_execution_report(csv_output_dir, *, start_as_of_jst, end_as_of_jst, generated_at_utc)
       -> dict[str, Any]` が純粋な集計 (ファイル読みのみ、書き込みなし) で、**期間窓内**の行について
       (`start_as_of_jst` / `end_as_of_jst` は `datetime | None`、None はその端を無制限にする =
-      両方 None で history 全体) book ごとに spec §8 の指標を返す: `decision_count`, `trade_count`,
+      両方 None で history 全体) `execution_version` ごとの層 (`strata[version].books[book_id]`、版を
+      跨いで足さない) で book ごとに spec §8 の指標を返す: `decision_count`, `trade_count`,
       `skip_counts` (評価行の `skip_reason` 列の値別、取引行は含めない),
       `live_coverage_rate`, `direction_hit_rate`, `capture_bp` (`Σ side × (realized_close −
       realized_open) / realized_open × 1e4`、単位サイズ)、`signed_bp_live_mean/sd/t`
@@ -33,8 +38,8 @@
       `max_drawdown_live`, `max_drawdown_bar`, `profit_factor_live`, `cost_jpy_total`。資産曲線は spec §5.2 の式 (初期 3,000,000 円、複利、
       `position_usd = equity × size / entry`) で、live 系列は `entry_status == live` の行のみ、
       bar 系列は全行 (`backfill_bar` を含む)。
-- [ ] 同関数が `benchmark_deltas` を返す: `ugh_x1` と `bench_gpt_m3` / `bench_long` の
-      `pnl_jpy_live` 差と `capture_bp` 差。
+- [ ] 同関数が `benchmark_deltas` を層ごとに返す (`strata[version].benchmark_deltas`): `ugh_x1` と
+      `bench_gpt_m3` / `bench_long` の `pnl_jpy_live` 差と `capture_bp` 差。
 - [ ] 同関数が `gate` を返す。ゲートの母集団は**期間窓に依存しない累積コホート**: history 全体の
       行のうち `execution_version == execution.EXECUTION_VERSION` かつ `entry_status == live` の
       完全 batch (backfill 行と他 version は除外)。`gate.cohort` に `execution_version`,
@@ -42,13 +47,15 @@
       spec §9 の 4 条件それぞれの現在値・閾値・充足可否を、`gate.passed: bool` を返す。取引数・t 値・
       DD は **`ugh_x1` の行だけ**から計算し (`trade_count` は `ugh_x1` の `side != 0` 行数)、ベンチマーク
       book は条件 4 の比較にだけ使う。t 値は `signed_bp_live` (= `size × (pnl_live_bp − cost_live_bp)`)
-      から計算し、bar 系列はゲートに使わない。現行 `execution_version` の batch に `incomplete_batches`
-      が 1 つでもあれば `gate.passed = False` かつ `gate.blocked_reason = "incomplete_batches"` (new;
-      通常は None) — 欠けた archive を黙って短くして合格にはしない。
+      から計算し、bar 系列はゲートに使わない。現行 `execution_version` に `incomplete_batches` または
+      `missing_evaluations` (`window_end_jst > generated_at_utc` の pending 窓は除く) が 1 つでもあれば
+      `gate.passed = False` かつ `gate.blocked_reasons` (new; `tuple[str, ...]`、値は
+      `"incomplete_batches"` / `"missing_evaluations"`、通常は空) に理由を入れる — 欠けた archive を
+      黙って短くして合格にはしない。
 - [ ] `export_execution_report_artifacts(report, csv_output_dir, scope, date_str)` が
       `csv/analytics/execution/{scope}/{date_str}/execution_{scope}.md|.csv|.json` (scope は
-      `weekly` / `monthly`) を書く。md は book 別の表 1 つ、ベンチマーク差の表 1 つ、ゲート進捗の
-      表 1 つ。`latest/execution_summary.json` は期間窓の report からは書かず、
+      `weekly` / `monthly`) を書く。md は層 (version) ごとに book 別の表 1 つとベンチマーク差の表 1 つ、
+      ゲート進捗の表 1 つ (通常は層が 1 つ)。`latest/execution_summary.json` は期間窓の report からは書かず、
       `export_execution_latest_summary(cumulative_report, csv_output_dir)` (new) が
       `run_execution_report(csv_output_dir, start_as_of_jst=None, end_as_of_jst=None, ...)`
       (history 全体を 1 つの窓として集計) の結果を書く。weekly / monthly の呼び出し元は scoped
@@ -117,8 +124,12 @@
   - ゲート: 4 条件の境界 (取引 99 と 100、t 1.99 と 2.00、DD −10% と −10.01%、ベンチマーク同額)、
     期間窓を狭めてもコホートが変わらないこと、`execution_version` が違う行と backfill 行が
     コホートに入らないこと、6 book 未満の batch が集計とコホートの両方から除外され、かつその存在で
-    `gate.passed` が False (`blocked_reason == "incomplete_batches"`) になること、`trade_count` が
-    `ugh_x1` の取引行数だけを数えること (他 book の取引は数えない)。
+    `gate.passed` が False (`"incomplete_batches" in blocked_reasons`) になること、完全な `execution.csv`
+    だけがあり評価ファイルが無い (または header のみの) 過去窓で `missing_evaluations` に入り
+    `"missing_evaluations" in blocked_reasons` になること、`window_end_jst` が `generated_at_utc` より
+    後の pending 窓はそこに入らないこと、`execution_version` が 2 つ混在する fixture で層が 2 つに
+    分かれ版を跨いで足されないこと、`trade_count` が `ugh_x1` の取引行数だけを数えること (他 book の
+    取引は数えない)。
   - export: 3 形式が書かれること、`latest/execution_summary.json` が累積 report から書かれ、
     期間窓を変えても内容が変わらないこと (`tmp_path`)。
   - backfill: 完全な既存 `execution.csv` を上書きしないこと、`execution.csv` だけある batch で評価
