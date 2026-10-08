@@ -277,6 +277,20 @@ def _write_decision_rows(root: str, day: date, count: int) -> str:
     return os.path.join(root, "history", date_str, batch_id)
 
 
+def _set_cell(path: str, row_index: int | None, field: str, value: str) -> None:
+    """Rewrite one cell (*row_index*) or a whole column (``None``) of a history CSV in place."""
+    with open(path, newline="", encoding="utf-8") as fh:
+        reader = csv.DictReader(fh)
+        fieldnames = list(reader.fieldnames or ())
+        rows = list(reader)
+    for row in rows if row_index is None else [rows[row_index]]:
+        row[field] = value
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
 def _write_corrupt_bytes(path: str) -> None:
     """Plant a file that is not valid UTF-8 (directories created)."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1284,16 +1298,8 @@ class TestArchiveRobustness:
         _activate(monkeypatch, days[0])
         _write_day(root, days[0], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
         batch_dir = _write_day(root, days[1], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
-        path = os.path.join(batch_dir, "execution_evaluation.csv")
-        with open(path, newline="", encoding="utf-8") as fh:
-            reader = csv.DictReader(fh)
-            fieldnames = list(reader.fieldnames or ())
-            rows = list(reader)
-        rows[-1][field] = "x0" if field == "execution_version" else _as_of(days[0]).isoformat()
-        with open(path, "w", newline="", encoding="utf-8") as fh:
-            writer = csv.DictWriter(fh, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(rows)
+        value = "x0" if field == "execution_version" else _as_of(days[0]).isoformat()
+        _set_cell(os.path.join(batch_dir, "execution_evaluation.csv"), -1, field, value)
         generated_at = _after_close(days[1])
         collected = _collect(root, generated_at)
 
@@ -1307,6 +1313,58 @@ class TestArchiveRobustness:
         gate = _report(root, generated_at)["gate"]
         assert "incomplete_batches" in gate["blocked_reasons"]
         assert gate["cohort"]["trade_count"] == 1  # the mixed batch's rows never reach the gate
+
+    @pytest.mark.parametrize("field", ["execution_version", "as_of_jst", "window_end_jst"])
+    def test_decision_rows_disagreeing_on_batch_metadata_are_incomplete(
+        self, tmp_path, monkeypatch, field: str
+    ) -> None:
+        """Six valid decision rows that disagree on version / window metadata are not a decision
+        batch: the file is incomplete (never reduced to its first row) and blocks."""
+        root = str(tmp_path / "csv")
+        days = _business_days(date(2026, 3, 2), date(2026, 3, 3))
+        _activate(monkeypatch, days[0])
+        _write_day(root, days[0], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
+        batch_dir = _write_day(root, days[1], {BookId.ugh_x1: _trade(1)}, evaluations=False)
+        value = {
+            "execution_version": "x0",
+            "as_of_jst": _as_of(days[0]).isoformat(),
+            "window_end_jst": (_window_end(days[1]) + timedelta(days=1)).isoformat(),
+        }[field]
+        _set_cell(os.path.join(batch_dir, "execution.csv"), -1, field, value)
+        generated_at = _before_close(days[1])  # pending window: the file is the only defect
+        collected = _collect(root, generated_at)
+
+        rel_path = f"history/{days[1]:%Y%m%d}/{_batch_id(days[1])}"
+        assert collected.incomplete_decision_batches == (rel_path,)
+        assert collected.missing_evaluations == ()
+        gate = _report(root, generated_at)["gate"]
+        assert gate["blocked_reasons"] == ("incomplete_decisions",)
+
+    def test_evaluation_with_other_batch_metadata_is_not_the_decisions_evaluation(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """A complete evaluation file that reuses the batch id but consistently carries another
+        version evaluates some other batch: the x1 decision file is still missing its
+        evaluation (and blocks), and the x0 rows aggregate in their own stratum."""
+        root = str(tmp_path / "csv")
+        days = _business_days(date(2026, 3, 2), date(2026, 3, 3))
+        _activate(monkeypatch, days[0])
+        _write_day(root, days[0], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
+        batch_dir = _write_day(root, days[1], {BookId.ugh_x1: _trade(1)}, realized_close=101.0)
+        _set_cell(
+            os.path.join(batch_dir, "execution_evaluation.csv"), None, "execution_version", "x0"
+        )
+        generated_at = _after_close(days[1])
+        collected = _collect(root, generated_at)
+
+        assert [m.forecast_batch_id for m in collected.missing_evaluations] == [_batch_id(days[1])]
+        assert collected.missing_evaluations[0].execution_version == "x1"
+        assert collected.incomplete_batches == ()
+        report = _report(root, generated_at)
+        assert "missing_evaluations" in report["gate"]["blocked_reasons"]
+        assert "missing_decisions" not in report["gate"]["blocked_reasons"]
+        assert set(report["strata"]) == {"x0", "x1"}
+        assert report["gate"]["cohort"]["trade_count"] == 1  # only days[0] is x1 evidence
 
     def test_naive_generated_at_is_treated_as_utc(
         self, aggregation_root: tuple[str, datetime]

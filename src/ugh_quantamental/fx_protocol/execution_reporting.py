@@ -301,6 +301,12 @@ def expected_decision_days(generated_at_utc: datetime) -> tuple[tuple[date, ...]
 # ---------------------------------------------------------------------------
 
 
+#: ``(forecast_batch_id, execution_version, as_of_jst, window_end_jst)``: the metadata every
+#: row of one decision or evaluation file must share, and that an evaluation must share with
+#: the decision file it evaluates.
+_BatchKey = tuple[str, str, datetime, datetime]
+
+
 @dataclass(frozen=True, slots=True)
 class _DecisionFile:
     """A complete ``execution.csv`` (one row per book) and the metadata the inventory needs."""
@@ -316,10 +322,15 @@ class _DecisionFile:
 
 @dataclass(frozen=True, slots=True)
 class _ArchiveScan:
-    """Everything one pass over ``history/`` yields, before deduplication."""
+    """Everything one pass over ``history/`` yields, before deduplication.
+
+    ``complete_evaluation_keys`` holds one ``_BatchKey`` per complete evaluation
+    file whose six rows share their batch metadata: the key a decision file
+    must match to count as evaluated.
+    """
 
     evaluation_rows: tuple[dict[str, str], ...]
-    complete_evaluation_batch_ids: frozenset[str]
+    complete_evaluation_keys: frozenset[_BatchKey]
     complete_decisions: tuple[_DecisionFile, ...]
     incomplete_decisions: tuple[tuple[str, date | None], ...]
 
@@ -360,7 +371,7 @@ def _scan_batch_dir(
     rel_path: str,
     dir_date: date | None,
     evaluation_rows: list[dict[str, str]],
-    complete_evaluation_batch_ids: set[str],
+    complete_evaluation_keys: set[_BatchKey],
     complete_decisions: list[_DecisionFile],
     incomplete_decisions: list[tuple[str, date | None]],
 ) -> None:
@@ -372,8 +383,14 @@ def _scan_batch_dir(
             logger.warning("execution evaluation CSV %s is unreadable; skipped", evaluation_path)
         else:
             evaluation_rows.extend(_read_raw_rows(evaluation_path))
-            if _is_complete_book_set(ev.book_id for ev in evaluations):
-                complete_evaluation_batch_ids.update(ev.forecast_batch_id for ev in evaluations)
+            keys = {
+                (ev.forecast_batch_id, ev.execution_version, ev.as_of_jst, ev.window_end_jst)
+                for ev in evaluations
+            }
+            # Only a six-book file whose rows agree on their batch metadata evaluates anything;
+            # a mixed file is reported by the collector, never credited to a decision file.
+            if len(keys) == 1 and _is_complete_book_set(ev.book_id for ev in evaluations):
+                complete_evaluation_keys.update(keys)
 
     decision_path = os.path.join(batch_path, _DECISION_FILENAME)
     if not os.path.isfile(decision_path):
@@ -385,7 +402,12 @@ def _scan_batch_dir(
     if not _is_complete_book_set(d.book_id for d in decisions):
         incomplete_decisions.append((rel_path, dir_date))
         return
-    if len({d.forecast_batch_id for d in decisions}) != 1:
+    keys = {
+        (d.forecast_batch_id, d.execution_version, d.as_of_jst, d.window_end_jst) for d in decisions
+    }
+    if len(keys) != 1:
+        # Rows of two batches, versions or windows in one file: not a decision batch, and
+        # never reduced to its first row's metadata.
         incomplete_decisions.append((rel_path, dir_date))
         return
     first = decisions[0]
@@ -406,7 +428,7 @@ def _scan_batch_dir(
 def _scan_history(history_dir: str) -> _ArchiveScan:
     """Walk ``history/<date>/<batch>/`` (sorted, like ``collect_evaluated_forecast_rows``)."""
     evaluation_rows: list[dict[str, str]] = []
-    complete_evaluation_batch_ids: set[str] = set()
+    complete_evaluation_keys: set[_BatchKey] = set()
     complete_decisions: list[_DecisionFile] = []
     incomplete_decisions: list[tuple[str, date | None]] = []
 
@@ -425,14 +447,14 @@ def _scan_history(history_dir: str) -> _ArchiveScan:
                     f"history/{date_dir}/{batch_dir}",
                     dir_date,
                     evaluation_rows,
-                    complete_evaluation_batch_ids,
+                    complete_evaluation_keys,
                     complete_decisions,
                     incomplete_decisions,
                 )
 
     return _ArchiveScan(
         evaluation_rows=tuple(evaluation_rows),
-        complete_evaluation_batch_ids=frozenset(complete_evaluation_batch_ids),
+        complete_evaluation_keys=frozenset(complete_evaluation_keys),
         complete_decisions=tuple(complete_decisions),
         incomplete_decisions=tuple(incomplete_decisions),
     )
@@ -594,8 +616,14 @@ def collect_execution_evaluation_rows(
         if decision.forecast_batch_id in seen_decision_batches:
             continue
         seen_decision_batches.add(decision.forecast_batch_id)
-        if decision.forecast_batch_id in scan.complete_evaluation_batch_ids:
-            continue
+        key: _BatchKey = (
+            decision.forecast_batch_id,
+            decision.execution_version,
+            decision.as_of_jst,
+            decision.window_end_jst,
+        )
+        if key in scan.complete_evaluation_keys:
+            continue  # evaluated: same batch id *and* the same version / window metadata
         if decision.window_end_jst > generated:
             continue  # pending window: its evaluation is not due yet
         _route(decision.as_of_jst, decision.execution_version).missing_evaluations.append(

@@ -1136,3 +1136,26 @@ def test_unreadable_archive_csv_is_skipped_with_a_warning(
     warn_lines = [line for line in out.splitlines() if line.startswith("[WARN]")]
     assert any(filename in line and "unreadable" in line for line in warn_lines)
     assert not (_batch_dir(layout.csv_root, _D1) / "execution.csv").exists()
+
+
+def test_forecast_rows_of_another_window_are_a_partial_forecast(tmp_path: Path) -> None:
+    """Seven distinct kinds, but one row for the next window: not this batch's forecast, so the
+    batch is partial_forecast rather than a hybrid of two windows in the bar series."""
+    layout = _build_checkout(tmp_path)
+    required = set(backfill._REQUIRED_STRATEGY_KINDS)
+
+    def move_a_spare_row_to_the_next_window(rows: list[dict[str, str]]) -> None:
+        spare = next(r for r in rows if StrategyKind(r["strategy_kind"]) not in required)
+        spare["as_of_jst"] = _D2.isoformat()
+        spare["window_end_jst"] = _window_end(_D2).isoformat()
+
+    _edit_csv(
+        _batch_dir(layout.csv_root, _D1) / "forecast.csv", move_a_spare_row_to_the_next_window
+    )
+
+    summary, _lines = _run(layout)
+
+    assert summary.partial_forecast == 2  # the built-in partial batch plus this one
+    assert summary.written_decisions_and_evaluations == 1  # the catch-up window only
+    assert not (_batch_dir(layout.csv_root, _D1) / "execution.csv").exists()
+    assert _counter_sum(summary) == summary.batches

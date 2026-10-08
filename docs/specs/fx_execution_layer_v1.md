@@ -195,11 +195,14 @@ live spot を取り直さず何もしない。前 run が判断の書き込み�
   丸めない。block / report の振り分けは最も遅い `as_of_jst` と、1 行でも現行版なら現行版で行う)。
   集計にもゲートにも入れない。
 - `incomplete_decision_batches` (`history/{date}/{batch}` 相対 path): `execution.csv` はあるが完全で
-  ない dir。完全 = 6 book 1 行ずつが検証付きで読め、`forecast_batch_id` が 1 つ (header のみ、
-  6 book 未満、読めない、batch id 混在は不完全)。
+  ない dir。完全 = 6 book 1 行ずつが検証付きで読め、`forecast_batch_id` / `execution_version` /
+  `as_of_jst` / `window_end_jst` が 1 組 (header のみ、6 book 未満、読めない、batch id・版・窓の混在は
+  不完全。先頭行の値に丸めない)。
 - `missing_evaluations` (`forecast_batch_id`, `execution_version`, `as_of_jst`, `window_end_jst`):
-  完全な `execution.csv` で、同じ batch id の完全な評価ファイルが archive のどこにも無く、
-  `window_end_jst <= generated_at_utc` のもの。pending 窓は入れない。
+  完全な `execution.csv` で、同じ batch id **かつ同じ `execution_version` / `as_of_jst` /
+  `window_end_jst`** の完全な評価ファイル (6 行がその 4 つで一致するもの) が archive のどこにも無く、
+  `window_end_jst <= generated_at_utc` のもの。pending 窓は入れない。版や窓が違う評価ファイルは
+  別 batch の評価であって、この判断ファイルの評価にはならない。
 - `duplicate_batches` (日付): 同じ `(execution_version, as_of_jst の日付)` に完全 batch (判断
   ファイルまたは評価 batch) が 2 つ以上ある日。その batch はすべて `rows` から外す (黙って片方を
   選ばない)。
@@ -402,7 +405,7 @@ forecast 行の無い `execution.csv` dir も unit に入れ、`missing_forecast
 | 評価は完全だが判断が不完全 | `contradictory_archive` (archive の自己矛盾)。`[WARN]` を出してその batch には触れず、**次の batch に進む**。summary を出した後に exit 1 (手で直して再実行) |
 | その batch の forecast 行が archive のどこにも無い | `missing_forecast` (outcome を forecast_id 経由で引けないため、判断ファイルの有無によらず) |
 | `execution.csv` が完全、評価ファイルが無い・不完全 (前回の中断、日次 run の評価失敗) | 修復経路: 既存の判断 6 行を `load_execution_decisions_csv` で読み (行の日付・batch id が dir と食い違えば `contradictory_archive`: `[WARN]` + 触れずに次へ、summary 後に exit 1)、(b) の outcome だけで評価 6 行を書く → `written_evaluations_only`。forecast が 7 行揃っていなくても、snapshot が無くても進む |
-| それ以外 (判断ファイルが無い・不完全) | (a) `forecast.csv` が 7 行揃い `ugh_v2_alpha/beta/gamma/delta` と `baseline_simple_technical` の `forecast_direction` が読めなければ `partial_forecast`; (b) 評価行が指す outcome (`outcome_id` が 1 つに定まり、`window_start_jst` / `realized_open` / `realized_close` / `evaluated_at_utc` が読める) が無ければ `missing_outcome` (評価がまだ無い窓もここ); (c) その batch 自身の `input_snapshot.json` (`observability.load_input_snapshot`) が読めなければ `missing_snapshot`。3 つ揃えば `build_execution_decisions(forecast_directions, build_baseline_context(snapshot), completed closes, ..., entry_status="backfill_bar", live_entry=None, decided_at_utc=as_of_jst→UTC)` と `evaluate_execution_decisions` で判断 6 行と評価 6 行 → `written_decisions_and_evaluations` |
+| それ以外 (判断ファイルが無い・不完全) | (a) `forecast.csv` が distinct な 7 kind 揃い、全行が同じ `as_of_jst` / `window_end_jst` で、`ugh_v2_alpha/beta/gamma/delta` と `baseline_simple_technical` の `forecast_direction` が読めなければ `partial_forecast`; (b) 評価行が指す outcome (`outcome_id` が 1 つに定まり、`window_start_jst` / `realized_open` / `realized_close` / `evaluated_at_utc` が読める) が無ければ `missing_outcome` (評価がまだ無い窓もここ); (c) その batch 自身の `input_snapshot.json` (`observability.load_input_snapshot`) が読めなければ `missing_snapshot`。3 つ揃えば `build_execution_decisions(forecast_directions, build_baseline_context(snapshot), completed closes, ..., entry_status="backfill_bar", live_entry=None, decided_at_utc=as_of_jst→UTC)` と `evaluate_execution_decisions` で判断 6 行と評価 6 行 → `written_decisions_and_evaluations` |
 
 `decided_at_utc` は `as_of_jst` を UTC に変換した値 (`forecast.csv` には `locked_at_utc` 列が無い)、
 `evaluated_at_utc` は batch の `evaluation.csv` 行の `evaluated_at_utc` の最大値。書き込みは実 exporter

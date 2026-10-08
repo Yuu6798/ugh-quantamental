@@ -151,7 +151,7 @@ _SKIP_LABELS: dict[str, str] = {
         f"before backfill start (spec §10 scope begins {BACKFILL_START_AS_OF.isoformat()})"
     ),
     MISSING_FORECAST: "missing forecast (no forecast.csv rows for this batch anywhere in history/)",
-    PARTIAL_FORECAST: "partial forecast (not the complete 7-row daily batch)",
+    PARTIAL_FORECAST: "partial forecast (not the complete 7-row daily batch of one window)",
     MISSING_OUTCOME: "missing outcome (no evaluated window for this batch)",
     UNUSABLE_OUTCOME: "unusable outcome (its evaluation / outcome rows cannot be used; see [WARN])",
     MISSING_SNAPSHOT: "missing snapshot (no readable input_snapshot.json in the batch directory)",
@@ -411,12 +411,18 @@ def collect_units(history_dir: str, batches: dict[str, _ForecastBatch]) -> list[
 def _forecast_directions(batch: _ForecastBatch) -> dict[StrategyKind, ForecastDirection] | None:
     """The batch's ``strategy_kind -> forecast_direction`` map, or ``None`` when the batch is
     not the complete daily set (``EXPECTED_DAILY_BATCH_SIZE`` rows of distinct kinds holding
-    every required kind; a duplicated kind means another kind is absent).
+    every required kind, all for the batch's own window; a duplicated kind means another kind
+    is absent, and a row for another window is not this batch's forecast).
     """
     if len(batch.rows) != EXPECTED_DAILY_BATCH_SIZE:
         return None
     directions: dict[StrategyKind, ForecastDirection] = {}
     for row in batch.rows.values():
+        if (
+            _parse_jst(row.get("as_of_jst", "")) != batch.as_of_jst
+            or _parse_jst(row.get("window_end_jst", "")) != batch.window_end_jst
+        ):
+            return None
         try:
             kind = StrategyKind(row.get("strategy_kind", ""))
             direction = ForecastDirection(row.get("forecast_direction", ""))
