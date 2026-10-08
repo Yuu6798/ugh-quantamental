@@ -296,6 +296,8 @@ def build_execution_decisions(
             f"execution layer requires at least {MIN_COMPLETED_CLOSES} completed closes "
             f"(oldest -> newest); got {len(completed_closes)}"
         )
+    if not all(math.isfinite(close) for close in completed_closes):
+        raise ValueError("execution layer requires finite completed closes")
     entry = _entry_fields(entry_status, live_entry, decided_at_utc)
 
     beta_direction = directions[StrategyKind.ugh_v2_beta]
@@ -438,8 +440,8 @@ def evaluate_execution_decisions(
     ------
     ValueError
         If ``decisions`` is empty, mixes ``forecast_batch_id`` values,
-        ``window_start_jst`` differs from the decisions' ``as_of_jst``, or a
-        realized price is not finite and positive.
+        ``window_start_jst`` differs from any decision's ``as_of_jst``, a book
+        appears more than once, or a realized price is not finite and positive.
     """
     if not decisions:
         raise ValueError("execution layer evaluation requires at least one decision")
@@ -455,13 +457,16 @@ def evaluate_execution_decisions(
                 f"execution layer evaluation requires a finite positive {name}; got {value!r}"
             )
     window_start = _to_jst(window_start_jst)
-    first = decisions[0]
-    if window_start != first.as_of_jst:
-        raise ValueError(
-            "outcome window does not match the decisions' forecast window "
-            f"(window_start_jst={window_start.isoformat()}, "
-            f"decisions.as_of_jst={first.as_of_jst.isoformat()})"
-        )
+    for decision in decisions:
+        if window_start != decision.as_of_jst:
+            raise ValueError(
+                "outcome window does not match the decisions' forecast window "
+                f"(window_start_jst={window_start.isoformat()}, "
+                f"decisions.as_of_jst={decision.as_of_jst.isoformat()})"
+            )
+    book_ids = [decision.book_id for decision in decisions]
+    if len(set(book_ids)) != len(book_ids):
+        raise ValueError("execution layer evaluation requires at most one decision per book")
     return tuple(
         _evaluate_one(
             decision,

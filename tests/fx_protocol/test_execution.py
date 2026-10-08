@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -1093,6 +1093,31 @@ def test_evaluation_rejects_mixed_batch_ids() -> None:
 def test_evaluation_rejects_window_mismatch() -> None:
     with pytest.raises(ValueError, match="outcome window does not match"):
         _evaluate(_decide(), window_start_jst=_WINDOW_END)
+
+
+def test_evaluation_rejects_window_mismatch_in_any_row() -> None:
+    decisions = _decide()
+    shifted = decisions[1].model_copy(
+        update={
+            "as_of_jst": _AS_OF - timedelta(days=1),
+            "window_end_jst": _AS_OF,
+        }
+    )
+    with pytest.raises(ValueError, match="outcome window does not match"):
+        _evaluate((decisions[0], shifted))
+
+
+def test_evaluation_rejects_duplicate_books() -> None:
+    decisions = _decide()
+    with pytest.raises(ValueError, match="at most one decision per book"):
+        _evaluate((decisions[0], decisions[0]))
+
+
+@pytest.mark.parametrize("bad", [math.nan, math.inf, -math.inf])
+def test_build_rejects_non_finite_closes(bad: float) -> None:
+    closes = (150.0, 149.6, 150.1, bad, 149.0)
+    with pytest.raises(ValueError, match="finite completed closes"):
+        _decide(closes=closes)
 
 
 @pytest.mark.parametrize(
