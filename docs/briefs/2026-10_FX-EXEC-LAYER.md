@@ -177,8 +177,9 @@
   payload 形状。テストは `urllib.request.urlopen` を monkeypatch するか、`data_sources` の
   関数を `MagicMock` に差し替える (`tests/fx_protocol/test_automation.py` の
   `TestYahooFinanceFxMarketDataProvider` に同じ手法がある)。
-- automation の統合テストは `TestRunFxDailyProtocolOnce._make_session` / `_make_provider` /
-  `_build_windows_raw` を再利用する。`run_fx_daily_protocol_once` は `now_utc` を受けるので
+- automation の統合テストは `TestRunFxDailyProtocolOnce._make_session` / `_make_provider` (class の
+  メソッド) と、module レベルの helper `_build_windows_raw` (`tests/fx_protocol/test_automation.py`
+  の末尾付近、class の外) を再利用する。`run_fx_daily_protocol_once` は `now_utc` を受けるので
   fixing 後の時刻を渡す。
 - `forecast_created` の判定は Step 3 の既存変数をそのまま使う (batch が既存なら False)。
 

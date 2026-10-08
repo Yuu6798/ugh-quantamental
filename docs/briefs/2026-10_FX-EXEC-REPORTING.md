@@ -12,7 +12,9 @@
 
 ## Acceptance Criteria
 - [ ] `src/ugh_quantamental/fx_protocol/execution_reporting.py` (new) に
-      `collect_execution_evaluation_rows(history_dir) -> CollectedExecutionEvaluations` (new、frozen
+      `collect_execution_evaluation_rows(history_dir, *, generated_at_utc: datetime) ->
+      CollectedExecutionEvaluations` (new、`generated_at_utc` は report の値をそのまま渡す。collector 自身は
+      時計を読まない。frozen
       dataclass または Pydantic model: `rows: tuple[dict[str, str], ...]` と
       `incomplete_batches: tuple[IncompleteExecutionBatch, ...]` (後者は `forecast_batch_id`,
       `execution_version` (存在する行から取る), `missing_books: tuple[str, ...]`) と
@@ -32,13 +34,15 @@
       marker。コードに固定した日付) 以降で窓が閉じた日 (`next_as_of_jst(D) <= generated_at_utc`) から
       `execution.EXECUTION_EXCLUDED_AS_OF` (new; 明示的に諦めた日の `frozenset[date]`。追加は spec §12
       に理由を書く PR で行う) を引いた集合を期待日とし、各期待日 D について `history/{D:%Y%m%d}/*/execution.csv`
-      に行の `as_of_jst` が D の完全な判断ファイルが 1 つも無ければ `missing_decisions:
+      に行の `as_of_jst` が D で **`execution_version == EXECUTION_VERSION`** の完全な判断ファイルが
+      1 つも無ければ `missing_decisions:
       tuple[MissingExecutionDecision, ...]` (`as_of_jst`、`forecast_batch_id` は forecast.csv が正本 dir に
       あればその id、無ければ None) として返す。forecast.csv の有無・内容には依存しない (publish が壊れた日
       も、プロトコル自体が走らなかった日も同じく欠落)。backfill が `backfill_bar` で埋めれば
       `missing_decisions` からは外れるが、live 観測としては戻らないので次の `missing_live` に残る。
       さらに **live コホートを期待日で検証する**: 同じ期待日のうち `ugh_x1` の判断行が
-      `entry_status == live` でない日 (ファイル無し・`backfill_bar`・`live_unavailable` のいずれも) を
+      `entry_status == live` かつ `execution_version == EXECUTION_VERSION` でない日 (ファイル無し・
+      `backfill_bar`・`live_unavailable`・旧版の行しか無い、のいずれも) を
       `missing_live: tuple[date, ...]` として返す。解消手段は `EXECUTION_EXCLUDED_AS_OF` への明示追加
       (理由付き PR) だけで、backfill では消えない。同じ version・同じ `as_of_jst` に完全な判断 batch が
       2 つ以上ある日 (protocol_version 変更などで `make_forecast_batch_id` が別 id を作る) は
