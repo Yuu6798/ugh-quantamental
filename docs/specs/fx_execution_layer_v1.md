@@ -1,7 +1,7 @@
 # FX Execution Layer v1 — UGH 売買エンジン (執行層) とベンチマーク観測スキーム
 
 Status: **Implemented (v1, FX-EXEC-LAYER — 判断の記録・評価・automation 配線; 集計・ゲート・backfill は
-FX-EXEC-REPORTING で実装予定)**
+FX-EXEC-REPORTING で実装済)**
 Owner: Claude (design) / Codex (implementation)
 Related: `fx_daily_automation_v1.md` (Step 構成)、`fx_daily_csv_exports_v1.md` (CSV 規約)、
 `fx_ugh_engine_v2.md` (予測エンジン)、`fx_monthly_governance_v1.md` (統治)、
