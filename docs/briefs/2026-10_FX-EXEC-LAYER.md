@@ -12,7 +12,12 @@
 ## Acceptance Criteria
 - [ ] `src/ugh_quantamental/fx_protocol/execution_models.py` (new) に `BookId` (str Enum、値は
       `ugh_x1` / `ugh_beta_unit` / `ugh_consensus` / `ugh_divergence` / `bench_gpt_m3` / `bench_long`
-      の 6 つ、この順)、`ExecutionDecision`、`ExecutionEvaluation` (いずれも
+      の 6 つ、この順)、`LiveEntry` (new: `price: float` (有限かつ > 0)、`retrieved_at_utc: datetime`
+      (aware UTC)、`vendor: str`、`feed: str`。automation は `fetch_live_spot_yahoo()` の `(spot,
+      retrieved_at)` を `LiveEntry(price=spot, retrieved_at_utc=retrieved_at, vendor="yahoo_finance",
+      feed="chart/USDJPY=X")` に詰めて渡す。判断行の `entry_price_live` / `entry_time_utc` /
+      `entry_vendor` / `entry_feed` はここから写し、live が無い行は `entry_time_utc = decided_at_utc`、
+      vendor / feed は None)、`ExecutionDecision`、`ExecutionEvaluation` (いずれも
       `ConfigDict(extra="forbid", frozen=True)`) があり、spec §5.1 / §5.2 の列をフィールドとして持つ。
       validator: `side ∈ {-1, 0, 1}`、`0.0 ≤ size ≤ 1.0`、`side == 0` と `size == 0.0` は同値、
       `entry_status` は `Literal["live", "live_unavailable", "backfill_bar"]` (`backfill_bar` は
@@ -50,8 +55,8 @@
         down 3 かつ up 0 → `-1, 0.5`、それ以外 → `0, skip_reason "no_consensus"`。
       - `ugh_divergence`: β が flat → `"flat"`、β の方向が `baseline_simple_technical` の
         `forecast_direction` と同じ → `skip_reason "agree_with_technical"`、違えば β の方向で `size 1.0`。
-      - `bench_gpt_m3`: `momentum_3d = completed_closes[-2] - completed_closes[-5]`、正 → `+1`、
-        負 → `-1`、ゼロ → `0, skip_reason "momentum_zero"`、`size 1.0`。
+      - `bench_gpt_m3`: `momentum_3d = completed_closes[-2] - completed_closes[-5]`、正 → `+1, 1.0`、
+        負 → `-1, 1.0`、ゼロ → `0, 0.0, skip_reason "momentum_zero"` (見送り行は size 0.0)。
       - `bench_long`: 常に `+1, 1.0`。
       監査列 (`beta_direction`, `consensus_up_count`, `consensus_down_count`, `technical_direction`,
       `momentum_3d`, `trailing_mean_abs_close_change_bp`, `previous_close_change_bp`) は 6 行すべてに
