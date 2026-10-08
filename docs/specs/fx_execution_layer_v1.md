@@ -200,7 +200,10 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
 - 合格ゲート (`ugh_x1` を実運用候補に進める条件、すべて live 系列。母集団は現行 `execution_version`
   の累積コホートで、版を bump したらコホートもゼロから始まる。取引数・t 値・DD は **`ugh_x1` の行だけ**
   から計算し、ベンチマーク book は条件 4 の比較にのみ使う):
-  1. `ugh_x1` の取引 (`side != 0`) 100 回以上かつ観測 6 か月以上
+  1. `ugh_x1` の取引 (`side != 0`) 100 回以上かつ観測 6 か月以上。「6 か月」はコホートの
+     `first_as_of_jst` から `last_as_of_jst` までの**暦日数** (`observation_calendar_days` =
+     `(last − first).days`) が 182 以上 (定数 `GATE_MIN_CALENDAR_DAYS = 182`)。観測日数
+     (`observation_days`、評価済み窓の数) は情報として出すが閾値には使わない
   2. コスト控除後・size 加重の live 日次リターン (`size × (pnl_live_bp − cost_live_bp)`) の t 値 ≥ 2.0
      (標本標準偏差 `stdev`、n − 1 で割る。`pstdev` は使わない)
   3. 最大 DD ≤ 初期資産の 10%

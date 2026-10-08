@@ -75,10 +75,13 @@
       (`{csv_output_dir}/execution/{pair}_{YYYYMMDD}_execution.csv`)、
       `export_execution_evaluation_csv(evaluations, as_of_jst, pair, csv_output_dir) -> str`
       (`.../execution/{pair}_{YYYYMMDD}_execution_evaluation.csv`)、
-      `publish_execution_csvs(csv_output_dir, date_str, forecast_batch_id, decision_path,
-      evaluation_path) -> dict[str, str | None]` がある。publish は
-      `history/{date_str}/{forecast_batch_id}/execution.csv` と同 `execution_evaluation.csv` を書き、
-      `latest/execution.csv` を更新する。**完全な既存の `history/.../execution.csv` は上書きせず**その
+      `publish_execution_csvs(csv_output_dir, date_str, forecast_batch_id, decision_path: str | None,
+      evaluation_path: str | None) -> dict[str, str | None]` がある。2 つの path は**独立に省略可**で、
+      渡したものだけを `history/{date_str}/{forecast_batch_id}/` に書く: Step 3b は当日の
+      `(date_str, batch, decision_path, None)` で 1 回、Step 4c は評価した窓ごとに**その窓の**
+      `(date_str, batch, None, evaluation_path)` で呼ぶ (同じ呼び出しに当日の判断と過去窓の評価を
+      混ぜない)。publish は `execution.csv` と `execution_evaluation.csv` を書き、decision_path を
+      渡したときだけ `latest/execution.csv` を更新する。**完全な既存の `history/.../execution.csv` は上書きせず**その
       パスをそのまま返す。完全 = `load_execution_decisions_csv` が 6 book それぞれ 1 行を検証付きで
       返せること (`is_complete_decision_file(path) -> bool` (new) で判定)。header のみ・途中で切れた
       ファイルは不完全として置き換える。`execution_evaluation.csv` は上書き可。書き込みは一時ファイルに

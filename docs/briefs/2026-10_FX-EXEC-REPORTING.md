@@ -43,7 +43,9 @@
 - [ ] 同関数が `gate` を返す。ゲートの母集団は**期間窓に依存しない累積コホート**: history 全体の
       行のうち `execution_version == execution.EXECUTION_VERSION` かつ `entry_status == live` の
       完全 batch (backfill 行と他 version は除外)。`gate.cohort` に `execution_version`,
-      `first_as_of_jst`, `last_as_of_jst`, `trade_count`, `observation_days` を、`gate.criteria` に
+      `first_as_of_jst`, `last_as_of_jst`, `trade_count`, `observation_days` (評価済み窓の数),
+      `observation_calendar_days` (`(last_as_of_jst − first_as_of_jst).days`、条件 1 の「6 か月」は
+      これが `GATE_MIN_CALENDAR_DAYS = 182` 以上) を、`gate.criteria` に
       spec §9 の 4 条件それぞれの現在値・閾値・充足可否を、`gate.passed: bool` を返す。取引数・t 値・
       DD は **`ugh_x1` の行だけ**から計算し (`trade_count` は `ugh_x1` の `side != 0` 行数)、ベンチマーク
       book は条件 4 の比較にだけ使う。t 値は `signed_bp_live` (= `size × (pnl_live_bp − cost_live_bp)`)
@@ -121,7 +123,8 @@
     1 行 (`skip_reason` 付き)、backfill 2 行) から、損益・資産・DD・t 値・capture・live 率・見送り
     内訳・ゲートの各値を数値で固定 (詳細な数値検証は 3 book 分で十分だが fixture は 6 book を揃える)。
     重複 batch (同じ `forecast_batch_id` が 2 つの dir にある) が 1 回だけ数えられること。
-  - ゲート: 4 条件の境界 (取引 99 と 100、t 1.99 と 2.00、DD −10% と −10.01%、ベンチマーク同額)、
+  - ゲート: 4 条件の境界 (取引 99 と 100、暦日 181 と 182 (取引 100 回あっても 181 日なら不合格)、
+    t 1.99 と 2.00、DD −10% と −10.01%、ベンチマーク同額)、
     期間窓を狭めてもコホートが変わらないこと、`execution_version` が違う行と backfill 行が
     コホートに入らないこと、6 book 未満の batch が集計とコホートの両方から除外され、かつその存在で
     `gate.passed` が False (`"incomplete_batches" in blocked_reasons`) になること、完全な `execution.csv`
