@@ -232,8 +232,10 @@ book_id)` で重複排除して読み、**6 book が揃わない batch は丸ご
   `missing_live` / `duplicate_batches`)。欠けた archive を黙って短くした上で合格にはしない
   (昇格証拠は欠落・部分 batch で fail する、`AGENTS.md` §5)。修復は Step 4c の再スキャンか §10 の
   backfill で行い、修復できない欠落は data 側の問題として扱う (ゲートは外さない)。block の判定は
-  現行 version の batch に限る (`incomplete_batches` / `missing_evaluations` は `execution_version` を
-  持ち、旧版の欠損は現行版のゲートを block しない)。
+  現行 version かつ **activation marker 以降** (`as_of_jst >= EXECUTION_ACTIVATION_AS_OF`) の batch /
+  日に限る: backfill は activation 前の過去 batch にも現行 version を付けるため、version だけで絞ると
+  bar 系列専用の過去欠損が forward の live ゲートを永久に block する。activation 前の欠損は
+  `archive_defects` として報告のみ (旧版の欠損も同じく block しない)。
 - 不合格なら `x2` として設計し直し、観測を 1 からやり直す (期間を継ぎ足さない)。
 - ゲート通過後も実弾の判断は人が行う (本 spec の対象外)。
 

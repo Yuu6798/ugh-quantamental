@@ -76,9 +76,15 @@
       spec §9 の 4 条件それぞれの現在値・閾値・充足可否を、`gate.passed: bool` を返す。取引数・t 値・
       DD は **`ugh_x1` の行だけ**から計算し (`trade_count` は `ugh_x1` の `side != 0` 行数)、ベンチマーク
       book は条件 4 の比較にだけ使う。t 値は `signed_bp_live` (= `size × (pnl_live_bp − cost_live_bp)`)
-      から計算し、bar 系列はゲートに使わない。現行 `execution_version` に `incomplete_batches` または
-      `missing_evaluations` (`window_end_jst > generated_at_utc` の pending 窓は除く) または
-      `incomplete_decision_batches` または `missing_decisions` または `missing_live` または
+      から計算し、bar 系列はゲートに使わない。**block の母集団は activation 以降だけ**: backfill は
+      2026-05 以降の過去 batch にも現行 `execution_version` を付けるので、version だけで絞ると
+      activation 前の欠損 (bar 系列専用の行) が forward の live ゲートを永久に block してしまう。そこで
+      `incomplete_batches` / `missing_evaluations` / `incomplete_decision_batches` / `missing_decisions` /
+      `missing_live` / `duplicate_batches` のうち **`as_of_jst` (dir の日付) が
+      `EXECUTION_ACTIVATION_AS_OF` 以降**のものだけを block に使い、それより前の欠損は
+      `archive_defects` (同じ構造、報告のみ) として別に返す。現行 `execution_version` に activation 以降の
+      `incomplete_batches` または `missing_evaluations` (`window_end_jst > generated_at_utc` の pending 窓は
+      除く) または `incomplete_decision_batches` または `missing_decisions` または `missing_live` または
       `duplicate_batches` が 1 つでもあれば `gate.passed = False` かつ `gate.blocked_reasons` (new;
       `tuple[str, ...]`、値は `"incomplete_batches"` / `"missing_evaluations"` /
       `"incomplete_decisions"` / `"missing_decisions"` / `"missing_live"` / `"duplicate_batches"`、
@@ -174,8 +180,12 @@
     `"missing_evaluations" in blocked_reasons` になること、`window_end_jst` が `generated_at_utc` より
     後の pending 窓はそこに入らないこと、header のみの `execution.csv` だけがある dir が
     `incomplete_decision_batches` に入り `"incomplete_decisions" in blocked_reasons` になること、現行版の
-    最初の判断 batch 以降で `forecast.csv` だけがあり `execution.csv` が無い過去窓が `missing_decisions`
-    に入り `"missing_decisions" in blocked_reasons` になり、backfill 後 (backfill_bar 行あり) は
+    activation 以降で `forecast.csv` だけがあり `execution.csv` が無い過去窓が `missing_decisions`
+    に入り `"missing_decisions" in blocked_reasons` になり、**activation 当日〜最初の判断成功日より前**の
+    営業日で forecast も judgment も無い日 (archive に痕跡が無い) も同じく `missing_decisions` に入って
+    block すること (archive 由来・初回成功日由来の境界に退行したら落ちる fixture)、activation 前の
+    backfill batch に欠損 (6 book 未満・評価無し・同日重複) があっても `archive_defects` に入るだけで
+    `blocked_reasons` は空のままであること、backfill 後 (backfill_bar 行あり) は
     `missing_decisions` からは外れるが `missing_live` に残って block が続き、その日を
     `EXECUTION_EXCLUDED_AS_OF` に入れた (monkeypatch) ときだけ外れること、`live_unavailable` の日も
     `missing_live` に入ること、同じ `as_of_jst` に完全 batch が 2 つある fixture で `duplicate_batches` に

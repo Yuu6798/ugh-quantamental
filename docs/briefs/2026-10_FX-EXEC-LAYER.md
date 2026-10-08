@@ -122,9 +122,13 @@
         失敗した batch) の live 観測は失われたものとし、FX-EXEC-REPORTING の backfill が `backfill_bar`
         で埋める (ゲート対象外)。persisted batch 全体を走査する回復経路は設けない (spec §3)。
       - Step 4c (Step 4b の後): **archive 全体の独立スキャン**。`history/*/*/execution.csv` を列挙し
-        (`glob`、ディレクトリ名から日付 D と batch id を取る)、完全な判断ファイルで、同 dir に完全な
-        `execution_evaluation.csv` (6 book 揃い) が無く、`make_outcome_id(pair, D, next_as_of_jst(D),
-        schema_version)` の outcome が `FxOutcomeEvaluationRepository.load_fx_outcome_record` で読める
+        (`glob`。日付と batch id はディレクトリ名からではなく **判断行の `as_of_jst` / `window_end_jst` /
+        `forecast_batch_id`** から取る: いずれも aware な 08:00 JST の datetime で、`make_outcome_id` は
+        datetime を要求する。dir 名の `YYYYMMDD` を date/str のまま渡したり深夜 0 時に変換すると別 id に
+        なり全評価が黙って skip される)、完全な判断ファイルで、同 dir に完全な
+        `execution_evaluation.csv` (6 book 揃い) が無く、`make_outcome_id(pair, rows[0].as_of_jst,
+        rows[0].window_end_jst, schema_version)` の outcome が
+        `FxOutcomeEvaluationRepository.load_fx_outcome_record` で読める
         ときだけ、判断行を読んで `evaluate_execution_decisions` を呼ぶ。outcome が無い窓 (当日の
         pending) と条件を満たさない窓は何もしない (warning 不要)。候補は通常 0〜1 件。Step 4 の直前窓も
         Step 4b の catch-up 窓もこのスキャンに含まれるので個別の配線はしない。評価の書き込みに失敗した
