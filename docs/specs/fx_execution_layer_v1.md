@@ -64,7 +64,9 @@ run 実行時 (観測実績 18:00〜翌 03:00 JST) であり、**D 08:00 に約�
 同じ扱いで置き換える。書き込みは一時ファイルから `os.replace` で原子的に行う)。
 通常は batch D を作成した run がこれに当たる。同日の 2 本目以降の retry は、ファイルがあれば
 live spot を取り直さず何もしない。前 run が判断の書き込みに失敗していた場合だけ、次の run が
-その時刻の live spot で記録して回復する (`entry_time_utc` が実際の判断時刻)。既存ファイルは
+その時刻の live spot で記録して回復する (`entry_time_utc` が実際の判断時刻)。回復 run の baseline と closes
+は当日の provider snapshot ではなく archive の `history/{D}/{batch}/input_snapshot.json` から再導出する
+(forecast と同じ入力。archive が無ければ当日 snapshot で代用し warning)。既存ファイルは
 決して上書きしない。繰り越し run (#130 / #135) は batch を作らないが、既存 batch の `execution.csv`
 が欠けていれば同じ回復経路で記録する。ただし判断を作るのは **run 時刻 (`now_utc`) が窓の終了
 `window_end_jst` (翌営業日 08:00 JST) より前**のときだけ。窓が閉じた batch (前営業日 fallback で

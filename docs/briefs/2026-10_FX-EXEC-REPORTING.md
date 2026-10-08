@@ -17,7 +17,8 @@
       時計を読まない。frozen
       dataclass または Pydantic model: `rows: tuple[dict[str, str], ...]` と
       `incomplete_batches: tuple[IncompleteExecutionBatch, ...]` (後者は `forecast_batch_id`,
-      `execution_version` (存在する行から取る), `missing_books: tuple[str, ...]`) と
+      `execution_version` (存在する行から取る), `as_of_jst` (行から。activation 境界の分類に使う),
+      `missing_books: tuple[str, ...]`) と
       `missing_evaluations: tuple[MissingExecutionEvaluation, ...]`
       (`forecast_batch_id`, `execution_version`, `as_of_jst`, `window_end_jst`)) があり、
       `history/*/*/execution_evaluation.csv` を読んで `(forecast_batch_id, book_id)` で重複排除し、

@@ -84,7 +84,9 @@
       `export_execution_csv(decisions, as_of_jst, pair, csv_output_dir) -> str`
       (`{csv_output_dir}/execution/{pair}_{YYYYMMDD}_execution.csv`)、
       `export_execution_evaluation_csv(evaluations, as_of_jst, pair, csv_output_dir) -> str`
-      (`.../execution/{pair}_{YYYYMMDD}_execution_evaluation.csv`)、
+      (`.../execution/{pair}_{YYYYMMDD}_execution_evaluation.csv`。staging は日付だけの名前なので同日に
+      2 batch を評価すると後勝ちになる。結果に返す path は staging ではなく不変の
+      `history/{date}/{batch}/execution_evaluation.csv`)、
       `publish_execution_csvs(csv_output_dir, date_str, forecast_batch_id, decision_path: str | None,
       evaluation_path: str | None) -> dict[str, str | None]` がある。2 つの path は**独立に省略可**で、
       渡したものだけを `history/{date_str}/{forecast_batch_id}/` に書く: Step 3b は当日の
@@ -113,8 +115,12 @@
         が False。無い・header のみ・途中で切れている) ときに限り、
         `FxForecastRepository.load_fx_forecast_batch` で読んだ batch、`build_baseline_context(snapshot)`、
         `snapshot.completed_windows` の終値から `build_execution_decisions` を呼ぶ。通常は batch を作った
-        run がこれに当たる。前 run が判断の書き込みに失敗していれば次の run がこの経路で回復する
-        (live spot はその時刻で取り直す。`entry_time_utc` がそれを記録する)。既にファイルがあれば
+        run がこれに当たる (その run の snapshot = forecast の入力)。前 run が判断の書き込みに失敗して
+        いれば次の run がこの経路で回復するが、**回復 run は当日の provider snapshot ではなく archive の
+        `history/{date}/{batch}/input_snapshot.json` (`observability.load_input_snapshot` (new) で読む)
+        から baseline と closes を再導出する** (provider が bar を改定しても forecast と同じ入力で判断する。
+        archive が無ければ当日 snapshot で代用し warning)。live spot はその時刻で取り直す
+        (`entry_time_utc` がそれを記録する)。既にファイルがあれば
         何もしない (live spot も取り直さない)。live spot は `fetch_live_spot_yahoo` を**1 回**呼び、
         失敗時は warning ログ + `entry_status "live_unavailable"`。さらに **`now_utc` が
         `window_end_jst` (翌営業日 08:00 JST) 以降なら判断を作らない** (warning 1 行、live spot も
@@ -169,10 +175,11 @@
   `trailing_mean_abs_close_change_bp: float` をそのまま使う。`build_baseline_context(snapshot)` は
   `request_builders.py:37`。
 - 評価の入力: `OutcomeRecord` (`models.py`) の `outcome_id`, `window_start_jst`, `realized_open`,
-  `realized_close` をスカラーで渡す。Step 4c のスキャンは `make_outcome_id(config.pair, D,
-  next_as_of_jst(D), config.schema_version)` (`ids.py`、Step 4 と同じ引数規約) で id を再計算し
+  `realized_close` をスカラーで渡す。Step 4c のスキャンは判断行の datetime で
+  `make_outcome_id(config.pair, rows[0].as_of_jst, rows[0].window_end_jst, config.schema_version)`
+  (`ids.py`、Step 4 と同じ引数規約) と id を再計算し
   `FxOutcomeEvaluationRepository.load_fx_outcome_record(session, outcome_id)` で読む (None なら skip)。
-  `prev_as_of_jst` / `next_as_of_jst` は `calendar.py`。
+  dir 名の日付から `next_as_of_jst` で組み立て直さない。
 - Step 4c で読む判断行は CSV から `ExecutionDecision` に復元する (型変換は `csv_exports` の
   `_blank` 規約に揃える: 空文字は None)。
 - `publish_csv_to_history_only` (`csv_exports.py:426`) が history/ だけに書く既存パターン。
