@@ -1,0 +1,279 @@
+{
+  "report_kind": "fx_execution",
+  "execution_version": "x1",
+  "generated_at_utc": "2026-10-09T17:28:46.512239+00:00",
+  "window": {
+    "start_as_of_jst": "2026-10-05",
+    "end_as_of_jst": "2026-10-09"
+  },
+  "row_count": 24,
+  "batch_count": 4,
+  "history_row_count": 654,
+  "strata": {
+    "x1": {
+      "execution_version": "x1",
+      "row_count": 24,
+      "batch_count": 4,
+      "first_as_of_jst": "2026-10-05T08:00:00+09:00",
+      "last_as_of_jst": "2026-10-08T08:00:00+09:00",
+      "books": {
+        "ugh_x1": {
+          "decision_count": 4,
+          "trade_count": 4,
+          "live_trade_count": 1,
+          "skip_counts": {},
+          "live_coverage_rate": 0.25,
+          "direction_hit_rate": 0.5,
+          "capture_bp": 24.148360405621986,
+          "signed_bp_live_mean": -21.603779677137855,
+          "signed_bp_live_sd": null,
+          "signed_bp_live_t": null,
+          "signed_bp_bar_mean": 3.543259501606475,
+          "signed_bp_bar_sd": 11.951761218574047,
+          "signed_bp_bar_t": 0.592926755614888,
+          "pnl_jpy_live": -6481.1339031411335,
+          "pnl_jpy_bar": 4247.740414810833,
+          "final_equity_jpy_live": 2993518.866096859,
+          "final_equity_jpy_bar": 3004247.740414811,
+          "max_drawdown_live": 0.002160377967713711,
+          "max_drawdown_bar": 0.0011151948438525541,
+          "profit_factor_live": 0.0,
+          "cost_jpy_live": 152.85693167786678,
+          "cost_jpy_bar": 579.1354406774117
+        },
+        "ugh_beta_unit": {
+          "decision_count": 4,
+          "trade_count": 4,
+          "live_trade_count": 1,
+          "skip_counts": {},
+          "live_coverage_rate": 0.25,
+          "direction_hit_rate": 0.5,
+          "capture_bp": 24.148360405621986,
+          "signed_bp_live_mean": -26.78898618850773,
+          "signed_bp_live_sd": null,
+          "signed_bp_live_t": null,
+          "signed_bp_bar_mean": 5.40371618637646,
+          "signed_bp_bar_sd": 16.42441092388776,
+          "signed_bp_bar_t": 0.6580103495239837,
+          "pnl_jpy_live": -8036.695856552105,
+          "pnl_jpy_bar": 6477.569394791499,
+          "final_equity_jpy_live": 2991963.304143448,
+          "final_equity_jpy_bar": 3006477.5693947915,
+          "max_drawdown_live": 0.002678898618850702,
+          "max_drawdown_bar": 0.001391756470900731,
+          "profit_factor_live": 0.0,
+          "cost_jpy_live": 189.54471359793774,
+          "cost_jpy_bar": 761.8569077983474
+        },
+        "ugh_consensus": {
+          "decision_count": 4,
+          "trade_count": 4,
+          "live_trade_count": 1,
+          "skip_counts": {},
+          "live_coverage_rate": 0.25,
+          "direction_hit_rate": 0.5,
+          "capture_bp": 24.148360405621986,
+          "signed_bp_live_mean": -26.78898618850773,
+          "signed_bp_live_sd": null,
+          "signed_bp_live_t": null,
+          "signed_bp_bar_mean": 5.40371618637646,
+          "signed_bp_bar_sd": 16.42441092388776,
+          "signed_bp_bar_t": 0.6580103495239837,
+          "pnl_jpy_live": -8036.695856552105,
+          "pnl_jpy_bar": 6477.569394791499,
+          "final_equity_jpy_live": 2991963.304143448,
+          "final_equity_jpy_bar": 3006477.5693947915,
+          "max_drawdown_live": 0.002678898618850702,
+          "max_drawdown_bar": 0.001391756470900731,
+          "profit_factor_live": 0.0,
+          "cost_jpy_live": 189.54471359793774,
+          "cost_jpy_bar": 761.8569077983474
+        },
+        "ugh_divergence": {
+          "decision_count": 4,
+          "trade_count": 0,
+          "live_trade_count": 0,
+          "skip_counts": {
+            "agree_with_technical": 4
+          },
+          "live_coverage_rate": 0.25,
+          "direction_hit_rate": null,
+          "capture_bp": 0,
+          "signed_bp_live_mean": null,
+          "signed_bp_live_sd": null,
+          "signed_bp_live_t": null,
+          "signed_bp_bar_mean": null,
+          "signed_bp_bar_sd": null,
+          "signed_bp_bar_t": null,
+          "pnl_jpy_live": 0.0,
+          "pnl_jpy_bar": 0.0,
+          "final_equity_jpy_live": 3000000.0,
+          "final_equity_jpy_bar": 3000000.0,
+          "max_drawdown_live": 0.0,
+          "max_drawdown_bar": 0.0,
+          "profit_factor_live": null,
+          "cost_jpy_live": 0.0,
+          "cost_jpy_bar": 0.0
+        },
+        "bench_gpt_m3": {
+          "decision_count": 4,
+          "trade_count": 4,
+          "live_trade_count": 1,
+          "skip_counts": {},
+          "live_coverage_rate": 0.25,
+          "direction_hit_rate": 0.5,
+          "capture_bp": 24.148360405621986,
+          "signed_bp_live_mean": -26.78898618850773,
+          "signed_bp_live_sd": null,
+          "signed_bp_live_t": null,
+          "signed_bp_bar_mean": 5.40371618637646,
+          "signed_bp_bar_sd": 16.42441092388776,
+          "signed_bp_bar_t": 0.6580103495239837,
+          "pnl_jpy_live": -8036.695856552105,
+          "pnl_jpy_bar": 6477.569394791499,
+          "final_equity_jpy_live": 2991963.304143448,
+          "final_equity_jpy_bar": 3006477.5693947915,
+          "max_drawdown_live": 0.002678898618850702,
+          "max_drawdown_bar": 0.001391756470900731,
+          "profit_factor_live": 0.0,
+          "cost_jpy_live": 189.54471359793774,
+          "cost_jpy_bar": 761.8569077983474
+        },
+        "bench_long": {
+          "decision_count": 4,
+          "trade_count": 4,
+          "live_trade_count": 1,
+          "skip_counts": {},
+          "live_coverage_rate": 0.25,
+          "direction_hit_rate": 0.5,
+          "capture_bp": 24.148360405621986,
+          "signed_bp_live_mean": -26.78898618850773,
+          "signed_bp_live_sd": null,
+          "signed_bp_live_t": null,
+          "signed_bp_bar_mean": 5.40371618637646,
+          "signed_bp_bar_sd": 16.42441092388776,
+          "signed_bp_bar_t": 0.6580103495239837,
+          "pnl_jpy_live": -8036.695856552105,
+          "pnl_jpy_bar": 6477.569394791499,
+          "final_equity_jpy_live": 2991963.304143448,
+          "final_equity_jpy_bar": 3006477.5693947915,
+          "max_drawdown_live": 0.002678898618850702,
+          "max_drawdown_bar": 0.001391756470900731,
+          "profit_factor_live": 0.0,
+          "cost_jpy_live": 189.54471359793774,
+          "cost_jpy_bar": 761.8569077983474
+        }
+      },
+      "benchmark_deltas": {
+        "bench_gpt_m3": {
+          "pnl_jpy_live_delta": 1555.561953410972,
+          "capture_bp_delta": 0.0
+        },
+        "bench_long": {
+          "pnl_jpy_live_delta": 1555.561953410972,
+          "capture_bp_delta": 0.0
+        }
+      }
+    }
+  },
+  "gate": {
+    "execution_version": "x1",
+    "cohort": {
+      "execution_version": "x1",
+      "first_as_of_jst": "2026-10-08T08:00:00+09:00",
+      "last_as_of_jst": "2026-10-08T08:00:00+09:00",
+      "trade_count": 1,
+      "observation_days": 1,
+      "observation_calendar_days": 0,
+      "excluded_days": 0,
+      "excluded_as_of_jst": [],
+      "signed_bp_live_mean": -21.603779677137855,
+      "signed_bp_live_sd": null
+    },
+    "criteria": {
+      "trades_and_duration": {
+        "current": {
+          "trade_count": 1,
+          "observation_calendar_days": 0
+        },
+        "threshold": {
+          "trade_count": 100,
+          "observation_calendar_days": 182
+        },
+        "met": false
+      },
+      "t_stat_live": {
+        "current": null,
+        "threshold": 2.0,
+        "met": false
+      },
+      "max_drawdown_live": {
+        "current": 0.002160377967713711,
+        "threshold": 0.1,
+        "met": true
+      },
+      "beats_benchmarks": {
+        "current": -6481.1339031411335,
+        "threshold": {
+          "bench_gpt_m3": -8036.695856552105,
+          "bench_long": -8036.695856552105
+        },
+        "met": true
+      }
+    },
+    "passed": false,
+    "blocked_reasons": []
+  },
+  "inventory": {
+    "incomplete_batches": {
+      "count": 0,
+      "items": []
+    },
+    "missing_evaluations": {
+      "count": 0,
+      "items": []
+    },
+    "incomplete_decision_batches": {
+      "count": 0,
+      "items": []
+    },
+    "missing_decisions": {
+      "count": 0,
+      "items": []
+    },
+    "missing_live": {
+      "count": 0,
+      "items": []
+    },
+    "duplicate_batches": {
+      "count": 0,
+      "items": []
+    },
+    "archive_defects": {
+      "incomplete_batches": {
+        "count": 0,
+        "items": []
+      },
+      "missing_evaluations": {
+        "count": 0,
+        "items": []
+      },
+      "incomplete_decision_batches": {
+        "count": 0,
+        "items": []
+      },
+      "missing_decisions": {
+        "count": 0,
+        "items": []
+      },
+      "missing_live": {
+        "count": 0,
+        "items": []
+      },
+      "duplicate_batches": {
+        "count": 0,
+        "items": []
+      }
+    }
+  }
+}
