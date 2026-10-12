@@ -1,7 +1,7 @@
 {
   "report_version": "v2",
-  "generated_at_utc": "2026-10-09T17:28:46Z",
-  "report_date_jst": "2026-10-10T08:00:00+09:00",
+  "generated_at_utc": "2026-10-12T06:49:35Z",
+  "report_date_jst": "2026-10-12T08:00:00+09:00",
   "week_window": {
     "start": "20261005",
     "end": "20261009"
@@ -827,11 +827,11 @@
   },
   "observation_count": 28,
   "generated_artifact_paths": [
-    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20261010/weekly_report.json",
-    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20261010/weekly_report.md",
-    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20261010/weekly_strategy_metrics.csv",
-    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20261010/weekly_slice_metrics.csv",
-    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20261010/weekly_annotation_coverage.csv",
-    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20261010/weekly_ai_annotation_summary.csv"
+    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20261012/weekly_report.json",
+    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20261012/weekly_report.md",
+    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20261012/weekly_strategy_metrics.csv",
+    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20261012/weekly_slice_metrics.csv",
+    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20261012/weekly_annotation_coverage.csv",
+    "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/analytics/weekly/20261012/weekly_ai_annotation_summary.csv"
   ]
 }
