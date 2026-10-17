@@ -18,6 +18,7 @@
 - 2026-10-08: UGH の売買価値の切り分け (方向 60% は実在、conviction 逆相関で magnitude が打ち消す、合議は最悪部分集合、順位は政策ショック 8 日) と仮想売買試算 (合議・GPT-M3・Fable-VR1・1 月拡張・v2.7 再計算)。執行層 v1 の spec + brief FX-EXEC-LAYER / FX-EXEC-REPORTING を起草。9/29 yahoo 退化 bar を発見・訂正。
 - 2026-10-08: (Session 2) PR #138 merge (Codex 21 rounds / 50 件、ユーザー判断で締切) → FX-EXEC-LAYER を並列 agent 3 体 + レビュー agent 2 体で実装、PR #139 (Codex 2 rounds / 1 件、merge)。REPORTING brief はゲート整合性 (期待日 = 営業日 − 明示除外、live 欠落は除外まで block) に収束。follow-up: labeled_observations の版列、/new-brief の欠落経路 checklist。
 - 2026-10-08: (Session 3) FX-EXEC-REPORTING を同じ体制 (並列 agent 3 体 + レビュー agent 2 体 + 実データ copy の smoke test) で実装、PR #140 (Codex 4 rounds / 12 件、採用 10・変更なし 2、merge)。backfill は copy で 107 batch 生成。follow-up: archive 検証モード (評価の再導出 diff)、activation 日の照合、backfill 本番実行と data push は人手。
+- 2026-10-17: 週報 2 本 (10/5 週 = v2.7 初週・執行層 live 初日、10/12 週 = CPI 週・ドリフト 6 日実測) を土曜 Routine で作成し PR #141 で merge (セルフレビュー agent P1 2 件 + Codex 7 rounds / 9 件、全採用)。10/8 午後にユーザー承認で backfill を本番 push (c450d9d / c7e229d)、activation 日 10/8 を確定。執行層の論点は live 建値ドリフト (live 正本は変えない、11 月月次で run 時刻 / 評価窓 / 現状維持)。
 
 <!--
 新規エントリのテンプレート:

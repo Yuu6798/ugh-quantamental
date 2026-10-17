@@ -84,3 +84,7 @@
 ## 2026-10-08 (PR #140 merge sweep overflow)
 
 - **PR #135 / FX-ASOF-FIXING** (2026-10-01) - Claude 実装。08:00 fixing 前に着地した run (月〜木の遅延 retry が JST 翌日 00:xx) を、前営業日 batch 完備時に #130 の繰り越し経路へ (後退拒否・`requested_as_of_jst` 基準 lag=0 を流用、フラグ名 `carried_over` に一般化)。batch 不在は従来 fallback で救済、部分 batch は既存 `partial forecast batch exists` で fail。`run_fx_daily_protocol_once(now_utc=)` を test 注入用に追加。test 4 本、spec Step 1 更新。Codex 0 件。
+
+## 2026-10-17 (PR #141 merge sweep overflow)
+
+- **PR #136 / policy encode — brief は `/new-brief` 経由、promotion evidence は検証件数を pin** (2026-10-01) - #133 の 9 rounds から 2 系統を encode: CLAUDE.md § Workflow (brief の起草・改訂は必ず `/new-brief`)、AGENTS.md §5.3 に 2 行、`/new-brief` SKILL.md §1a に flag 識別子・例外メッセージ (repo 全体 grep で append 箇所を読む、新規は `(new)` と明記して spec に根拠)・既存ガード/test fixture の挙動・validated count の単位 (forecast record = 日 × variant、164) を追加。Codex 4 rounds / 4 件全採用 — うち 3 件は「grep せよ」と書いた本文自体が未 grep だった (emitter を reporting.py と誤記、validated count を日数と誤記)。
