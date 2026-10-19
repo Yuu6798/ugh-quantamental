@@ -1,7 +1,7 @@
 {
   "report_kind": "fx_execution",
   "execution_version": "x1",
-  "generated_at_utc": "2026-10-16T15:24:37.938575+00:00",
+  "generated_at_utc": "2026-10-19T05:32:36.792541+00:00",
   "window": {
     "start_as_of_jst": null,
     "end_as_of_jst": null
@@ -230,7 +230,9 @@
       }
     },
     "passed": false,
-    "blocked_reasons": []
+    "blocked_reasons": [
+      "missing_evaluations"
+    ]
   },
   "inventory": {
     "incomplete_batches": {
@@ -238,8 +240,15 @@
       "items": []
     },
     "missing_evaluations": {
-      "count": 0,
-      "items": []
+      "count": 1,
+      "items": [
+        {
+          "forecast_batch_id": "fb_USDJPY_20261016T080000_v1_74868d2d2f3a33fb",
+          "execution_version": "x1",
+          "as_of_jst": "2026-10-16T08:00:00+09:00",
+          "window_end_jst": "2026-10-19T08:00:00+09:00"
+        }
+      ]
     },
     "incomplete_decision_batches": {
       "count": 0,
