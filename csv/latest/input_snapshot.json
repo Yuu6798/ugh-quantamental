@@ -1,7 +1,7 @@
 {
-  "as_of_jst": "2026-10-21T08:00:00+09:00",
+  "as_of_jst": "2026-10-22T08:00:00+09:00",
   "pair": "USDJPY",
-  "current_spot": 158.16,
+  "current_spot": 158.13,
   "provider_name": "alpha_vantage",
   "market_data_provenance": {
     "vendor": "alpha_vantage",
@@ -9,17 +9,9 @@
     "price_type": "mid",
     "resolution": "1d",
     "timezone": "UTC",
-    "retrieved_at_utc": "2026-10-21T10:21:00.034890+00:00"
+    "retrieved_at_utc": "2026-10-22T10:20:23.263611+00:00"
   },
   "completed_windows": [
-    {
-      "window_start_jst": "2026-06-03T08:00:00+09:00",
-      "window_end_jst": "2026-06-04T08:00:00+09:00",
-      "open_price": 159.89,
-      "high_price": 160.09,
-      "low_price": 159.35,
-      "close_price": 160.03
-    },
     {
       "window_start_jst": "2026-06-04T08:00:00+09:00",
       "window_end_jst": "2026-06-05T08:00:00+09:00",
@@ -811,9 +803,17 @@
       "high_price": 158.59,
       "low_price": 157.81,
       "close_price": 158.16
+    },
+    {
+      "window_start_jst": "2026-10-21T08:00:00+09:00",
+      "window_end_jst": "2026-10-22T08:00:00+09:00",
+      "open_price": 158.15,
+      "high_price": 158.39,
+      "low_price": 157.82,
+      "close_price": 158.13
     }
   ],
   "completed_window_count": 100,
-  "newest_completed_window_end_jst": "2026-10-21T08:00:00+09:00",
-  "generated_at_utc": "2026-10-21T10:21:00Z"
+  "newest_completed_window_end_jst": "2026-10-22T08:00:00+09:00",
+  "generated_at_utc": "2026-10-22T10:20:23Z"
 }
