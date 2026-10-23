@@ -18,8 +18,8 @@
     "evaluation_csv_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/evaluations/USDJPY_20261022_evaluation.csv"
   },
   "manifest_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/latest/manifest.json",
-  "snapshot_lag_business_days": 0,
-  "used_fallback_adjustment": false,
+  "snapshot_lag_business_days": 1,
+  "used_fallback_adjustment": true,
   "run_status": "idempotent_skip",
-  "generated_at_utc": "2026-10-22T15:55:50Z"
+  "generated_at_utc": "2026-10-23T10:16:10Z"
 }
