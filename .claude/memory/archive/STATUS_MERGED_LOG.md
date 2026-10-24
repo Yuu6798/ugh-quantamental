@@ -88,3 +88,7 @@
 ## 2026-10-17 (PR #141 merge sweep overflow)
 
 - **PR #136 / policy encode — brief は `/new-brief` 経由、promotion evidence は検証件数を pin** (2026-10-01) - #133 の 9 rounds から 2 系統を encode: CLAUDE.md § Workflow (brief の起草・改訂は必ず `/new-brief`)、AGENTS.md §5.3 に 2 行、`/new-brief` SKILL.md §1a に flag 識別子・例外メッセージ (repo 全体 grep で append 箇所を読む、新規は `(new)` と明記して spec に根拠)・既存ガード/test fixture の挙動・validated count の単位 (forecast record = 日 × variant、164) を追加。Codex 4 rounds / 4 件全採用 — うち 3 件は「grep せよ」と書いた本文自体が未 grep だった (emitter を reporting.py と誤記、validated count を日数と誤記)。
+
+## 2026-10-24 (PR #142 merge sweep overflow)
+
+- **PR #137 / 9 月 findings の正式 artifact 照合済注記** (2026-10-01) - `monthly/202610/` (commit `81cfcbf`、月次 cron は 07:29Z 発火 = 6 時間遅延・失敗なし) と Axis 1〜6 を照合、全数値一致・訂正なし。冒頭注記と §9 制限事項を照合済に書換 (docs のみ)。Codex 1 round / 1 件 (冒頭を直して §9 を残した同一主張の二重記載)。
