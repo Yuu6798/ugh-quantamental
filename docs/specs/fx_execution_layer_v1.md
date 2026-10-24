@@ -340,7 +340,7 @@ pipeline は `[WARN] Execution <scope> report generation failed (non-fatal): ...
   日付が activation marker 以降なら現行版扱い、それより前は報告のみ)、または**期待日** — `calendar` の
   protocol 営業日のうち activation marker (`execution.EXECUTION_ACTIVATION_AS_OF`、コードに固定した初回
   運用日。最初に publish に成功した日から推定しない — 初日の publish 失敗を見失うため) 以降で窓が閉じた
-  日から、明示的に諦めた日 `execution.EXECUTION_EXCLUDED_AS_OF` (追加は §12 に理由を書く PR で行う) を
+  日から、明示的に諦めた日 `execution.EXECUTION_EXCLUDED_AS_OF` (追加は §12.2 に理由を書く PR で行う) を
   引いたもの — に現行版 (`execution_version == EXECUTION_VERSION`) の完全な `execution.csv` が 1 つも無い日
   (`missing_decisions`。archive の forecast の有無には
   依存しない: publish が壊れた日もプロトコルが走らなかった日も同じ欠落)、または期待日のうち `ugh_x1` の
@@ -455,11 +455,23 @@ scripts/backfill_execution_history.py   # FX-EXEC-REPORTING
 - `FxDailyAutomationResult.execution_evaluation_windows` がスキャンで評価した窓を全件返し、
   `execution_evaluation_csv_path` は最新窓、`execution_evaluations_recorded` は合計。
 - Step 4c は判断ファイルの行とディレクトリ (日付・batch id) が食い違う場合 warning で skip する。
-- `EXECUTION_ACTIVATION_AS_OF = 2026-10-08` は暫定。本番で最初に判断を記録した営業日と違えば
-  その日に合わせる (reporting の期待コホートの起点)。`EXECUTION_EXCLUDED_AS_OF` は空。
+- `EXECUTION_ACTIVATION_AS_OF = 2026-10-08` は**確定** (2026-10-24 照合: 2026-10-08 12:07Z の本番 run が最初の live 判断
+  6 行を `history/20261008/.../execution.csv` に記録した日と一致)。reporting の期待コホートの起点。
+  `EXECUTION_EXCLUDED_AS_OF` の内容と理由は §12.2。
 - テスト規律: `tests/conftest.py` の autouse fixture が `automation.fetch_live_spot_yahoo` を
   `FxDataFetchError` に差し替えるので、CSV exports 付きで `run_fx_daily_protocol_once` を回す既存テストは
   `live_unavailable` の判断行を tmp dir に書く (観測可能な assertion は変えない)。
+
+### 12.2 `EXECUTION_EXCLUDED_AS_OF` の追加記録
+
+期待コホートから除外した営業日と、その日に判断が二度と記録も backfill もできない理由。追加は必ずこの表に
+1 行足す PR で行う (§9)。除外日数は `gate.cohort.excluded_days` / `excluded_as_of_jst` に常に表示される。
+
+| as_of (JST) | 追加日 | 理由 | 根拠 |
+|---|---|---|---|
+| 2026-10-23 | 2026-10-24 | provider (alpha_vantage) が 10/22 窓 (10/22 08:00 → 10/23 08:00) の日足を金曜 19:16 / 21:41 JST の 2 run の時点で公表しておらず、2 run とも `snapshot_lag_business_days=1` で 10/22 の既存 batch に繰り下げて `idempotent_skip`。最終 retry (10/24 00:47 JST) は営業日ガードで停止 (10/23 に繰り越す batch が無い)。10/23 の forecast batch が存在しないため判断を記録できず、`backfill_bar` も forecast 行を要するので埋まらない | `provider_health.csv` の generated_at 10/23 の 2 行 (as_of は繰り下げ後の 10/22、`lag=1 / True`)、Actions run 39981271718 の失敗ログ、PRICE-ALERT Issue #126 の stall 通知 (10/23 13:45Z) |
+
+### 12.3 未決事項
 
 - live spot の取得元を alpha_vantage の realtime endpoint に切り替えるか (API key 制限との兼ね合い)。
   v1 は yahoo のみ。

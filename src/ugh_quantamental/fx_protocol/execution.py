@@ -65,9 +65,16 @@ EXECUTION_ACTIVATION_AS_OF: date = date(2026, 10, 8)
 
 #: Protocol business days deliberately removed from the expected decision cohort
 #: (spec §9): a day on which no decision can ever be recorded or backfilled.
-#: Empty by default; an addition is a reviewed change that records its reason
-#: in spec §12.
-EXECUTION_EXCLUDED_AS_OF: frozenset[date] = frozenset()
+#: Every addition is a reviewed change that records its reason in spec §12.2.
+EXECUTION_EXCLUDED_AS_OF: frozenset[date] = frozenset(
+    {
+        # 2026-10-23: the provider had not published the 10/22 daily bar by either
+        # Friday run, both fell back to the existing 10/22 batch, and the final retry
+        # (JST Saturday) had no Friday batch to carry over.  No forecast batch exists,
+        # so no decision can be recorded or backfilled (spec §12.2).
+        date(2026, 10, 23),
+    }
+)
 
 #: Starting equity of every book's equity curve (reporting layer, spec §5.2 / §8).
 EXECUTION_INITIAL_EQUITY_JPY: int = 3_000_000

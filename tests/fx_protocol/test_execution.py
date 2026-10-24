@@ -269,7 +269,7 @@ def test_book_id_values_and_canonical_order() -> None:
 def test_execution_constants_are_pinned_and_exported() -> None:
     assert EXECUTION_VERSION == "x1"
     assert EXECUTION_ACTIVATION_AS_OF == date(2026, 10, 8)
-    assert EXECUTION_EXCLUDED_AS_OF == frozenset()
+    assert EXECUTION_EXCLUDED_AS_OF == frozenset({date(2026, 10, 23)})  # spec §12.2
     assert EXECUTION_INITIAL_EQUITY_JPY == 3_000_000
     assert EXECUTION_ROUND_TRIP_COST_JPY_PER_USD == 0.01
     assert UGH_X1_TARGET_BP == 30.0
