@@ -262,32 +262,10 @@ vs GPT-M3/long` の形に写す: 先頭は `Passed: yes` なら `passed`、`no` 
 ゲートは期間窓と独立な累積 live コホートなので週次の表とは母集団が違うことを一言添える。artifact が
 無い週は 運用ヘルス に欠落として記録し (weekly v2 と同じ失敗点 a〜d)、再計算で埋めない。
 
-## 4b. リピート注文モニタ (live position watch)
+## 4b. (削除) リピート注文モニタ
 
-The user runs a Rakuten FX repeat-order grid, live since **2026-07-27**:
-buy USDJPY 161.500–163.500, 25 pips grid / 25 pips take-profit, 10,000
-units per order (9 levels, no stop configured).
-
-**Policy tracking is closed** (2026-08-30, user decision): the exit
-question, the 160.50 line, and any reset definition are the user's own
-call — do not track them, escalate them, or carry a 方針判断 item in
-次週への持ち越し. The section reports the week's facts only.
-
-While this grid is active, add a `## リピート注文モニタ` section to the
-weekly report (after 運用ヘルス) answering, from the week's OHLC:
-
-- Weekly low / high / close vs the band 161.50–163.50 — held below,
-  dipped into, or spent above (above 163.50 = grid idle, not at risk).
-- Days whose range overlapped the band, and estimated fills/take-profits.
-- Any shock day (−0.9 円級, the 7/2 / 7/13 pattern) that would have
-  filled multiple levels at once.
-- Unrealized P/L at the week's close and the margin-ratio estimate,
-  stated with the usual assumptions.
-
-Estimated fill counts from daily OHLC are order-of-magnitude only — say
-so rather than implying precision. If the user reports changed or closed
-settings, update this section (or delete it) in the same commit as the
-report.
+2026-10-24 のユーザー判断で終了。`## リピート注文モニタ` 節は書かない (2026-07-27〜10-16 週の
+レポートにある節は当時の記録として残す)。グリッドの方針追跡は 2026-08-30 に終了済み。
 
 ## 5. Deliver
 
