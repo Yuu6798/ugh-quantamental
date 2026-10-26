@@ -1,0 +1,25 @@
+{
+  "as_of_jst": "2026-10-26T08:00:00+09:00",
+  "provider_name": "alpha_vantage",
+  "versions": {
+    "theory_version": "v2",
+    "engine_version": "v2.7",
+    "schema_version": "v1",
+    "protocol_version": "v1"
+  },
+  "forecast_batch_id": "fb_USDJPY_20261026T080000_v1_e52840606202d1c6",
+  "outcome_id": null,
+  "forecast_created": true,
+  "outcome_recorded": false,
+  "evaluation_count": 0,
+  "csv_paths": {
+    "forecast_csv_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/forecasts/USDJPY_20261026_forecast.csv",
+    "outcome_csv_path": null,
+    "evaluation_csv_path": null
+  },
+  "manifest_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/latest/manifest.json",
+  "snapshot_lag_business_days": 0,
+  "used_fallback_adjustment": false,
+  "run_status": "ok",
+  "generated_at_utc": "2026-10-26T11:18:43Z"
+}

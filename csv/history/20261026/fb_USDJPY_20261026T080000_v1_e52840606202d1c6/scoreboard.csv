@@ -1,0 +1,9 @@
+strategy_kind,observation_count,direction_hit_count,direction_hit_rate,range_hit_count,range_hit_rate,state_proxy_hit_count,state_proxy_hit_rate,state_correctness_hit_count,state_correctness_hit_rate,mean_close_error_bp,median_close_error_bp,mean_magnitude_error_bp,last_updated_utc
+baseline_prev_day_direction,145,74,0.5103,,,,,,,43.24,28.6,28.34,2026-10-26T11:18:43Z
+baseline_random_walk,145,0,0.0,,,,,,,28.26,17.36,28.26,2026-10-26T11:18:43Z
+baseline_simple_technical,145,78,0.5379,,,,,,,41.32,32.27,23.12,2026-10-26T11:18:43Z
+ugh,26,12,0.4615,16,0.6154,26,1.0,,,27.34,18.64,27.18,2026-10-26T11:18:43Z
+ugh_v2_alpha,119,61,0.5126,93,0.7815,84,0.7179,29,0.3452,31.26,18.06,22.9,2026-10-26T11:18:43Z
+ugh_v2_beta,119,63,0.5294,89,0.7479,85,0.7265,32,0.381,30.69,17.61,22.99,2026-10-26T11:18:43Z
+ugh_v2_delta,119,58,0.4874,91,0.7647,86,0.735,32,0.381,31.1,17.64,23.19,2026-10-26T11:18:43Z
+ugh_v2_gamma,119,62,0.521,94,0.7899,86,0.735,29,0.3452,31.01,17.94,23.01,2026-10-26T11:18:43Z
