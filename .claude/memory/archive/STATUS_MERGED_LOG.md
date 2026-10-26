@@ -92,3 +92,7 @@
 ## 2026-10-24 (PR #142 merge sweep overflow)
 
 - **PR #137 / 9 月 findings の正式 artifact 照合済注記** (2026-10-01) - `monthly/202610/` (commit `81cfcbf`、月次 cron は 07:29Z 発火 = 6 時間遅延・失敗なし) と Axis 1〜6 を照合、全数値一致・訂正なし。冒頭注記と §9 制限事項を照合済に書換 (docs のみ)。Codex 1 round / 1 件 (冒頭を直して §9 を残した同一主張の二重記載)。
+
+## 2026-10-26 (PR #143 merge sweep overflow)
+
+- **PR #138 / 週報 9/28〜10/2 + 月次 2026-09 + 9/29 訂正 + 執行層 v1 spec + brief 2 本** (2026-10-08) - docs のみ。週報 (v2.7 初週、方向 3/4、Range 16/16 3 週連続、9/29 yahoo fallback の退化 bar 訂正)、月次 (β 11/22、RW に +4.7〜7.2bp 劣後は 3 日に集中)、`docs/specs/fx_execution_layer_v1.md` + `docs/briefs/2026-10_FX-EXEC-LAYER.md` / `FX-EXEC-REPORTING.md`。**Codex 21 rounds / 46 件 (採用 45、変更なし 1)** — 14 round 以降は REPORTING brief のゲート整合性 (期待コホート = 営業日カレンダー − 明示除外、現行版 live 行の無い日は明示除外まで block、activation 前は報告のみ) に収束。ユーザー判断で 20 round 超過時点でレビュー締切、以降の指摘は follow-up。副産物: `labeled_observations.csv` に版列が無く weekly の自動層別が no-op (持ち越し)。

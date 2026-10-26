@@ -20,6 +20,7 @@
 - 2026-10-08: (Session 3) FX-EXEC-REPORTING を同じ体制 (並列 agent 3 体 + レビュー agent 2 体 + 実データ copy の smoke test) で実装、PR #140 (Codex 4 rounds / 12 件、採用 10・変更なし 2、merge)。backfill は copy で 107 batch 生成。follow-up: archive 検証モード (評価の再導出 diff)、activation 日の照合、backfill 本番実行と data push は人手。
 - 2026-10-17: 週報 2 本 (10/5 週 = v2.7 初週・執行層 live 初日、10/12 週 = CPI 週・ドリフト 6 日実測) を土曜 Routine で作成し PR #141 で merge (セルフレビュー agent P1 2 件 + Codex 7 rounds / 9 件、全採用)。10/8 午後にユーザー承認で backfill を本番 push (c450d9d / c7e229d)、activation 日 10/8 を確定。執行層の論点は live 建値ドリフト (live 正本は変えない、11 月月次で run 時刻 / 評価窓 / 現状維持)。
 - 2026-10-24: 週報 10/19〜10/23 (評価 3 日、provider の日足遅延で 10/22 未確定・10/23 forecast 欠落・Saturday artifact 欠落) と欠損補填の判断: 10/22 は月曜 catch-up、artifact は CI 再実行、10/23 forecast は archive に入れず replay 参考値、執行層は除外 (#142 merge)。リピート注文モニタ廃止、日次メールの Gmail 535 を発見。
+- 2026-10-26: 10/19 週の欠損補填を実行 — 10/22 窓が確定 (−86.6bp、UGH 4 variant MISS、α の Range 的中 32 連続が途切れる)、analysis pipeline の手動実行で `20261024/`・`20261026/` を Obs 4 に、10/23 は replay 参考値。9/25 との誤差差は v2.7 でなく e_star・trailing、非 low 累計の数え漏れを訂正、SKILL.md に規則 2 項目 (PR #143)。
 
 <!--
 新規エントリのテンプレート:
