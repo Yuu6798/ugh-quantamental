@@ -229,6 +229,24 @@ Interpretation rules learned over the series — apply, don't re-derive:
   carry-over (round 4), was fixed there, and still stood in the TL;DR
   (round 5). A narrow "body↔carry-over" pass is not enough. Treat this as a
   mandatory consistency sweep alongside prose↔table.
+- **Recount running tallies from the data every week; never carry them
+  forward by addition.** The non-low `intervention_risk` tally (UGH
+  variants with `intervention_risk` ≠ `low` in
+  `analytics/labeled_observations.csv`, hit/miss from `direction_hit`) was
+  carried forward by hand, and the Friday windows that resolve the next
+  Monday (9/11, 9/18) were never added: the 9/14–10/19 week reports
+  understated it by 8 obs (60 vs 68), corrected in the 10/19 week report's
+  10/26 addendum. Count it afresh each week and say what the count spans.
+- **A difference between two days is not a version effect until a
+  counterfactual says so.** The 10/19 week report credited v2.7 for 10/22's
+  +3bp magnitude against 9/25's +46bp. Recomputed from the snapshots, 10/22
+  gives the same value under the v2.6 setting and 9/25 still gives +35–38bp
+  under v2.7: the gap was e_star and the trailing move. Before writing
+  "v2.x reduced …", recompute both days under both configs:
+  `scripts/replay_magnitude_counterfactual.py --fxdata-dir <csv> --out-dir
+  <out> --start D --end D` writes mode A (v2.6 ceiling 1.8) and mode C
+  (v2.7, 1.0) per variant to `daily_rows.csv` and fails unless it
+  reproduces that day's persisted forecasts.
 - **A carry-over that names a script must state whether that script can
   actually do the job.** `analyze_estar_lag.py` hard-codes its analysis and
   search windows to 2026-08-28 with no CLI override, so "run it on September
