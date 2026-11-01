@@ -10,6 +10,6 @@
   "freeze_window_start": "",
   "freeze_window_end": "",
   "rollback_trigger": "",
-  "review_month": "202609",
+  "review_month": "202610",
   "note": "Version updates require human decision after logic audit investigation. This record is auto-generated; update fields manually if a version promotion is approved."
 }

@@ -1,0 +1,290 @@
+{
+  "report_kind": "fx_execution",
+  "execution_version": "x1",
+  "generated_at_utc": "2026-11-01T07:49:47.308058+00:00",
+  "window": {
+    "start_as_of_jst": "2026-10-05",
+    "end_as_of_jst": "2026-10-30"
+  },
+  "row_count": 108,
+  "batch_count": 18,
+  "history_row_count": 738,
+  "strata": {
+    "x1": {
+      "execution_version": "x1",
+      "row_count": 108,
+      "batch_count": 18,
+      "first_as_of_jst": "2026-10-05T08:00:00+09:00",
+      "last_as_of_jst": "2026-10-29T08:00:00+09:00",
+      "books": {
+        "ugh_x1": {
+          "decision_count": 18,
+          "trade_count": 13,
+          "live_trade_count": 10,
+          "skip_counts": {
+            "flat": 5
+          },
+          "live_coverage_rate": 0.8333333333333334,
+          "direction_hit_rate": 0.5384615384615384,
+          "capture_bp": 84.54635192680131,
+          "signed_bp_live_mean": 4.595358868051873,
+          "signed_bp_live_sd": 12.326157089733073,
+          "signed_bp_live_t": 1.1789400851463414,
+          "signed_bp_bar_mean": 4.839231120083535,
+          "signed_bp_bar_sd": 19.36462465433146,
+          "signed_bp_bar_t": 0.9010293898663015,
+          "pnl_jpy_live": 13794.019436608534,
+          "pnl_jpy_bar": 18860.03807952674,
+          "final_equity_jpy_live": 3013794.0194366085,
+          "final_equity_jpy_bar": 3018860.0380795267,
+          "max_drawdown_live": 0.002160377967713711,
+          "max_drawdown_bar": 0.0040353268055455215,
+          "profit_factor_live": 2.568571351880614,
+          "cost_jpy_live": 1802.5696833354343,
+          "cost_jpy_bar": 2235.5345868297463
+        },
+        "ugh_beta_unit": {
+          "decision_count": 18,
+          "trade_count": 13,
+          "live_trade_count": 10,
+          "skip_counts": {
+            "flat": 5
+          },
+          "live_coverage_rate": 0.8333333333333334,
+          "direction_hit_rate": 0.5384615384615384,
+          "capture_bp": 84.54635192680131,
+          "signed_bp_live_mean": 4.146575734992738,
+          "signed_bp_live_sd": 13.614411948435137,
+          "signed_bp_live_t": 0.9631428711447945,
+          "signed_bp_bar_mean": 5.870679352885494,
+          "signed_bp_bar_sd": 20.90788872594664,
+          "signed_bp_bar_t": 1.0123946853786419,
+          "pnl_jpy_live": 12437.834657374304,
+          "pnl_jpy_bar": 22897.27424963005,
+          "final_equity_jpy_live": 3012437.8346573743,
+          "final_equity_jpy_bar": 3022897.27424963,
+          "max_drawdown_live": 0.002678898618850702,
+          "max_drawdown_bar": 0.004161006112562032,
+          "profit_factor_live": 2.196464030230791,
+          "cost_jpy_live": 1897.4473127034862,
+          "cost_jpy_bar": 2479.828248027849
+        },
+        "ugh_consensus": {
+          "decision_count": 18,
+          "trade_count": 12,
+          "live_trade_count": 9,
+          "skip_counts": {
+            "no_consensus": 6
+          },
+          "live_coverage_rate": 0.8333333333333334,
+          "direction_hit_rate": 0.5,
+          "capture_bp": -23.691629674883554,
+          "signed_bp_live_mean": 3.0816544236699257,
+          "signed_bp_live_sd": 13.697896681355887,
+          "signed_bp_live_t": 0.6749184554438225,
+          "signed_bp_bar_mean": 1.0292996026086436,
+          "signed_bp_bar_sd": 24.925152081002427,
+          "signed_bp_bar_t": 0.14305222308251817,
+          "pnl_jpy_live": 8308.145448201802,
+          "pnl_jpy_bar": 3604.93342449842,
+          "final_equity_jpy_live": 3008308.145448202,
+          "final_equity_jpy_bar": 3003604.9334244984,
+          "max_drawdown_live": 0.002678898618850702,
+          "max_drawdown_bar": 0.007376583714128693,
+          "profit_factor_live": 1.8386146258834495,
+          "cost_jpy_live": 1611.8043286874308,
+          "cost_jpy_bar": 2191.095852424325
+        },
+        "ugh_divergence": {
+          "decision_count": 18,
+          "trade_count": 2,
+          "live_trade_count": 2,
+          "skip_counts": {
+            "agree_with_technical": 11,
+            "flat": 5
+          },
+          "live_coverage_rate": 0.8333333333333334,
+          "direction_hit_rate": 0.5,
+          "capture_bp": 21.60040492426727,
+          "signed_bp_live_mean": 4.475376407072115,
+          "signed_bp_live_sd": 15.374459097514741,
+          "signed_bp_live_t": null,
+          "signed_bp_bar_mean": 10.166126241089929,
+          "signed_bp_bar_sd": 23.33289377269361,
+          "signed_bp_bar_t": null,
+          "pnl_jpy_live": 2682.2811041749083,
+          "pnl_jpy_bar": 6094.609889359213,
+          "final_equity_jpy_live": 3002682.281104175,
+          "final_equity_jpy_bar": 3006094.609889359,
+          "max_drawdown_live": 0.0006396007877855469,
+          "max_drawdown_bar": 0.0006332721170287364,
+          "profit_factor_live": 2.3957513449058085,
+          "cost_jpy_live": 380.5210899257287,
+          "cost_jpy_bar": 380.9523181556865
+        },
+        "bench_gpt_m3": {
+          "decision_count": 18,
+          "trade_count": 17,
+          "live_trade_count": 14,
+          "skip_counts": {
+            "momentum_zero": 1
+          },
+          "live_coverage_rate": 0.8333333333333334,
+          "direction_hit_rate": 0.29411764705882354,
+          "capture_bp": -194.4500427426396,
+          "signed_bp_live_mean": -5.702965016341802,
+          "signed_bp_live_sd": 11.728125493687276,
+          "signed_bp_live_t": -1.8194332241238598,
+          "signed_bp_bar_mean": -12.071264244322132,
+          "signed_bp_bar_sd": 28.52874873635743,
+          "signed_bp_bar_t": -1.7445944781536433,
+          "pnl_jpy_live": -23890.50470643118,
+          "pnl_jpy_bar": -61164.632707018405,
+          "final_equity_jpy_live": 2976109.495293569,
+          "final_equity_jpy_bar": 2938835.3672929816,
+          "max_drawdown_live": 0.007963501568810394,
+          "max_drawdown_bar": 0.02521581780171962,
+          "profit_factor_live": 0.2838191817642271,
+          "cost_jpy_live": 2650.2176379208677,
+          "cost_jpy_bar": 3215.1733938628777
+        },
+        "bench_long": {
+          "decision_count": 18,
+          "trade_count": 18,
+          "live_trade_count": 15,
+          "skip_counts": {},
+          "live_coverage_rate": 0.8333333333333334,
+          "direction_hit_rate": 0.4444444444444444,
+          "capture_bp": 24.81169210330033,
+          "signed_bp_live_mean": -0.017016891608057395,
+          "signed_bp_live_sd": 12.38327673609429,
+          "signed_bp_live_t": -0.005322188884798352,
+          "signed_bp_bar_mean": 0.7454028430305574,
+          "signed_bp_bar_sd": 29.91310227542243,
+          "signed_bp_bar_t": 0.1057221147113927,
+          "pnl_jpy_live": -108.7904259627685,
+          "pnl_jpy_bar": 3798.7593443025835,
+          "final_equity_jpy_live": 2999891.209574037,
+          "final_equity_jpy_bar": 3003798.7593443026,
+          "max_drawdown_live": 0.00269656479805413,
+          "max_drawdown_bar": 0.012226339913667202,
+          "profit_factor_live": 0.9949090664014152,
+          "cost_jpy_live": 2847.1169547165455,
+          "cost_jpy_bar": 3429.5816607822435
+        }
+      },
+      "benchmark_deltas": {
+        "bench_gpt_m3": {
+          "pnl_jpy_live_delta": 37684.524143039715,
+          "capture_bp_delta": 278.9963946694409
+        },
+        "bench_long": {
+          "pnl_jpy_live_delta": 13902.809862571303,
+          "capture_bp_delta": 59.73465982350098
+        }
+      }
+    }
+  },
+  "gate": {
+    "execution_version": "x1",
+    "cohort": {
+      "execution_version": "x1",
+      "first_as_of_jst": "2026-10-08T08:00:00+09:00",
+      "last_as_of_jst": "2026-10-29T08:00:00+09:00",
+      "trade_count": 10,
+      "observation_days": 15,
+      "observation_calendar_days": 21,
+      "excluded_days": 1,
+      "excluded_as_of_jst": [
+        "2026-10-23"
+      ],
+      "signed_bp_live_mean": 4.595358868051873,
+      "signed_bp_live_sd": 12.326157089733073
+    },
+    "criteria": {
+      "trades_and_duration": {
+        "current": {
+          "trade_count": 10,
+          "observation_calendar_days": 21
+        },
+        "threshold": {
+          "trade_count": 100,
+          "observation_calendar_days": 182
+        },
+        "met": false
+      },
+      "t_stat_live": {
+        "current": 1.1789400851463414,
+        "threshold": 2.0,
+        "met": false
+      },
+      "max_drawdown_live": {
+        "current": 0.002160377967713711,
+        "threshold": 0.1,
+        "met": true
+      },
+      "beats_benchmarks": {
+        "current": 13794.019436608534,
+        "threshold": {
+          "bench_gpt_m3": -23890.50470643118,
+          "bench_long": -108.7904259627685
+        },
+        "met": true
+      }
+    },
+    "passed": false,
+    "blocked_reasons": []
+  },
+  "inventory": {
+    "incomplete_batches": {
+      "count": 0,
+      "items": []
+    },
+    "missing_evaluations": {
+      "count": 0,
+      "items": []
+    },
+    "incomplete_decision_batches": {
+      "count": 0,
+      "items": []
+    },
+    "missing_decisions": {
+      "count": 0,
+      "items": []
+    },
+    "missing_live": {
+      "count": 0,
+      "items": []
+    },
+    "duplicate_batches": {
+      "count": 0,
+      "items": []
+    },
+    "archive_defects": {
+      "incomplete_batches": {
+        "count": 0,
+        "items": []
+      },
+      "missing_evaluations": {
+        "count": 0,
+        "items": []
+      },
+      "incomplete_decision_batches": {
+        "count": 0,
+        "items": []
+      },
+      "missing_decisions": {
+        "count": 0,
+        "items": []
+      },
+      "missing_live": {
+        "count": 0,
+        "items": []
+      },
+      "duplicate_batches": {
+        "count": 0,
+        "items": []
+      }
+    }
+  }
+}

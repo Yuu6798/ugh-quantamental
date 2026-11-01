@@ -1,0 +1,3 @@
+flag,reason
+regime_direction_collapse,UGH direction rate collapsed below 40% in confirmed regime slice(s): trending (33%). Blended metrics mask this per-regime failure; direction logic needs regime-specific review.
+volatility_direction_collapse,UGH direction rate collapsed below 40% in confirmed volatility slice(s): normal (33%). Blended metrics mask this per-volatility failure; direction logic needs volatility-specific review.

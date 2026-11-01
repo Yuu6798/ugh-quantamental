@@ -1,127 +1,83 @@
 {
-  "review_month": "202609",
+  "review_month": "202610",
   "overall_judgment": "logic_audit",
   "key_flags": [
-    "inspect_magnitude_mapping",
-    "inspect_state_mapping"
+    "regime_direction_collapse",
+    "volatility_direction_collapse"
   ],
   "baseline_comparison_summary": [
     {
       "baseline": "baseline_random_walk",
-      "direction_delta": -0.4211,
-      "direction_delta_excl_flat": -0.5333,
-      "close_error_delta": -7.41,
-      "magnitude_error_delta": 12.61
+      "direction_delta": -0.3333,
+      "direction_delta_excl_flat": -0.4615,
+      "close_error_delta": -1.44,
+      "magnitude_error_delta": 3.29
     },
     {
       "baseline": "baseline_prev_day_direction",
-      "direction_delta": 0.0526,
-      "direction_delta_excl_flat": -0.0666,
-      "close_error_delta": 14.23,
-      "magnitude_error_delta": 6.64
+      "direction_delta": 0.2778,
+      "direction_delta_excl_flat": 0.1539,
+      "close_error_delta": 5.88,
+      "magnitude_error_delta": 2.19
     },
     {
       "baseline": "baseline_simple_technical",
-      "direction_delta": 0.0,
-      "direction_delta_excl_flat": -0.0666,
-      "close_error_delta": 9.74,
-      "magnitude_error_delta": -10.63
+      "direction_delta": 0.1111,
+      "direction_delta_excl_flat": 0.0,
+      "close_error_delta": 12.59,
+      "magnitude_error_delta": 2.04
     }
   ],
   "weekly_trends": [
     {
-      "week_start": "20260831",
-      "week_end": "20260904",
+      "week_start": "20261005",
+      "week_end": "20261009",
       "observation_count": 28,
       "ugh_direction_hit_rate": "",
       "ugh_mean_close_error_bp": "",
       "provider_success_count": 5,
       "provider_failed_count": 0,
-      "provider_fallback_count": 3,
+      "provider_fallback_count": 0,
       "annotation_coverage_rate": 1.0
     },
     {
-      "week_start": "20260903",
-      "week_end": "20260909",
-      "observation_count": 35,
-      "ugh_direction_hit_rate": "",
-      "ugh_mean_close_error_bp": "",
-      "provider_success_count": 5,
-      "provider_failed_count": 0,
-      "provider_fallback_count": 4,
-      "annotation_coverage_rate": 1.0
-    },
-    {
-      "week_start": "20260907",
-      "week_end": "20260911",
+      "week_start": "20261012",
+      "week_end": "20261016",
       "observation_count": 28,
       "ugh_direction_hit_rate": "",
       "ugh_mean_close_error_bp": "",
       "provider_success_count": 5,
       "provider_failed_count": 0,
-      "provider_fallback_count": 4,
+      "provider_fallback_count": 0,
       "annotation_coverage_rate": 1.0
     },
     {
-      "week_start": "20260910",
-      "week_end": "20260916",
-      "observation_count": 35,
+      "week_start": "20261019",
+      "week_end": "20261023",
+      "observation_count": 28,
       "ugh_direction_hit_rate": "",
       "ugh_mean_close_error_bp": "",
-      "provider_success_count": 5,
+      "provider_success_count": 4,
       "provider_failed_count": 0,
-      "provider_fallback_count": 4,
+      "provider_fallback_count": 2,
       "annotation_coverage_rate": 1.0
     },
     {
-      "week_start": "20260914",
-      "week_end": "20260918",
+      "week_start": "20261026",
+      "week_end": "20261030",
       "observation_count": 28,
       "ugh_direction_hit_rate": "",
       "ugh_mean_close_error_bp": "",
       "provider_success_count": 5,
       "provider_failed_count": 0,
-      "provider_fallback_count": 4,
-      "annotation_coverage_rate": 1.0
-    },
-    {
-      "week_start": "20260917",
-      "week_end": "20260923",
-      "observation_count": 35,
-      "ugh_direction_hit_rate": "",
-      "ugh_mean_close_error_bp": "",
-      "provider_success_count": 5,
-      "provider_failed_count": 0,
-      "provider_fallback_count": 4,
-      "annotation_coverage_rate": 1.0
-    },
-    {
-      "week_start": "20260921",
-      "week_end": "20260925",
-      "observation_count": 28,
-      "ugh_direction_hit_rate": "",
-      "ugh_mean_close_error_bp": "",
-      "provider_success_count": 5,
-      "provider_failed_count": 0,
-      "provider_fallback_count": 4,
-      "annotation_coverage_rate": 1.0
-    },
-    {
-      "week_start": "20260924",
-      "week_end": "20260930",
-      "observation_count": 28,
-      "ugh_direction_hit_rate": "",
-      "ugh_mean_close_error_bp": "",
-      "provider_success_count": 5,
-      "provider_failed_count": 0,
-      "provider_fallback_count": 5,
+      "provider_fallback_count": 0,
       "annotation_coverage_rate": 1.0
     }
   ],
   "logic_audit_candidates": [
-    "magnitude/close-error mapping",
-    "state-to-magnitude mapping"
+    "regime-stratified direction logic",
+    "volatility-stratified direction logic"
   ],
   "provider_annotation_concerns": [],
-  "final_recommendation": "Review magnitude/close-error mapping in UGH engine. Review state-to-magnitude mapping — state hits are good but errors high."
+  "final_recommendation": "Review direction logic per regime — a confirmed regime slice collapsed despite an acceptable blended metric. Review direction logic per volatility regime — a confirmed volatility slice collapsed despite an acceptable blended metric."
 }

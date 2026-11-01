@@ -1,45 +1,41 @@
 # FX Monthly Governance Summary v1
 
-**Review month**: 202609
+**Review month**: 202610
 **Overall judgment**: `logic_audit`
 
 ## Review Flags
 
-- `inspect_magnitude_mapping`
-- `inspect_state_mapping`
+- `regime_direction_collapse`
+- `volatility_direction_collapse`
 
 ## Baseline Comparison Summary
 
 | Baseline | Dir Delta | Close Err Delta | Mag Err Delta |
 |---|---|---|---|
-| baseline_random_walk | -0.42 | -7.41 bp | +12.61 bp |
-| baseline_prev_day_direction | +0.05 | +14.23 bp | +6.64 bp |
-| baseline_simple_technical | 0.00 | +9.74 bp | -10.63 bp |
+| baseline_random_walk | -0.33 | -1.44 bp | +3.29 bp |
+| baseline_prev_day_direction | +0.28 | +5.88 bp | +2.19 bp |
+| baseline_simple_technical | +0.11 | +12.59 bp | +2.04 bp |
 
 ## Weekly Trends
 
 | Week | Obs | UGH Dir Rate | UGH Mean Err | Prov OK | Prov Fail | Fallback | Ann Cov |
 |---|---|---|---|---|---|---|---|
-| 20260831-20260904 | 28 | - |  | 5 | 0 | 3 | 100.0% |
-| 20260903-20260909 | 35 | - |  | 5 | 0 | 4 | 100.0% |
-| 20260907-20260911 | 28 | - |  | 5 | 0 | 4 | 100.0% |
-| 20260910-20260916 | 35 | - |  | 5 | 0 | 4 | 100.0% |
-| 20260914-20260918 | 28 | - |  | 5 | 0 | 4 | 100.0% |
-| 20260917-20260923 | 35 | - |  | 5 | 0 | 4 | 100.0% |
-| 20260921-20260925 | 28 | - |  | 5 | 0 | 4 | 100.0% |
-| 20260924-20260930 | 28 | - |  | 5 | 0 | 5 | 100.0% |
+| 20261005-20261009 | 28 | - |  | 5 | 0 | 0 | 100.0% |
+| 20261012-20261016 | 28 | - |  | 5 | 0 | 0 | 100.0% |
+| 20261019-20261023 | 28 | - |  | 4 | 0 | 2 | 100.0% |
+| 20261026-20261030 | 28 | - |  | 5 | 0 | 0 | 100.0% |
 
 ## Logic Audit Candidates
 
-- magnitude/close-error mapping
-- state-to-magnitude mapping
+- regime-stratified direction logic
+- volatility-stratified direction logic
 
 ## Change Candidates
 
 | ID | Category | Rationale | Status |
 |---|---|---|---|
-| CC-001 | logic_audit | UGH mean abs close error is 7.4 bp worse than baseline_random_walk (threshold... | proposed |
-| CC-002 | logic_audit | State proxy hit rate (73.7%) is high but magnitude error (39.7 bp) exceeds th... | proposed |
+| CC-001 | logic_audit | UGH direction rate collapsed below 40% in confirmed regime slice(s): trending... | proposed |
+| CC-002 | logic_audit | UGH direction rate collapsed below 40% in confirmed volatility slice(s): norm... | proposed |
 
 ## Version Decision
 
@@ -49,7 +45,7 @@
 
 ## Final Recommendation
 
-> Review magnitude/close-error mapping in UGH engine. Review state-to-magnitude mapping — state hits are good but errors high.
+> Review direction logic per regime — a confirmed regime slice collapsed despite an acceptable blended metric. Review direction logic per volatility regime — a confirmed volatility slice collapsed despite an acceptable blended metric.
 
 ---
 

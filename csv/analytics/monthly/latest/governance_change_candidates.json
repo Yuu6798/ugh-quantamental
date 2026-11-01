@@ -2,18 +2,18 @@
   {
     "candidate_id": "CC-001",
     "category": "logic_audit",
-    "rationale": "UGH mean abs close error is 7.4 bp worse than baseline_random_walk (threshold: 5.0 bp). Magnitude mapping may need review.",
-    "expected_benefit": "Reduce close error gap vs baseline_random_walk",
-    "expected_risk": "Magnitude mapping change may affect range_hit_rate",
+    "rationale": "UGH direction rate collapsed below 40% in confirmed regime slice(s): trending (33%). Blended metrics mask this per-regime failure; direction logic needs regime-specific review.",
+    "expected_benefit": "Recover UGH direction accuracy in the collapsed regime slice(s)",
+    "expected_risk": "Regime-specific direction logic may affect other slices",
     "owner": "unassigned",
     "status": "proposed"
   },
   {
     "candidate_id": "CC-002",
     "category": "logic_audit",
-    "rationale": "State proxy hit rate (73.7%) is high but magnitude error (39.7 bp) exceeds threshold (30.0 bp). State-to-magnitude mapping may need review.",
-    "expected_benefit": "Better magnitude prediction when state proxy hits",
-    "expected_risk": "State threshold change may affect direction accuracy",
+    "rationale": "UGH direction rate collapsed below 40% in confirmed volatility slice(s): normal (33%). Blended metrics mask this per-volatility failure; direction logic needs volatility-specific review.",
+    "expected_benefit": "Recover UGH direction accuracy in the collapsed volatility slice(s)",
+    "expected_risk": "Volatility-specific direction logic may affect other slices",
     "owner": "unassigned",
     "status": "proposed"
   }

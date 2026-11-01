@@ -1,101 +1,98 @@
 # FX Monthly Review v1 — USDJPY
 
-Generated: 2026-10-01T08:00:00+09:00
-Window: 20 business days requested, 19 included, 1 missing
+Generated: 2026-11-01T08:00:00+09:00
+Window: 20 business days requested, 18 included, 2 missing
 
 ## Monthly Summary
 
-> Review magnitude/close-error mapping in UGH engine. Review state-to-magnitude mapping — state hits are good but errors high.
+> Review direction logic per regime — a confirmed regime slice collapsed despite an acceptable blended metric. Review direction logic per volatility regime — a confirmed volatility slice collapsed despite an acceptable blended metric.
 
 ## Review Flags
 
-- **inspect_magnitude_mapping**: UGH mean abs close error is 7.4 bp worse than baseline_random_walk (threshold: 5.0 bp). Magnitude mapping may need review.
-- **inspect_state_mapping**: State proxy hit rate (73.7%) is high but magnitude error (39.7 bp) exceeds threshold (30.0 bp). State-to-magnitude mapping may need review.
+- **regime_direction_collapse**: UGH direction rate collapsed below 40% in confirmed regime slice(s): trending (33%). Blended metrics mask this per-regime failure; direction logic needs regime-specific review.
+- **volatility_direction_collapse**: UGH direction rate collapsed below 40% in confirmed volatility slice(s): normal (33%). Blended metrics mask this per-volatility failure; direction logic needs volatility-specific review.
 
 ## Strategy Performance
 
 | Strategy | N | Dir Hit | Dir Rate | Dir Rate (excl_flat) | Range Rate | State Persist | State Correct | Mean Err | Med Err | Mean Mag | Med Mag |
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | ugh | 0 | 0 | - | - | - | - | - | - | - | - | - |
-| ugh_v2_alpha | 19 | 8 | 42.1% | 53.3% | 89.5% | 73.7% | 26.3% | 59.7 | 46.4 | 39.7 | 31.9 |
-| ugh_v2_beta | 19 | 10 | 52.6% | 66.7% | 89.5% | 68.4% | 26.3% | 56.8 | 42.2 | 38.9 | 31.9 |
-| ugh_v2_gamma | 19 | 8 | 42.1% | 53.3% | 89.5% | 73.7% | 26.3% | 59.5 | 46.6 | 40.2 | 31.9 |
-| ugh_v2_delta | 19 | 6 | 31.6% | 54.5% | 89.5% | 73.7% | 26.3% | 58.7 | 47.3 | 40.6 | 31.9 |
-| baseline_random_walk | 19 | 0 | 0.0% | - | - | - | - | 52.3 | 47.3 | 52.3 | 47.3 |
-| baseline_prev_day_direction | 19 | 9 | 47.4% | 47.4% | - | - | - | 74.0 | 77.6 | 46.3 | 31.9 |
-| baseline_simple_technical | 19 | 8 | 42.1% | 42.1% | - | - | - | 69.5 | 63.4 | 29.1 | 17.1 |
+| ugh_v2_alpha | 18 | 6 | 33.3% | 46.2% | 94.4% | 100.0% | 72.2% | 22.3 | 20.2 | 17.6 | 15.1 |
+| ugh_v2_beta | 18 | 7 | 38.9% | 53.8% | 94.4% | 100.0% | 72.2% | 22.1 | 20.9 | 17.2 | 14.0 |
+| ugh_v2_gamma | 18 | 6 | 33.3% | 46.2% | 94.4% | 100.0% | 72.2% | 22.2 | 19.9 | 17.7 | 15.0 |
+| ugh_v2_delta | 18 | 7 | 38.9% | 53.8% | 94.4% | 100.0% | 72.2% | 22.0 | 20.2 | 17.4 | 15.0 |
+| baseline_random_walk | 18 | 0 | 0.0% | - | - | - | - | 20.9 | 19.6 | 20.9 | 19.6 |
+| baseline_prev_day_direction | 18 | 11 | 61.1% | 61.1% | - | - | - | 28.2 | 19.9 | 19.8 | 17.4 |
+| baseline_simple_technical | 18 | 8 | 44.4% | 44.4% | - | - | - | 34.9 | 31.5 | 19.6 | 15.9 |
 
 ## Baseline Comparisons (delta vs UGH)
 
 | Baseline | Dir Acc Delta | Dir Acc Delta (excl_flat) | Close Err Delta | Mag Err Delta | State Delta |
 |---|---|---|---|---|---|
-| baseline_random_walk | -0.42 | -0.53 | -7.41 bp | +12.61 bp | - |
-| baseline_prev_day_direction | +0.05 | -0.07 | +14.23 bp | +6.64 bp | - |
-| baseline_simple_technical | 0.00 | -0.07 | +9.74 bp | -10.63 bp | - |
+| baseline_random_walk | -0.33 | -0.46 | -1.44 bp | +3.29 bp | - |
+| baseline_prev_day_direction | +0.28 | +0.15 | +5.88 bp | +2.19 bp | - |
+| baseline_simple_technical | +0.11 | 0.00 | +12.59 bp | +2.04 bp | - |
 
 ## State Metrics (UGH)
 
 | State | N | Dir Rate | Mean Err |
 |---|---|---|---|
-| failure | 5 | 100.0% | 44.4 |
-| fire | 44 | 34.1% | 52.6 |
-| setup | 27 | 44.4% | 71.2 |
+| setup | 72 | 36.1% | 22.2 |
 
 ## Regime Analysis (UGH, confirmed annotations)
 
 | Regime | N | Dir Rate | Mean Err |
 |---|---|---|---|
-| trending | 76 | 42.1% | 58.7 |
+| trending | 72 | 36.1% | 22.2 |
 
 ## Volatility Analysis (UGH, confirmed annotations)
 
 | Volatility | N | Dir Rate | Mean Err |
 |---|---|---|---|
-| high | 12 | 8.3% | 134.3 |
-| low | 8 | 50.0% | 8.3 |
-| normal | 56 | 48.2% | 49.7 |
+| high | 4 | 0.0% | 89.0 |
+| low | 8 | 75.0% | 20.2 |
+| normal | 60 | 33.3% | 18.0 |
 
 ## Intervention Risk Analysis (UGH, confirmed annotations)
 
 | Intervention Risk | N | Dir Rate | Mean Err |
 |---|---|---|---|
-| high | 8 | 12.5% | 141.1 |
-| low | 40 | 60.0% | 21.1 |
-| medium | 28 | 25.0% | 88.7 |
+| low | 68 | 38.2% | 18.2 |
+| medium | 4 | 0.0% | 89.0 |
 
 ## Provider Health Summary
 
 - **Total runs**: 59
-- **Success**: 20
+- **Success**: 19
 - **Failed**: 0
-- **Skipped**: 39
-- **Fallback adjustments**: 17
-- **Lagged snapshots**: 17
-- **Providers**: alpha_vantage (58), yahoo_finance (1)
+- **Skipped**: 40
+- **Fallback adjustments**: 2
+- **Lagged snapshots**: 2
+- **Providers**: alpha_vantage (59)
 
 ## Annotation Coverage
 
-- **Total observations**: 133
-- **Confirmed**: 133
+- **Total observations**: 126
+- **Confirmed**: 126
 - **Pending**: 0
 - **Unlabeled**: 0
 - **Coverage rate**: 100.0%
 
 ## Representative Successes
 
-1. **2026-09-22T08:00:00+09:00** — Predicted up (11.358884373685937 bp), Realized up (10.177469626613865 bp), Error: 1.2 bp
-2. **2026-09-22T08:00:00+09:00** — Predicted up (7.9638811359407935 bp), Realized up (10.177469626613865 bp), Error: 2.2 bp
-3. **2026-09-24T08:00:00+09:00** — Predicted up (30.47188016627277 bp), Realized up (34.74854687894942 bp), Error: 4.3 bp
+1. **2026-10-29T08:00:00+09:00** — Predicted down (-3.6045141272760945 bp), Realized down (-6.9708491761732345 bp), Error: 3.4 bp
+2. **2026-10-29T08:00:00+09:00** — Predicted down (-3.4174739542697528 bp), Realized down (-6.9708491761732345 bp), Error: 3.6 bp
+3. **2026-10-29T08:00:00+09:00** — Predicted down (-3.3227774342767016 bp), Realized down (-6.9708491761732345 bp), Error: 3.6 bp
 
 ## Representative Failures
 
-1. **2026-09-03T08:00:00+09:00** — Predicted flat (0.0 bp), Realized down (-181.5087918321041 bp), Error: 181.5 bp
-2. **2026-09-03T08:00:00+09:00** — Predicted flat (0.0 bp), Realized down (-181.5087918321041 bp), Error: 181.5 bp
-3. **2026-09-03T08:00:00+09:00** — Predicted flat (0.0 bp), Realized down (-181.5087918321041 bp), Error: 181.5 bp
+1. **2026-10-22T08:00:00+09:00** — Predicted up (3.3268176103035767 bp), Realized down (-86.6375766774176 bp), Error: 90.0 bp
+2. **2026-10-22T08:00:00+09:00** — Predicted up (3.2242966612828172 bp), Realized down (-86.6375766774176 bp), Error: 89.9 bp
+3. **2026-10-22T08:00:00+09:00** — Predicted up (3.060545778202513 bp), Realized down (-86.6375766774176 bp), Error: 89.7 bp
 
 ## Recommendation Summary
 
-Review magnitude/close-error mapping in UGH engine. Review state-to-magnitude mapping — state hits are good but errors high.
+Review direction logic per regime — a confirmed regime slice collapsed despite an acceptable blended metric. Review direction logic per volatility regime — a confirmed volatility slice collapsed despite an acceptable blended metric.
 
 ---
 

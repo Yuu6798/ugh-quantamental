@@ -1,9 +1,9 @@
 # FX Weekly Report v2 — 20261012 to 20261016
 
-Generated: 2026-10-19T05:32:36Z
+Generated: 2026-11-01T07:49:47Z
 Report date (JST): 2026-10-19T08:00:00+09:00
 Business days: 5
-Total observations: 28
+Total observations: 35
 Core analysis ready: Yes
 Annotated analysis ready: Yes
 
@@ -13,17 +13,17 @@ Annotated analysis ready: Yes
 
 | Strategy | Obs | Dir Hit | Dir Rate | Range Rate | State Persist | State Correct | Mean Err (bp) | Median Err (bp) |
 |---|---|---|---|---|---|---|---|---|
-| baseline_prev_day_direction | 4 | 3 | 75.0% | - | - | - | 22.1 | 17.7 |
-| baseline_random_walk | 4 | 0 | 0.0% | - | - | - | 18.5 | 20.2 |
-| baseline_simple_technical | 4 | 1 | 25.0% | - | - | - | 33.8 | 40.5 |
-| ugh_v2_alpha | 4 | 1 | 25.0% | 100.0% | 100.0% | 75.0% | 20.2 | 21.1 |
-| ugh_v2_beta | 4 | 1 | 25.0% | 100.0% | 100.0% | 75.0% | 18.9 | 19.1 |
-| ugh_v2_delta | 4 | 1 | 25.0% | 100.0% | 100.0% | 75.0% | 19.1 | 20.0 |
-| ugh_v2_gamma | 4 | 1 | 25.0% | 100.0% | 100.0% | 75.0% | 20.2 | 21.6 |
+| baseline_prev_day_direction | 5 | 3 | 60.0% | - | - | - | 22.0 | 18.3 |
+| baseline_random_walk | 5 | 0 | 0.0% | - | - | - | 14.9 | 19.6 |
+| baseline_simple_technical | 5 | 2 | 40.0% | - | - | - | 32.3 | 33.1 |
+| ugh_v2_alpha | 5 | 1 | 20.0% | 100.0% | 100.0% | 80.0% | 16.3 | 15.8 |
+| ugh_v2_beta | 5 | 1 | 20.0% | 100.0% | 100.0% | 80.0% | 15.3 | 13.3 |
+| ugh_v2_delta | 5 | 1 | 20.0% | 100.0% | 100.0% | 80.0% | 15.4 | 14.2 |
+| ugh_v2_gamma | 5 | 1 | 20.0% | 100.0% | 100.0% | 80.0% | 16.3 | 17.1 |
 
 ## AI Annotation Layer
 
-- **AI annotated**: 28
+- **AI annotated**: 35
 - **Auto annotated**: 0
 - **Manual compat**: 0
 - **OHLC fallback**: 0
@@ -36,11 +36,11 @@ Annotated analysis ready: Yes
 
 | Field | AI | Auto | Manual | Fallback | Effective | Missing |
 |---|---|---|---|---|---|---|
-| regime_label | 28 | 0 | 0 | 0 | 28 | 0 |
-| event_tags | 0 | 0 | 0 | 0 | 0 | 28 |
-| volatility_label | 28 | 0 | 0 | 0 | 28 | 0 |
-| intervention_risk | 28 | 0 | 0 | 0 | 28 | 0 |
-| failure_reason | 12 | 0 | 0 | 0 | 12 | 16 |
+| regime_label | 35 | 0 | 0 | 0 | 35 | 0 |
+| event_tags | 0 | 0 | 0 | 0 | 0 | 35 |
+| volatility_label | 35 | 0 | 0 | 0 | 35 | 0 |
+| intervention_risk | 35 | 0 | 0 | 0 | 35 | 0 |
+| failure_reason | 16 | 0 | 0 | 0 | 16 | 19 |
 
 ## Annotation-Dependent Analysis
 
@@ -48,37 +48,37 @@ Annotated analysis ready: Yes
 
 | Strategy | Label | Obs | Dir Rate | Range Rate | Mean Err (bp) |
 |---|---|---|---|---|---|
-| baseline_prev_day_direction | low | 4 | 75.0% | - | 22.1 |
-| baseline_random_walk | low | 4 | 0.0% | - | 18.5 |
-| baseline_simple_technical | low | 4 | 25.0% | - | 33.8 |
-| ugh_v2_alpha | low | 4 | 25.0% | 100.0% | 20.2 |
-| ugh_v2_beta | low | 4 | 25.0% | 100.0% | 18.9 |
-| ugh_v2_delta | low | 4 | 25.0% | 100.0% | 19.1 |
-| ugh_v2_gamma | low | 4 | 25.0% | 100.0% | 20.2 |
+| baseline_prev_day_direction | low | 5 | 60.0% | - | 22.0 |
+| baseline_random_walk | low | 5 | 0.0% | - | 14.9 |
+| baseline_simple_technical | low | 5 | 40.0% | - | 32.3 |
+| ugh_v2_alpha | low | 5 | 20.0% | 100.0% | 16.3 |
+| ugh_v2_beta | low | 5 | 20.0% | 100.0% | 15.3 |
+| ugh_v2_delta | low | 5 | 20.0% | 100.0% | 15.4 |
+| ugh_v2_gamma | low | 5 | 20.0% | 100.0% | 16.3 |
 
 ### Regime Label
 
 | Strategy | Label | Obs | Dir Rate | Range Rate | Mean Err (bp) |
 |---|---|---|---|---|---|
-| baseline_prev_day_direction | trending | 4 | 75.0% | - | 22.1 |
-| baseline_random_walk | trending | 4 | 0.0% | - | 18.5 |
-| baseline_simple_technical | trending | 4 | 25.0% | - | 33.8 |
-| ugh_v2_alpha | trending | 4 | 25.0% | 100.0% | 20.2 |
-| ugh_v2_beta | trending | 4 | 25.0% | 100.0% | 18.9 |
-| ugh_v2_delta | trending | 4 | 25.0% | 100.0% | 19.1 |
-| ugh_v2_gamma | trending | 4 | 25.0% | 100.0% | 20.2 |
+| baseline_prev_day_direction | trending | 5 | 60.0% | - | 22.0 |
+| baseline_random_walk | trending | 5 | 0.0% | - | 14.9 |
+| baseline_simple_technical | trending | 5 | 40.0% | - | 32.3 |
+| ugh_v2_alpha | trending | 5 | 20.0% | 100.0% | 16.3 |
+| ugh_v2_beta | trending | 5 | 20.0% | 100.0% | 15.3 |
+| ugh_v2_delta | trending | 5 | 20.0% | 100.0% | 15.4 |
+| ugh_v2_gamma | trending | 5 | 20.0% | 100.0% | 16.3 |
 
 ### Volatility Label
 
 | Strategy | Label | Obs | Dir Rate | Range Rate | Mean Err (bp) |
 |---|---|---|---|---|---|
-| baseline_prev_day_direction | normal | 4 | 75.0% | - | 22.1 |
-| baseline_random_walk | normal | 4 | 0.0% | - | 18.5 |
-| baseline_simple_technical | normal | 4 | 25.0% | - | 33.8 |
-| ugh_v2_alpha | normal | 4 | 25.0% | 100.0% | 20.2 |
-| ugh_v2_beta | normal | 4 | 25.0% | 100.0% | 18.9 |
-| ugh_v2_delta | normal | 4 | 25.0% | 100.0% | 19.1 |
-| ugh_v2_gamma | normal | 4 | 25.0% | 100.0% | 20.2 |
+| baseline_prev_day_direction | normal | 5 | 60.0% | - | 22.0 |
+| baseline_random_walk | normal | 5 | 0.0% | - | 14.9 |
+| baseline_simple_technical | normal | 5 | 40.0% | - | 32.3 |
+| ugh_v2_alpha | normal | 5 | 20.0% | 100.0% | 16.3 |
+| ugh_v2_beta | normal | 5 | 20.0% | 100.0% | 15.3 |
+| ugh_v2_delta | normal | 5 | 20.0% | 100.0% | 15.4 |
+| ugh_v2_gamma | normal | 5 | 20.0% | 100.0% | 16.3 |
 
 ## Provider Health Summary
 

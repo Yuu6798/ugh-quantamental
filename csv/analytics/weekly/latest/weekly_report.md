@@ -1,7 +1,7 @@
 # FX Weekly Report v2 — 20261026 to 20261030
 
-Generated: 2026-10-30T17:03:32Z
-Report date (JST): 2026-10-31T08:00:00+09:00
+Generated: 2026-11-01T07:49:47Z
+Report date (JST): 2026-11-02T08:00:00+09:00
 Business days: 5
 Total observations: 28
 Core analysis ready: Yes
