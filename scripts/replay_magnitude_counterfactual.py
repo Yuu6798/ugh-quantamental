@@ -85,6 +85,8 @@ EXPANSION_MAX_BY_ENGINE_VERSION = {"v2.6": 1.8, "v2.7": 1.0, "v2.8": 1.0}
 #: (1.0 = the conviction-coupled factor of v2.4-v2.7, 0.0 = v2.8).  Every
 #: version in ``EXPANSION_MAX_BY_ENGINE_VERSION`` must have an entry here.
 MAGNITUDE_CONVICTION_WEIGHT_BY_ENGINE_VERSION = {"v2.6": 1.0, "v2.7": 1.0, "v2.8": 0.0}
+if set(MAGNITUDE_CONVICTION_WEIGHT_BY_ENGINE_VERSION) != set(EXPANSION_MAX_BY_ENGINE_VERSION):
+    raise RuntimeError("the engine_version maps must name the same versions")
 
 
 @dataclass(frozen=True)
@@ -318,7 +320,9 @@ def run(
                         magnitude_factor=_magnitude_factor(res.conviction, ref_cfg),
                     )
                     checked += 1
-                    if ref[0] != ref_direction or abs(ref[1] - ref_bp) > 1e-6:
+                    # Exact equality: forecast.csv round-trips the float (the csv
+                    # module writes repr), so a persisted row is reproduced bit for bit.
+                    if ref[0] != ref_direction or ref[1] != ref_bp:
                         raise RuntimeError(
                             f"replay drifted from the persisted forecast on {day_str} "
                             f"{variant}: {ref[:2]} vs ({ref_direction}, {ref_bp})"
@@ -339,7 +343,7 @@ def run(
                     )
                 )
 
-        # --- scale axis (current magnitude path) ---
+        # --- scale axis (the v2.6 magnitude path of mode A) ---
         for k in scales:
             stats = dict(base_stats)
             stats["momentum_5d"] = base_stats["momentum_5d"] * (k / 100.0)
@@ -455,7 +459,8 @@ def main(argv: list[str] | None = None) -> None:
             "Exact number of persisted forecasts the replay must validate; the run fails on "
             "any other count. An archive that lost a whole day (forecast.csv and snapshot) "
             "leaves nothing for the per-day guards to inspect, so pin the count when the "
-            "output is used as promotion evidence (2026-04-01..2026-09-30: 164)."
+            "output is used as promotion evidence (2026-04-01..2026-09-30: 164; "
+            "2026-04-01..2026-11-06: 272)."
         ),
     )
     args = parser.parse_args(argv)

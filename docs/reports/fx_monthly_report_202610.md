@@ -4,7 +4,7 @@
 - 評価済み観測: **暦月 21 発行日 (10/1〜10/30、10/23 は forecast 欠落) × 7 戦略 = 147 件**、すべて評価済み
   (10/30 発行分は 11/2 に確定)
 - 元データ: `fx-daily-data` ブランチ `csv/history/202610*/`、`csv/analytics/monthly/202611/` (review、
-  governance 窓 10/5〜10/29 の 18 評価日) と `csv/analytics/monthly/202610/` (governance)、
+  governance 窓 10/5〜10/30 の 20 営業日、評価済み 18 日) と `csv/analytics/monthly/202610/` (governance)、
   `csv/analytics/execution/monthly/202610/` (執行層)、週報 5 本
   (`fx_weekly_report_20260928_20261002.md` 〜 `fx_weekly_report_20261026_20261030.md`)
 - ロジックレビュー: `docs/engine_review_2026_10_findings.md` (本レポートと同じ PR)。本レポートはその結論を
@@ -24,8 +24,9 @@ UGH の方向は β・δ 8/21 (38%)、α・γ 7/21 (33%) で、FLAT を除くと
 USDJPY の上昇ドリフト (上昇日 65%) 以上の情報を持たず、conviction は信頼度の順位付けになっていない**
 (低いほど当たり、大きく張った判定ほど外れる) ことを確認した。方向側の候補はすべて方向を悪化させたので
 変えず、**予測幅の係数だけを conviction から切り離す engine v2.8** を判定した (`version_promotion_candidate`、
-方向・FLAT は 588 件すべて不変、平均誤差は 4 variant で −0.33〜−0.43bp。ただし改善の大半は平均的な
-賭けの縮小)。v2.7 の rollback trigger は不成立。運用では #135 後の偽 lag が月を通じて 0 になったが、
+方向・FLAT は 588 件すべて不変、平均誤差は 4 variant で −0.33〜−0.43bp。ただし改善の約 3/4 は平均的な
+賭けの縮小で、平均 magnitude 誤差は逆に少し悪化する — 7 月・9 月のレビューが同種の改善を採らなかった前例との
+関係は findings §4.4)。v2.7 の rollback trigger は不成立。運用では #135 後の偽 lag が月を通じて 0 になったが、
 10/23 は provider の公表遅れで forecast が欠落し、日次メールと LLM 要約の失敗 (secret) が続いている。
 
 ## 月間値動き
@@ -60,7 +61,7 @@ USDJPY の上昇ドリフト (上昇日 65%) 以上の情報を持たず、convi
 | baseline_simple_technical | 10/21 (48%) | 10/21 | — | — | 33.8 | 29.9 |
 | baseline_random_walk | 0/21 (0%) | — | — | — | **21.2** | 19.5 |
 
-### governance 窓 (10/5〜10/29、18 日、正式 artifact `monthly/202611/`)
+### governance 窓 (10/5〜10/30 の 20 営業日、評価済み 18 日、正式 artifact `monthly/202611/`)
 
 | 戦略 | 方向 | 方向 (excl FLAT) | Range | State 正解 | 平均誤差 | 中央値誤差 |
 |---|---|---|---|---|---|---|
@@ -129,7 +130,7 @@ USDJPY の上昇ドリフト (上昇日 65%) 以上の情報を持たず、convi
 
 **月全体**: α の外れ 14 日は、方向違い 8 日 (すべて `up` で実現が下落) と FLAT 6 日。`up` の 14 本中 8 本が
 外れた。10 月前半は SMA 系の 2 項がまだ大きく正 (`technical_score` +0.3〜+1.0、9 月下旬の上昇の名残) で、それに `gravity_bias` の上向き補正
-(常に ≥ 0、月中 +0.04〜+0.16) が乗り、下落窓の多い月に `up` を出し続けた。後半は SMA 系が 0.1〜0.3 まで
+(方向と無関係で、10 月は +0.04〜+0.16) が乗り、下落窓の多い月に `up` を出し続けた。後半は SMA 系が 0.1〜0.3 まで
 縮み、前日変化の項と相殺して FLAT が並んだ。
 
 **10/22 (−86.6bp)**: findings §2.5 の分解のとおり、α の e_star +0.165 のうち +0.132 が gravity で、
@@ -151,7 +152,7 @@ USDJPY の上昇ドリフト (上昇日 65%) 以上の情報を持たず、convi
 
 | # | 対応 | 内容 | 状態 |
 |---|---|---|---|
-| M1 | **engine v2.8** (FX-MAG-CONVICTION-DECOUPLE) | 方向・FLAT 判定は v2.7 のまま、記録する予測幅の係数を `0.5 + 0.5 × conviction` から定数 0.75 に (`ProjectionConfig.magnitude_conviction_weight`、default 0.0)。147 日 × 4 variant の replay で平均誤差は設計期間 (4〜9 月) −0.36〜−0.43bp、事前登録後 (10/1〜11/6) −0.33〜−0.39bp、方向・FLAT は 588 件すべて不変。改善の 70〜83% は平均的な賭けの縮小と同じ効果で、conviction を外すこと自体の効果は −0.13〜−0.19bp | **本 PR の merge で投入** (ユーザー承認) |
+| M1 | **engine v2.8** (FX-MAG-CONVICTION-DECOUPLE) | 方向・FLAT 判定は v2.7 のまま、記録する予測幅の係数を `0.5 + 0.5 × conviction` から定数 0.75 に (`ProjectionConfig.magnitude_conviction_weight`、default 0.0)。147 日 × 4 variant の replay で平均誤差は設計期間 (4〜9 月) −0.36〜−0.43bp、事前登録後 (10/1〜11/6) −0.33〜−0.39bp、方向・FLAT は 588 件すべて不変。改善の約 3/4 は平均的な賭けの縮小と同じ効果で、平均の予測幅をそろえて conviction だけを外した効果は −0.09〜−0.14bp。平均 magnitude 誤差は +0.17〜+0.22bp 悪化 (高ボラの 9 月窓では +0.7〜+0.9bp)。7 月 §5.6・9 月 §5.3 は縮小が主の改善を採らなかったので、その基準を貫くなら見送りが一貫した判断になる (findings §4.4) | **merge (ユーザー承認) で投入**。見送るなら engine の commit を外して docs だけ merge |
 | M2 | v2.7 の A/B (9 月 M3) | 10 月 governance 窓で v2.7 は v2.6 counterfactual より 0.29〜0.39bp 良く、`inspect_magnitude_mapping` はどちらも非発火 | **rollback 不成立、v2.7 の拡張無効化を維持** |
 | M3 | CC-M01 (9 月 M4) | 冗長入力の一致による conviction の膨張。magnitude 側は M1 で対処、alignment 側の重複除去は方向を悪化させたので不採用 | 一部採用 |
 | M4 | 方向ロジック (CC-001 / CC-002) | 方向入力はドリフト以上の情報を持たず、方向側の候補 (alignment 重複除去・gravity 除去・gravity 符号化) はすべて方向を悪化 | **変更なし** |

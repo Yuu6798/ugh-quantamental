@@ -149,6 +149,12 @@ the UGH variant forecast label is:
 - `FLAT` when `abs(expected_close_change_bp) <= epsilon_bp`
 - otherwise `UP` / `DOWN` by sign
 
+From v2.8 this label is decided on the conviction-coupled value above, but a
+non-FLAT forecast is recorded with the decoupled magnitude factor
+(§5.1.3.2), so a persisted non-FLAT row can carry
+`abs(expected_close_change_bp) <= epsilon_bp`. Never re-derive the label
+from the persisted field; read `forecast_direction`.
+
 When the label is `FLAT`, the persisted `expected_close_change_bp` is set
 to `0.0` so the forecast record remains schema-valid.
 
@@ -238,15 +244,19 @@ per-variant rows.
 runner passes its own default explicitly, so leaving it behind would persist
 v2.6 range math under a v2.5 label).
 
-**Conviction no longer appears on the width axis.** It still scales point
-magnitude through `(0.5 + 0.5 * conviction)` and still tightens the projection
+**Conviction no longer appears on the width axis.** Through v2.7 it still scaled
+point magnitude through `(0.5 + 0.5 * conviction)` (v2.8 decouples that,
+§5.1.3.2), and it still tightens the projection
 snapshot's own bounds via `bounds_low_conf_coef`, but it no longer reaches the
 forecast envelope. The 2026-07 review found conviction correlates *negatively*
 with realized magnitude (`r = -0.282`): the engine predicted smallest on the
 days the market moved most. Keeping a reliability scaler out of a coverage
 interval removes that inversion from the range path. The point-magnitude
 coupling is retained deliberately — replacing it was tested and did not improve
-close error (see `docs/engine_review_2026_07_findings.md` §5.6).
+close error (see `docs/engine_review_2026_07_findings.md` §5.6). *Superseded
+by v2.8 (§5.1.3.2): on 2026-04..11 data the decoupled factor lowered close
+error for every variant, mostly by betting less, with direction / FLAT left on
+the coupled value.*
 
 ### 5.1.3 Volatility-expansion magnitude term (v2.5)
 
@@ -366,19 +376,29 @@ v2.7 and not fitted since. `w = 1.0` reproduces v2.4–v2.7 bit-for-bit.
 - Effect on the replay: mean close error −0.36 to −0.43 bp per variant on
   2026-04-01..09-30 and −0.33 to −0.39 bp on 2026-10-01..11-06 (after the
   pre-registration); 6–7 of 8 months improve per variant, the worst month is
-  +0.15 bp. Most of the gain (70–83%) is the lower average factor (0.75 vs a
-  mean coupled factor of 0.82–0.84): a uniform shrink to the same mean
-  magnitude recovers −0.29 to −0.33 bp, while decoupling at the mean coupled
-  factor (no average shrink) gives −0.13 to −0.19 bp.
+  +0.15 bp. Roughly three quarters of the gain is the lower average factor
+  (0.75 vs a mean coupled factor of 0.82–0.84): a uniform shrink to the same
+  mean magnitude recovers −0.29 to −0.33 bp, while decoupling at an equal mean
+  magnitude (a constant of 0.84–0.85) gives −0.09 to −0.14 bp.
+- Cost: mean absolute magnitude error rises (+0.17 to +0.22 bp over the 147
+  days, +0.71 to +0.91 bp on the high-volatility 2026-09 window), because UGH
+  already under-forecasts `|Δ|`. That moves `inspect_state_mapping` (30 bp on
+  this metric) closer to firing in volatile months.
+- Precedent: the 2026-07 review (§5.6) kept the coupling because no
+  replacement improved close error, and the 2026-09 review (§5.3) rejected a
+  shrink that cost direction calls. v2.8 is adopted on a smaller gain that is
+  direction-neutral and holds out of sample; the case and its limits are in
+  `docs/engine_review_2026_10_findings.md` §4.4.
 
 `engine_version` bumps `v2.7 → v2.8` (synced across `automation_models.py`,
 `fx-daily-protocol.yml`, and `scripts/run_fx_daily_protocol.py`). Replay:
 `scripts/replay_magnitude_counterfactual.py` mode `E` (v2.8) vs mode `C`
 (v2.7), validating persisted rows under each version's expansion ceiling and
-magnitude weight. Rollback trigger (2026-11 review): any direction / FLAT call
-of a persisted v2.8 forecast differs from the mode-C replay of the same day, or
-the v2.8 mean close error over the November governance window exceeds the
-mode-C replay by more than 0.5 bp for two or more variants.
+magnitude weight. Rollback trigger (the 2026-11 review, run in December): any
+direction / FLAT call of a persisted v2.8 forecast differs from the mode-C
+replay of the same day, or, over the v2.8-issued days of the November
+governance window, the v2.8 mean close error exceeds the mode-C replay of the
+same days by more than 0.5 bp for two or more variants.
 
 ### 5.2 Parallel variant deployment
 

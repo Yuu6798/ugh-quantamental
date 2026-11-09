@@ -827,13 +827,15 @@ def test_expansion_uses_input_signal_not_lifecycle_posterior(db_session, monkeyp
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
 def test_calm_day_magnitude_unchanged(db_session, monkeypatch) -> None:
-    """v2.5: low-signal (calm) days keep the pre-expansion magnitude."""
-    req = _request()
+    """v2.5: low-signal (calm) days get multiplier 1.0 even with the expansion
+    enabled. v2.7 disabled it by default, so the ceiling is set explicitly here;
+    the recorded magnitude is v2.8's conviction-decoupled one."""
+    req = _request_with_config(volatility_expansion_max=1.8)
     projection = _projection_result(e_star=0.6, conviction=1.0)
     projection = projection.model_copy(update={"urgency": 0.1})
     ugh = _run_ugh_alpha(db_session, monkeypatch, req, projection, _state_result(req))
 
-    # mean(catalyst=0.6, urgency=0.1, fire=0.2) = 0.3 < floor(0.5) -> multiplier 1.0.
+    # mean(catalyst=0.6, urgency=0.1, fire=0.4) = 0.367 < floor(0.6) -> multiplier 1.0.
     # v2.8 magnitude = e_star * 20 * 0.75 (decoupled from conviction) = 9.0 bp.
     assert ugh.expected_close_change_bp == pytest.approx(9.0)
 
@@ -877,6 +879,32 @@ class TestMagnitudeFactor:
 
         cfg = ProjectionConfig(magnitude_conviction_weight=weight)
         assert 0.5 <= _magnitude_factor(conviction, cfg) <= 1.0
+
+    @pytest.mark.parametrize(
+        ("weight", "conviction", "expected"),
+        [(0.5, 1.0, 0.875), (0.5, 0.0, 0.625), (0.25, 1.0, 0.8125), (0.75, 0.2, 0.6375)],
+    )
+    def test_intermediate_weight_blends_linearly(self, weight, conviction, expected) -> None:
+        from ugh_quantamental.fx_protocol.forecasting import _magnitude_factor
+
+        cfg = ProjectionConfig(magnitude_conviction_weight=weight)
+        assert _magnitude_factor(conviction, cfg) == pytest.approx(expected)
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_expansion_cannot_lift_a_near_epsilon_flat(db_session, monkeypatch) -> None:
+    """Sign/FLAT invariant, expansion half: a FLAT just under the epsilon stays FLAT
+    although the multiplier alone would lift it over the threshold (v2.5-v2.6 path
+    enabled explicitly, so the recorded value is the coupled one)."""
+    req = _high_fire_request(expansion_max=1.8, magnitude_conviction_weight=1.0)
+    # pre-expansion 0.29 * 20 * 0.5 = 2.9 bp <= 3.0; mean(0.6, 0.99, 0.95) = 0.847 ->
+    # multiplier ~1.49, which would make it ~4.3 bp if FLAT were decided afterwards.
+    projection = _projection_result(e_star=0.29, conviction=0.0)
+    projection = projection.model_copy(update={"urgency": 0.99})
+    ugh = _run_ugh_alpha(db_session, monkeypatch, req, projection, _state_result(req))
+
+    assert ugh.forecast_direction == ForecastDirection.flat
+    assert ugh.expected_close_change_bp == 0.0
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
