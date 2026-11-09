@@ -7,8 +7,8 @@ persisted snapshot through the unmodified ``compute_snapshot_statistics`` ->
 ``build_ugh_request_from_snapshot`` -> projection path, the same way
 ``analyze_estar_lag.py`` does; every persisted UGH forecast in the window
 (direction and ``expected_close_change_bp``) is reproduced bit-for-bit under
-its own ``engine_version``'s expansion ceiling, and the script fails if any
-is missing or differs.
+its own ``engine_version``'s expansion ceiling and magnitude weight, and the
+script fails if any is missing or differs.
 
 Two axes, each independent of the other:
 
@@ -23,8 +23,13 @@ conviction factor is replaced (modes ``B`` / ``D``):
 * ``B`` conviction decoupled: the factor is the constant 0.75 (the midpoint
   of its ``[0.5, 1.0]`` range); expansion kept.
 * ``C`` expansion off: conviction factor kept, multiplier forced to ``1.0``
-  (what ``volatility_expansion_max=1.0`` produces).
+  (what ``volatility_expansion_max=1.0`` produces) -- v2.7.
 * ``D`` both.
+* ``E`` v2.8 (2026-10 monthly review, FX-MAG-CONVICTION-DECOUPLE): expansion off
+  and the recorded magnitude decoupled from conviction (the production
+  ``_magnitude_factor`` at ``magnitude_conviction_weight=0``, i.e. 0.75), but
+  direction / FLAT still decided on the conviction-coupled value, so -- unlike
+  ``B`` / ``D`` -- no call changes.  ``E`` minus ``C`` is the v2.8 effect.
 
 ``scale`` -- the hard-coded ``x100`` in ``derive_signal_features`` /
 ``derive_question_features`` replaced by ``k``, implemented by scaling the raw
@@ -64,7 +69,7 @@ from analyze_estar_lag import (  # noqa: E402
 )
 
 VARIANTS = ("ugh_v2_alpha", "ugh_v2_beta", "ugh_v2_gamma", "ugh_v2_delta")
-MAGNITUDE_MODES = ("A", "B", "C", "D")
+MAGNITUDE_MODES = ("A", "B", "C", "D", "E")
 DECOUPLED_CONVICTION_FACTOR = 0.75
 #: Mode A is the v2.6 counterfactual and stays pinned to the v2.6 expansion
 #: ceiling whatever ``ProjectionConfig`` defaults to later.  Once a
@@ -75,7 +80,11 @@ REPLAY_EXPANSION_MAX = 1.8
 #: ``volatility_expansion_max`` in force for each persisted ``engine_version``;
 #: the unablated validation replays a persisted row under its own version's
 #: ceiling.  Add an entry when a version changes the ceiling.
-EXPANSION_MAX_BY_ENGINE_VERSION = {"v2.6": 1.8, "v2.7": 1.0}
+EXPANSION_MAX_BY_ENGINE_VERSION = {"v2.6": 1.8, "v2.7": 1.0, "v2.8": 1.0}
+#: ``magnitude_conviction_weight`` in force for each persisted ``engine_version``
+#: (1.0 = the conviction-coupled factor of v2.4-v2.7, 0.0 = v2.8).  Every
+#: version in ``EXPANSION_MAX_BY_ENGINE_VERSION`` must have an entry here.
+MAGNITUDE_CONVICTION_WEIGHT_BY_ENGINE_VERSION = {"v2.6": 1.0, "v2.7": 1.0, "v2.8": 0.0}
 
 
 @dataclass(frozen=True)
@@ -123,7 +132,22 @@ def _load_persisted(fxdata_dir: str) -> dict[tuple[str, str], tuple[str, float, 
     return persisted
 
 
-def _forecast_bp(req, res, cfg, trailing: float, *, conviction_factor: float, expansion: bool):
+def _forecast_bp(
+    req,
+    res,
+    cfg,
+    trailing: float,
+    *,
+    conviction_factor: float,
+    expansion: bool,
+    magnitude_factor: float | None = None,
+):
+    """Direction and recorded bp of one replayed forecast.
+
+    Direction / FLAT are decided on ``e_star * trailing * conviction_factor``.
+    With ``magnitude_factor`` (v2.8 path) a non-FLAT forecast is then recorded at
+    ``e_star * trailing * magnitude_factor`` instead, as ``forecasting.py`` does.
+    """
     from ugh_quantamental.fx_protocol.forecasting import (
         _direction_from_bp_with_epsilon,
         _volatility_expansion_multiplier,
@@ -131,6 +155,8 @@ def _forecast_bp(req, res, cfg, trailing: float, *, conviction_factor: float, ex
 
     pre_expansion = res.e_star * trailing * conviction_factor
     direction, bp = _direction_from_bp_with_epsilon(pre_expansion, trailing, cfg)
+    if magnitude_factor is not None and direction.value != "flat":
+        bp = res.e_star * trailing * magnitude_factor
     if expansion and direction.value != "flat":
         bp *= _volatility_expansion_multiplier(
             catalyst_strength=req.state.event_features.catalyst_strength,
@@ -144,6 +170,7 @@ def _forecast_bp(req, res, cfg, trailing: float, *, conviction_factor: float, ex
 def run(
     fxdata_dir: str, start: date, end: date, scales: list[int]
 ) -> tuple[list[Row], int, list[str], list[str], list[str]]:
+    from ugh_quantamental.fx_protocol.forecasting import _magnitude_factor
     from ugh_quantamental.fx_protocol.market_ugh_builder import (
         build_ugh_request_from_snapshot,
         compute_snapshot_statistics,
@@ -153,6 +180,19 @@ def run(
     persisted = _load_persisted(fxdata_dir)
     configs = {
         v: _variant_config(v).model_copy(update={"volatility_expansion_max": REPLAY_EXPANSION_MAX})
+        for v in VARIANTS
+    }
+    # Mode E reads its magnitude factor from production at the v2.8 weight, pinned
+    # here so a later default change cannot move it.
+    v28_configs = {
+        v: _variant_config(v).model_copy(
+            update={
+                "volatility_expansion_max": EXPANSION_MAX_BY_ENGINE_VERSION["v2.8"],
+                "magnitude_conviction_weight": (
+                    MAGNITUDE_CONVICTION_WEIGHT_BY_ENGINE_VERSION["v2.8"]
+                ),
+            }
+        )
         for v in VARIANTS
     }
     rows: list[Row] = []
@@ -243,14 +283,30 @@ def run(
                     else 0.5 + 0.5 * res.conviction
                 )
                 direction, bp = _forecast_bp(
-                    req, res, cfg, trailing, conviction_factor=factor, expansion=mode in ("A", "B")
+                    req,
+                    res,
+                    cfg,
+                    trailing,
+                    conviction_factor=factor,
+                    expansion=mode in ("A", "B"),
+                    magnitude_factor=(
+                        _magnitude_factor(res.conviction, v28_configs[variant])
+                        if mode == "E"
+                        else None
+                    ),
                 )
                 if mode == "A" and validate_day:
-                    # Validate under the ceiling the persisted version ran with,
-                    # independently of the pinned mode-A counterfactual.
+                    # Validate under the ceiling and magnitude weight the persisted
+                    # version ran with, independently of the pinned mode-A
+                    # counterfactual.
                     ref = day_refs[variant]
                     ref_cfg = cfg.model_copy(
-                        update={"volatility_expansion_max": EXPANSION_MAX_BY_ENGINE_VERSION[ref[2]]}
+                        update={
+                            "volatility_expansion_max": EXPANSION_MAX_BY_ENGINE_VERSION[ref[2]],
+                            "magnitude_conviction_weight": (
+                                MAGNITUDE_CONVICTION_WEIGHT_BY_ENGINE_VERSION[ref[2]]
+                            ),
+                        }
                     )
                     ref_direction, ref_bp = _forecast_bp(
                         req,
@@ -259,6 +315,7 @@ def run(
                         trailing,
                         conviction_factor=0.5 + 0.5 * res.conviction,
                         expansion=True,
+                        magnitude_factor=_magnitude_factor(res.conviction, ref_cfg),
                     )
                     checked += 1
                     if ref[0] != ref_direction or abs(ref[1] - ref_bp) > 1e-6:

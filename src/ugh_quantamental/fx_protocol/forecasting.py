@@ -83,6 +83,25 @@ def _volatility_expansion_multiplier(
     return 1.0 + (config.volatility_expansion_max - 1.0) * activation
 
 
+#: v2.8 (FX-MAG-CONVICTION-DECOUPLE): the magnitude factor a non-FLAT UGH forecast
+#: is recorded with once conviction is decoupled -- the midpoint of the coupled
+#: factor's ``[0.5, 1.0]`` range, pre-registered as mode B of the 2026-09 monthly
+#: review (``docs/engine_review_2026_09_findings.md`` §5.1) and not fitted since.
+_DECOUPLED_MAGNITUDE_FACTOR = 0.75
+
+
+def _magnitude_factor(conviction: float, config: "ProjectionConfig") -> float:
+    """Return the factor that scales a non-FLAT forecast's recorded magnitude (v2.8).
+
+    ``(1 - w) * 0.75 + w * (0.5 + 0.5 * conviction)`` with
+    ``w = config.magnitude_conviction_weight``: ``w = 0`` (the v2.8 default) is
+    the constant 0.75 and ``w = 1`` is the v2.4-v2.7 coupled factor, bit for bit.
+    The result stays in ``[0.5, 1.0]`` because both endpoints do. Pure.
+    """
+    w = config.magnitude_conviction_weight
+    return (1.0 - w) * _DECOUPLED_MAGNITUDE_FACTOR + w * (0.5 + 0.5 * conviction)
+
+
 def _shared_range(low: float, high: float) -> ExpectedRange:
     return ExpectedRange(low_price=low, high_price=high)
 
@@ -366,25 +385,35 @@ def build_ugh_variant_forecast(
 
     # e_star is a unitless [-1, 1] score (direction × confidence). Scale it to bp
     # by the trailing mean absolute close change so UGH magnitudes are on the same
-    # unit as baseline_simple_technical / baseline_prev_day_direction. Apply a
-    # realized-volatility × conviction multiplier (matches PR #87 magnitude
-    # scaling, retained for v2).
+    # unit as baseline_simple_technical / baseline_prev_day_direction. The
+    # direction / FLAT decision uses the realized-volatility × conviction factor of
+    # PR #87 (retained for v2); the recorded magnitude does not (v2.8, below).
     ctx = request.baseline_context
     conviction_factor = 0.5 + 0.5 * projection_res.conviction
     pre_expansion_close_change_bp = (
         projection_res.e_star * ctx.trailing_mean_abs_close_change_bp * conviction_factor
     )
-    # Direction / FLAT are decided on the PRE-expansion magnitude so the v2.5
-    # volatility expansion can never push a below-epsilon FLAT forecast across
-    # the threshold into UP/DOWN (FX-MAG-EXPANSION sign/FLAT invariant).
+    # Direction / FLAT are decided on the PRE-expansion, conviction-coupled
+    # magnitude, so neither the v2.5 volatility expansion nor the v2.8 magnitude
+    # factor can move a forecast across the FLAT threshold (FX-MAG-EXPANSION
+    # sign/FLAT invariant, kept by FX-MAG-CONVICTION-DECOUPLE).
     forecast_direction, record_close_change_bp = _direction_from_bp_with_epsilon(
         pre_expansion_close_change_bp,
         ctx.trailing_mean_abs_close_change_bp,
         projection_req.config,
     )
-    # v2.5: scale the (signed) magnitude of already-non-FLAT forecasts so a
-    # high-catalyst day can exceed the trailing-mean band. FLAT stays FLAT.
     if forecast_direction is not ForecastDirection.flat:
+        # v2.8: record the magnitude with a factor decoupled from conviction (the
+        # sign is e_star's, which the direction already carries). With
+        # magnitude_conviction_weight = 1.0 this is pre_expansion_close_change_bp
+        # bit for bit.
+        record_close_change_bp = (
+            projection_res.e_star
+            * ctx.trailing_mean_abs_close_change_bp
+            * _magnitude_factor(projection_res.conviction, projection_req.config)
+        )
+        # v2.5: scale the (signed) magnitude of already-non-FLAT forecasts so a
+        # high-catalyst day can exceed the trailing-mean band. FLAT stays FLAT.
         record_close_change_bp *= _volatility_expansion_multiplier(
             catalyst_strength=variant_request.state.event_features.catalyst_strength,
             urgency=projection_res.urgency,

@@ -320,7 +320,65 @@ passing `volatility_expansion_max=1.8` explicitly reproduces v2.5–v2.6. The
 trigger: the October replay (`scripts/replay_magnitude_counterfactual.py`,
 mode A = v2.6 counterfactual pinned at 1.8) shows v2.7 mean close error more
 than 1.0 bp above the v2.6 counterfactual, or `inspect_magnitude_mapping`
-fires under v2.7 while the v2.6 counterfactual would not.
+fires under v2.7 while the v2.6 counterfactual would not. (2026-10 review:
+neither fired — v2.7 was 0.29–0.39 bp *below* the v2.6 counterfactual on the
+October governance window; `docs/engine_review_2026_10_findings.md` §5.)
+
+#### 5.1.3.2 v2.8: the recorded magnitude is decoupled from conviction
+
+The 2026-10 monthly review (`docs/engine_review_2026_10_findings.md` §3–§4,
+FX-MAG-CONVICTION-DECOUPLE) replayed 2026-04-01..11-06 (147 evaluated days ×
+4 variants) through the unmodified pipeline, reproducing all 272 persisted
+v2.6 / v2.7 forecasts bit-for-bit, and found that conviction does not rank
+reliability on this data: non-FLAT calls below conviction 0.5 hit 70% (alpha
+19/27) against 50–65% above it, and the third of calls with the largest
+`|expected_close_change_bp|` hit least (53%) and lost 205 bp against
+`baseline_random_walk` while the smallest third gained 36.5 bp. A magnitude
+proportional to `0.5 + 0.5 × conviction` therefore puts the largest bets on
+the least reliable calls (the 2026-09 CC-M01 mechanism: correlated inputs that
+agree after a large move inflate alignment and conviction).
+
+v2.8 adds `ProjectionConfig.magnitude_conviction_weight` (default **`0.0`**,
+bounded `[0, 1]`) and records a non-FLAT forecast as
+
+```
+factor = (1 - w) * 0.75 + w * (0.5 + 0.5 * conviction)     # w = magnitude_conviction_weight
+expected_close_change_bp = e_star * trailing_mean_abs_close_change_bp * factor
+                           * volatility_expansion_multiplier   # ≡ 1.0 by default since v2.7
+```
+
+0.75 is the midpoint of the coupled factor's `[0.5, 1.0]` range — mode B of
+the 2026-09 review, pre-registered there for re-evaluation after one month of
+v2.7 and not fitted since. `w = 1.0` reproduces v2.4–v2.7 bit-for-bit.
+
+- **Direction / FLAT are still decided on the conviction-coupled value**
+  `e_star × trailing × (0.5 + 0.5 × conviction)` — the §5.1.3 sign/FLAT
+  invariant, extended: no magnitude term may move a forecast across the FLAT
+  threshold. v2.8 therefore changes no direction call (verified on all 588
+  replayed forecasts). Mode B as originally defined (FLAT decided on the
+  constant) was rejected: its different FLAT set cost beta 3 and delta 2
+  direction hits.
+- Because the FLAT decision and the recorded value now use different factors,
+  a non-FLAT forecast can record `|expected_close_change_bp|` at or below the
+  3.0 bp FLAT epsilon (always above `3.0 × 0.75 / 1.0 = 2.25` bp; 12 of 588
+  replayed forecasts). The sign is always `e_star`'s, so the `ForecastRecord`
+  sign/direction validator holds.
+- Effect on the replay: mean close error −0.36 to −0.43 bp per variant on
+  2026-04-01..09-30 and −0.33 to −0.39 bp on 2026-10-01..11-06 (after the
+  pre-registration); 6–7 of 8 months improve per variant, the worst month is
+  +0.15 bp. Most of the gain (70–83%) is the lower average factor (0.75 vs a
+  mean coupled factor of 0.82–0.84): a uniform shrink to the same mean
+  magnitude recovers −0.29 to −0.33 bp, while decoupling at the mean coupled
+  factor (no average shrink) gives −0.13 to −0.19 bp.
+
+`engine_version` bumps `v2.7 → v2.8` (synced across `automation_models.py`,
+`fx-daily-protocol.yml`, and `scripts/run_fx_daily_protocol.py`). Replay:
+`scripts/replay_magnitude_counterfactual.py` mode `E` (v2.8) vs mode `C`
+(v2.7), validating persisted rows under each version's expansion ceiling and
+magnitude weight. Rollback trigger (2026-11 review): any direction / FLAT call
+of a persisted v2.8 forecast differs from the mode-C replay of the same day, or
+the v2.8 mean close error over the November governance window exceeds the
+mode-C replay by more than 0.5 bp for two or more variants.
 
 ### 5.2 Parallel variant deployment
 
@@ -440,17 +498,21 @@ diverge depending on mismatch. In particular, high catalyst / fire days
 can still have modest conviction when price or semantic mismatch is high
 (for example, the 2026-05-08 fire cases had conviction around 0.37).
 
-Downstream forecast construction also uses conviction as the magnitude
-scaler introduced in PR #87:
+Through v2.7 downstream forecast construction also used conviction as the
+magnitude scaler introduced in PR #87:
 
 `expected_close_change_bp = e_star * trailing_mean_abs_close_change_bp * (0.5 + 0.5 * conviction)`
 
-This dual use is intentional in v2.x: a reliable projection is allowed to
-move the close estimate more, while an unreliable projection is damped
-toward half size without changing sign. The range layer has its own
-related use of conviction for uncertainty width; see §5.1.2. If future
-work separates "reliability" from "magnitude scaler", this spec must be
-updated before any code change lands.
+That dual use let a reliable projection move the close estimate more and
+damped an unreliable one toward half size without changing sign. **v2.8
+separates the two roles (§5.1.3.2):** the conviction-coupled value above
+still decides direction / FLAT, but the recorded magnitude uses a factor that
+no longer follows conviction by default (`magnitude_conviction_weight = 0`),
+because on 2026-04..11 data conviction did not rank reliability. Conviction
+itself — its definition and its role in `ProjectionSnapshot.confidence` — is
+unchanged. The range layer no longer uses conviction at all since v2.6
+(§5.1.2.1). The execution layer never consults it
+(`docs/specs/fx_execution_layer_v1.md` §1, §4).
 
 ### 6.2 `compute_u` (unchanged)
 

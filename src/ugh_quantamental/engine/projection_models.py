@@ -144,6 +144,17 @@ class ProjectionConfig(BaseModel):
     volatility_expansion_activation_floor: FiniteFloat = Field(
         default=0.6, ge=0.0, le=1.0
     )
+    # v2.8 (2026-10 monthly review, FX-MAG-CONVICTION-DECOUPLE): how much the
+    # recorded magnitude of a non-FLAT forecast still follows conviction. The
+    # factor is ``(1 - w) * 0.75 + w * (0.5 + 0.5 * conviction)``, so 0.0 (the
+    # default) records every non-FLAT forecast with the constant 0.75 and 1.0
+    # restores the v2.4-v2.7 conviction-coupled factor exactly. Direction / FLAT
+    # are still decided on the coupled factor whatever the weight, so this term
+    # never changes a direction call. Over 2026-04-01..11-06 (147 evaluated days
+    # x 4 variants) the hit rate did not rise with conviction (70% below 0.5) and
+    # the largest bets lost the most; decoupling lowered mean close error for every
+    # variant in both the design and the forward period.
+    magnitude_conviction_weight: FiniteFloat = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class ProjectionEngineResult(BaseModel):
