@@ -21,6 +21,7 @@
 - 2026-10-17: 週報 2 本 (10/5 週 = v2.7 初週・執行層 live 初日、10/12 週 = CPI 週・ドリフト 6 日実測) を土曜 Routine で作成し PR #141 で merge (セルフレビュー agent P1 2 件 + Codex 7 rounds / 9 件、全採用)。10/8 午後にユーザー承認で backfill を本番 push (c450d9d / c7e229d)、activation 日 10/8 を確定。執行層の論点は live 建値ドリフト (live 正本は変えない、11 月月次で run 時刻 / 評価窓 / 現状維持)。
 - 2026-10-24: 週報 10/19〜10/23 (評価 3 日、provider の日足遅延で 10/22 未確定・10/23 forecast 欠落・Saturday artifact 欠落) と欠損補填の判断: 10/22 は月曜 catch-up、artifact は CI 再実行、10/23 forecast は archive に入れず replay 参考値、執行層は除外 (#142 merge)。リピート注文モニタ廃止、日次メールの Gmail 535 を発見。
 - 2026-10-26: 10/19 週の欠損補填を実行 — 10/22 窓が確定 (−86.6bp、UGH 4 variant MISS、α の Range 的中 32 連続が途切れる)、analysis pipeline の手動実行で `20261024/`・`20261026/` を Obs 4 に、10/23 は replay 参考値。9/25 との誤差差は v2.7 でなく e_star・trailing、非 low 累計の数え漏れを訂正、SKILL.md に規則 2 項目 (PR #143)。
+- 2026-11-10: 週報 2 本 (10/26 週・11/2 週、土曜 Routine) と 2026-10 月次ロジックレビュー — 147 日 replay で方向入力はドリフト以上の情報なし・conviction は 8 月以降逆転・gravity は上向き補正、方向側候補は全て不採用。予測幅の conviction 結合を外す **engine v2.8** を、縮小が主である点と 7 月 §5.6・9 月 §5.3 の前例との緊張を明記したうえでユーザー承認 (PR #144、Codex 0 件、merge `4eafa5a`)。
 
 <!--
 新規エントリのテンプレート:

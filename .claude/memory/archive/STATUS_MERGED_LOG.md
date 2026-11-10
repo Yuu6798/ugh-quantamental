@@ -96,3 +96,7 @@
 ## 2026-10-26 (PR #143 merge sweep overflow)
 
 - **PR #138 / 週報 9/28〜10/2 + 月次 2026-09 + 9/29 訂正 + 執行層 v1 spec + brief 2 本** (2026-10-08) - docs のみ。週報 (v2.7 初週、方向 3/4、Range 16/16 3 週連続、9/29 yahoo fallback の退化 bar 訂正)、月次 (β 11/22、RW に +4.7〜7.2bp 劣後は 3 日に集中)、`docs/specs/fx_execution_layer_v1.md` + `docs/briefs/2026-10_FX-EXEC-LAYER.md` / `FX-EXEC-REPORTING.md`。**Codex 21 rounds / 46 件 (採用 45、変更なし 1)** — 14 round 以降は REPORTING brief のゲート整合性 (期待コホート = 営業日カレンダー − 明示除外、現行版 live 行の無い日は明示除外まで block、activation 前は報告のみ) に収束。ユーザー判断で 20 round 超過時点でレビュー締切、以降の指摘は follow-up。副産物: `labeled_observations.csv` に版列が無く weekly の自動層別が no-op (持ち越し)。
+
+## 2026-11-10 (PR #144 merge sweep overflow)
+
+- **PR #139 / FX-EXEC-LAYER — 執行層 v1 の判断記録・評価・automation 配線** (2026-10-08) - Claude 実装 (並列 agent 3 体 + レビュー agent 2 体のセルフレビュー、P1 なし)。`execution_models.py` / `execution.py` / `execution_exports.py` (new)、`fetch_live_spot_yahoo`、`observability.load_input_snapshot`、automation Step 3b (batch あり・判断ファイル無し・窓内のときだけ live spot 1 回、回復は archive snapshot から) / Step 4c (archive 全体スキャン、評価は評価対象窓の dir)、非致命、`execution_evaluation_windows`、`EXECUTION_ACTIVATION_AS_OF = 2026-10-08` (暫定)、spec 3 本、tests 192 本、`tests/conftest.py` の no-network guard。Codex 2 rounds / 1 件 (docs の staging/archive path 表記)。
