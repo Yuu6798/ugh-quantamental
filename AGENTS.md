@@ -161,6 +161,7 @@ planning doc 側に吸収させた結果、後続の実装 PR は少ない round
 | review 5+ round → PR merge 後に「曖昧だった spec」を docs / tests に encode | round 内修正のみで完了 → trail が消失して再参照されない |
 | PR merge 直後に STATUS.md `次の発行順序` を sweep (完走 entry 削除) | 「後で」と先送り → stale entry 蓄積 (`tests/discipline/test_status_md_next_queue_no_completed.py` で検出) |
 | STATUS.md `## Phase` は 1 paragraph 厳守 | 新 paragraph 追加 + 旧 paragraph 残置 (`tests/discipline/test_status_md_phase_single_paragraph.py` で検出) |
+| STATUS.md の section は見出し行で区切って書き換える | 本文中の `## 次の発行順序` 等の文字列で split → 旧 section の残置 (2026-11-10)。痕跡は見出しの重複・見出しに見える断片・code span が切れた本文のいずれか (`tests/discipline/test_status_md_section_structure.py` で検出) |
 | `_index.md` 各 entry を 1–2 行に保つ | essay 化 (`tests/discipline/test_index_md_entry_compactness.py` で検出) |
 
 ### 5.4 Three-Tier Externalization

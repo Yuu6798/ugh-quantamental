@@ -17,6 +17,7 @@ no `pytest-cov`).
 |---|---|
 | `test_status_md_phase_single_paragraph.py` | `STATUS.md ## Phase` is exactly one paragraph (overwrite-on-change, never append). |
 | `test_status_md_next_queue_no_completed.py` | `STATUS.md ## 次の発行順序` holds only active items — no completed/merged markers leak in. |
+| `test_status_md_section_structure.py` | `STATUS.md` has exactly `## Phase` → `## 次の発行順序` → `## 直近 merged`, once each and in that order, no other `## ` line, and every mention of those headings in prose inside a closed `` `code span` ``. The two tests above read one section from its first heading to the next `## ` line, so a rewrite that split the file at heading text in the prose (the 2026-11-10 sweep) passes them: it leaves a duplicate section, a heading-like fragment, or — when the cut leaves no fragment — prose whose code span was cut open. |
 | `test_index_md_entry_compactness.py` | Each `_index.md` entry bullet stays ≤ 500 chars (essay-cell anti-pattern). |
 
 ## What is deliberately NOT enforced
