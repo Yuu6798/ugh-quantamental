@@ -22,6 +22,7 @@
 - 2026-10-24: 週報 10/19〜10/23 (評価 3 日、provider の日足遅延で 10/22 未確定・10/23 forecast 欠落・Saturday artifact 欠落) と欠損補填の判断: 10/22 は月曜 catch-up、artifact は CI 再実行、10/23 forecast は archive に入れず replay 参考値、執行層は除外 (#142 merge)。リピート注文モニタ廃止、日次メールの Gmail 535 を発見。
 - 2026-10-26: 10/19 週の欠損補填を実行 — 10/22 窓が確定 (−86.6bp、UGH 4 variant MISS、α の Range 的中 32 連続が途切れる)、analysis pipeline の手動実行で `20261024/`・`20261026/` を Obs 4 に、10/23 は replay 参考値。9/25 との誤差差は v2.7 でなく e_star・trailing、非 low 累計の数え漏れを訂正、SKILL.md に規則 2 項目 (PR #143)。
 - 2026-11-10: 週報 2 本 (10/26 週・11/2 週、土曜 Routine) と 2026-10 月次ロジックレビュー — 147 日 replay で方向入力はドリフト以上の情報なし・conviction は 8 月以降逆転・gravity は上向き補正、方向側候補は全て不採用。予測幅の conviction 結合を外す **engine v2.8** を、縮小が主である点と 7 月 §5.6・9 月 §5.3 の前例との緊張を明記したうえでユーザー承認 (PR #144、Codex 0 件、merge `4eafa5a`)。
+- 2026-11-10: (Session 2) STATUS.md の section 構造を discipline test 化 (PR #145) — 見出しは 3 つが 1 回ずつ・順に、他の `## ` 行なし、本文中の見出し文字列は閉じた code span 内。#144 の sweep で起きた split 事故と断片なしの変種を検出、履歴 38 版で誤検出 0。
 
 <!--
 新規エントリのテンプレート:
