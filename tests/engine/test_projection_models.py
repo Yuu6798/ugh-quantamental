@@ -111,6 +111,19 @@ def test_projection_config_volatility_expansion_defaults() -> None:
     assert ProjectionConfig(volatility_expansion_max=1.8).volatility_expansion_max == 1.8
 
 
+def test_projection_config_magnitude_conviction_weight_defaults() -> None:
+    # v2.8 (FX-MAG-CONVICTION-DECOUPLE): the recorded magnitude of a non-FLAT forecast
+    # no longer follows conviction by default; 1.0 restores the v2.4-v2.7 coupling.
+    assert ProjectionConfig().magnitude_conviction_weight == 0.0
+    assert ProjectionConfig(magnitude_conviction_weight=1.0).magnitude_conviction_weight == 1.0
+
+
+@pytest.mark.parametrize("weight", [-0.1, 1.1, math.inf, math.nan])
+def test_projection_config_magnitude_conviction_weight_bounds(weight: float) -> None:
+    with pytest.raises(ValidationError):
+        ProjectionConfig(magnitude_conviction_weight=weight)
+
+
 def test_projection_config_range_width_defaults() -> None:
     config = ProjectionConfig()
 

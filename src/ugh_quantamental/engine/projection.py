@@ -162,9 +162,12 @@ def compute_conviction(
 ) -> float:
     """Compute prediction reliability, not raw signal strength, in [0, 1].
 
-    Downstream FX forecasting also uses this reliability score as a magnitude
-    scaler for ``expected_close_change_bp``; the engine math here remains only
-    the reliability estimate.
+    Downstream FX forecasting decides the direction / FLAT call on
+    ``e_star * trailing * (0.5 + 0.5 * conviction)``. Through v2.7 it also scaled
+    the recorded ``expected_close_change_bp`` by that factor; since v2.8 the
+    recorded magnitude follows conviction only as far as
+    ``ProjectionConfig.magnitude_conviction_weight`` says (default 0). The engine
+    math here remains only the reliability estimate.
     """
     mismatch_penalty = 0.5 * (abs(mismatch_px) + abs(mismatch_sem))
     raw = signal_features.evidence_confidence * alignment * (1.0 - 0.5 * mismatch_penalty)

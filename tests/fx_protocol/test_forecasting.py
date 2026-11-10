@@ -220,6 +220,19 @@ def _request(**kwargs) -> DailyForecastWorkflowRequest:
     return DailyForecastWorkflowRequest(**base)
 
 
+def _request_with_config(**config_updates) -> DailyForecastWorkflowRequest:
+    """``_request()`` whose projection config carries ``config_updates``.
+
+    The variant configs are built from the request's projection config, so a field
+    set here (e.g. ``magnitude_conviction_weight``) reaches every UGH variant.
+    """
+    base = _full_request()
+    proj = base.projection
+    config = proj.config.model_copy(update=config_updates)
+    ugh = base.model_copy(update={"projection": proj.model_copy(update={"config": config})})
+    return _request(ugh_request=ugh)
+
+
 @pytest.fixture()
 def db_session():
     if not HAS_SQLALCHEMY:
@@ -368,7 +381,9 @@ def test_ugh_variant_preserves_caller_flat_epsilon_overrides(monkeypatch) -> Non
     )
 
     assert rec.forecast_direction == ForecastDirection.up
-    assert rec.expected_close_change_bp == pytest.approx(2.0)
+    # Direction is decided on 0.2 * 20 * (0.5 + 0.5 * 0.0) = 2.0 bp > epsilon 0; v2.8
+    # records the conviction-decoupled magnitude 0.2 * 20 * 0.75 = 3.0 bp.
+    assert rec.expected_close_change_bp == pytest.approx(3.0)
     assert rec.expected_range is not None
     range_center = (rec.expected_range.low_price + rec.expected_range.high_price) / 2.0
     # v2.6 (FX-RANGE-DECOUPLE): the envelope is centred on spot, NOT re-centred on
@@ -519,9 +534,9 @@ def test_daily_workflow_generates_seven_with_shared_metadata(db_session, monkeyp
     assert ugh_alpha.q_strength == req.ugh_request.projection.question_features.q_strength
     assert ugh_alpha.grv_lock == req.ugh_request.projection.signal_features.grv_lock
     assert ugh_alpha.e_star == 15.0
-    # expected_close_change_bp = e_star * trailing_mean_abs_close_change_bp * (0.5 + 0.5*conviction)
-    # = 15.0 * 20.0 * (0.5 + 0.5*0.7) = 15.0 * 20.0 * 0.85 = 255.0
-    assert ugh_alpha.expected_close_change_bp == pytest.approx(255.0)
+    # v2.8: expected_close_change_bp = e_star * trailing_mean_abs_close_change_bp * 0.75
+    # (magnitude decoupled from conviction) = 15.0 * 20.0 * 0.75 = 225.0
+    assert ugh_alpha.expected_close_change_bp == pytest.approx(225.0)
     assert ugh_alpha.forecast_direction == ForecastDirection.up
 
 
@@ -554,12 +569,13 @@ def test_ugh_variants_share_one_envelope_but_scale_is_configurable() -> None:
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
 def test_ugh_magnitude_scales_with_volatility_and_conviction(db_session, monkeypatch) -> None:
-    """UGH expected_close_change_bp must equal e_star * trailing_mean_abs_close_change_bp
-    * (0.5 + 0.5*conviction). A negative e_star produces DOWN; near-zero conviction
-    halves the magnitude."""
+    """v2.4-v2.7 path, explicitly enabled: UGH expected_close_change_bp must equal
+    e_star * trailing_mean_abs_close_change_bp * (0.5 + 0.5*conviction). A negative
+    e_star produces DOWN; near-zero conviction halves the magnitude. v2.8 decouples the
+    magnitude from conviction by default, so the weight is set on the request config."""
     from ugh_quantamental.fx_protocol import forecasting
 
-    req = _request()
+    req = _request_with_config(magnitude_conviction_weight=1.0)
 
     projection_result = ProjectionEngineResult(
         u_score=-0.4,
@@ -618,25 +634,34 @@ def test_ugh_magnitude_scales_with_volatility_and_conviction(db_session, monkeyp
     assert ugh.forecast_direction == ForecastDirection.down
 
 
-def _high_fire_request(expansion_max: float | None = None) -> DailyForecastWorkflowRequest:
+def _high_fire_request(
+    expansion_max: float | None = None,
+    magnitude_conviction_weight: float | None = None,
+) -> DailyForecastWorkflowRequest:
     """Request whose input fire_probability SIGNAL is high (drives expansion).
 
     The v2.5 multiplier reads ``projection.signal_features.fire_probability``
     (the same-snapshot input signal), not the lifecycle posterior, so the test
     high-fire input must live on the request's signal features.
 
-    v2.7 disables the expansion by default (``volatility_expansion_max=1.0``);
-    pass ``expansion_max=1.8`` to exercise the v2.5 path. The variant config is
-    built from the request's projection config, so the ceiling is set there.
+    v2.7 disables the expansion by default (``volatility_expansion_max=1.0``)
+    and v2.8 decouples the magnitude from conviction
+    (``magnitude_conviction_weight=0.0``); pass ``expansion_max=1.8`` and
+    ``magnitude_conviction_weight=1.0`` to exercise the v2.5-v2.6 path. The
+    variant config is built from the request's projection config, so both are
+    set there.
     """
     base = _full_request()
     proj = base.projection
     high_sig = proj.signal_features.model_copy(update={"fire_probability": 0.95})
     updates: dict[str, object] = {"signal_features": high_sig}
+    config_updates: dict[str, float] = {}
     if expansion_max is not None:
-        updates["config"] = proj.config.model_copy(
-            update={"volatility_expansion_max": expansion_max}
-        )
+        config_updates["volatility_expansion_max"] = expansion_max
+    if magnitude_conviction_weight is not None:
+        config_updates["magnitude_conviction_weight"] = magnitude_conviction_weight
+    if config_updates:
+        updates["config"] = proj.config.model_copy(update=config_updates)
     high_proj = proj.model_copy(update=updates)
     ugh = base.model_copy(update={"projection": high_proj})
     return _request(ugh_request=ugh)
@@ -737,8 +762,8 @@ def test_high_catalyst_magnitude_exceeds_trailing_mean(db_session, monkeypatch, 
     """v2.5 path, explicitly enabled: high catalyst/urgency/fire lets |magnitude|
     exceed the trailing mean (20 bp here) — for both positive and negative e_star
     (sign preserved). v2.7 keeps the formula but disables it by default, so the
-    ceiling is set on the request config."""
-    req = _high_fire_request(expansion_max=1.8)
+    ceiling (and v2.8's conviction weight) is set on the request config."""
+    req = _high_fire_request(expansion_max=1.8, magnitude_conviction_weight=1.0)
     projection = _projection_result(e_star=e_star, conviction=1.0)
     projection = projection.model_copy(update={"urgency": 0.95})
     ugh = _run_ugh_alpha(db_session, monkeypatch, req, projection, _state_result(req))
@@ -754,14 +779,14 @@ def test_default_ceiling_keeps_magnitude_within_trailing_mean(
     db_session, monkeypatch, e_star
 ) -> None:
     """v2.7: the same high-catalyst request under the default ceiling (1.0) emits
-    the pre-expansion magnitude e_star * trailing * (0.5 + 0.5 * conviction) —
-    0.9 * 20 * 1.0 = 18 bp — and never exceeds the trailing mean."""
+    the pre-expansion magnitude and never exceeds the trailing mean. v2.8 records it
+    with the conviction-decoupled factor: 0.9 * 20 * 0.75 = 13.5 bp."""
     req = _high_fire_request()
     projection = _projection_result(e_star=e_star, conviction=1.0)
     projection = projection.model_copy(update={"urgency": 0.95})
     ugh = _run_ugh_alpha(db_session, monkeypatch, req, projection, _state_result(req))
 
-    assert ugh.expected_close_change_bp == pytest.approx(e_star * 20.0)
+    assert ugh.expected_close_change_bp == pytest.approx(e_star * 20.0 * 0.75)
     assert abs(ugh.expected_close_change_bp) <= 20.0
     expected_dir = ForecastDirection.up if e_star > 0 else ForecastDirection.down
     assert ugh.forecast_direction == expected_dir
@@ -772,7 +797,8 @@ def test_expansion_uses_input_signal_not_lifecycle_posterior(db_session, monkeyp
     """v2.5 (PR #118 review): expansion is driven by the input fire_probability
     SIGNAL, so a negative large-move day whose lifecycle posterior collapsed to
     `failure` (P(fire)~0) still expands (v2.5 path enabled explicitly)."""
-    req = _high_fire_request(expansion_max=1.8)  # input signal fire_probability = 0.95
+    # input signal fire_probability = 0.95
+    req = _high_fire_request(expansion_max=1.8, magnitude_conviction_weight=1.0)
     projection = _projection_result(e_star=-0.9, conviction=1.0)
     projection = projection.model_copy(update={"urgency": 0.95})
     # Lifecycle posterior dominated by failure (P(fire) ~ 0).
@@ -801,15 +827,17 @@ def test_expansion_uses_input_signal_not_lifecycle_posterior(db_session, monkeyp
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
 def test_calm_day_magnitude_unchanged(db_session, monkeypatch) -> None:
-    """v2.5: low-signal (calm) days keep the pre-expansion magnitude."""
-    req = _request()
+    """v2.5: low-signal (calm) days get multiplier 1.0 even with the expansion
+    enabled. v2.7 disabled it by default, so the ceiling is set explicitly here;
+    the recorded magnitude is v2.8's conviction-decoupled one."""
+    req = _request_with_config(volatility_expansion_max=1.8)
     projection = _projection_result(e_star=0.6, conviction=1.0)
     projection = projection.model_copy(update={"urgency": 0.1})
     ugh = _run_ugh_alpha(db_session, monkeypatch, req, projection, _state_result(req))
 
-    # mean(catalyst=0.6, urgency=0.1, fire=0.2) = 0.3 < floor(0.5) -> multiplier 1.0.
-    # magnitude = e_star * 20 * (0.5 + 0.5*1.0) = 0.6 * 20 * 1.0 = 12.0 bp.
-    assert ugh.expected_close_change_bp == pytest.approx(12.0)
+    # mean(catalyst=0.6, urgency=0.1, fire=0.4) = 0.367 < floor(0.6) -> multiplier 1.0.
+    # v2.8 magnitude = e_star * 20 * 0.75 (decoupled from conviction) = 9.0 bp.
+    assert ugh.expected_close_change_bp == pytest.approx(9.0)
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
@@ -824,6 +852,113 @@ def test_expansion_does_not_cross_flat_epsilon(db_session, monkeypatch) -> None:
 
     assert ugh.forecast_direction == ForecastDirection.flat
     assert ugh.expected_close_change_bp == 0.0
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+class TestMagnitudeFactor:
+    """v2.8 (FX-MAG-CONVICTION-DECOUPLE): the recorded-magnitude factor."""
+
+    @pytest.mark.parametrize("conviction", [0.0, 0.3, 0.75, 0.9, 1.0])
+    def test_default_weight_is_constant(self, conviction) -> None:
+        from ugh_quantamental.fx_protocol.forecasting import _magnitude_factor
+
+        assert ProjectionConfig().magnitude_conviction_weight == 0.0
+        assert _magnitude_factor(conviction, ProjectionConfig()) == 0.75
+
+    @pytest.mark.parametrize("conviction", [0.0, 0.123456789, 0.6789, 1.0])
+    def test_weight_one_is_the_coupled_factor_bit_for_bit(self, conviction) -> None:
+        from ugh_quantamental.fx_protocol.forecasting import _magnitude_factor
+
+        cfg = ProjectionConfig(magnitude_conviction_weight=1.0)
+        assert _magnitude_factor(conviction, cfg) == 0.5 + 0.5 * conviction
+
+    @pytest.mark.parametrize("weight", [0.0, 0.25, 0.5, 1.0])
+    @pytest.mark.parametrize("conviction", [0.0, 0.5, 1.0])
+    def test_bounded_by_the_coupled_range(self, weight, conviction) -> None:
+        from ugh_quantamental.fx_protocol.forecasting import _magnitude_factor
+
+        cfg = ProjectionConfig(magnitude_conviction_weight=weight)
+        assert 0.5 <= _magnitude_factor(conviction, cfg) <= 1.0
+
+    @pytest.mark.parametrize(
+        ("weight", "conviction", "expected"),
+        [(0.5, 1.0, 0.875), (0.5, 0.0, 0.625), (0.25, 1.0, 0.8125), (0.75, 0.2, 0.6375)],
+    )
+    def test_intermediate_weight_blends_linearly(self, weight, conviction, expected) -> None:
+        from ugh_quantamental.fx_protocol.forecasting import _magnitude_factor
+
+        cfg = ProjectionConfig(magnitude_conviction_weight=weight)
+        assert _magnitude_factor(conviction, cfg) == pytest.approx(expected)
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_expansion_cannot_lift_a_near_epsilon_flat(db_session, monkeypatch) -> None:
+    """Sign/FLAT invariant, expansion half: a FLAT just under the epsilon stays FLAT
+    although the multiplier alone would lift it over the threshold (v2.5-v2.6 path
+    enabled explicitly, so the recorded value is the coupled one)."""
+    req = _high_fire_request(expansion_max=1.8, magnitude_conviction_weight=1.0)
+    # pre-expansion 0.29 * 20 * 0.5 = 2.9 bp <= 3.0; mean(0.6, 0.99, 0.95) = 0.847 ->
+    # multiplier ~1.49, which would make it ~4.3 bp if FLAT were decided afterwards.
+    projection = _projection_result(e_star=0.29, conviction=0.0)
+    projection = projection.model_copy(update={"urgency": 0.99})
+    ugh = _run_ugh_alpha(db_session, monkeypatch, req, projection, _state_result(req))
+
+    assert ugh.forecast_direction == ForecastDirection.flat
+    assert ugh.expected_close_change_bp == 0.0
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+@pytest.mark.parametrize("conviction", [0.0, 0.4, 1.0])
+@pytest.mark.parametrize("e_star", [0.6, -0.6])
+def test_default_magnitude_does_not_follow_conviction(
+    db_session, monkeypatch, e_star, conviction
+) -> None:
+    """v2.8: the same e_star records the same magnitude whatever the conviction —
+    e_star * 20 * 0.75 = ±9.0 bp — and the sign stays e_star's."""
+    req = _request()
+    projection = _projection_result(e_star=e_star, conviction=conviction)
+    ugh = _run_ugh_alpha(db_session, monkeypatch, req, projection, _state_result(req))
+
+    assert ugh.expected_close_change_bp == pytest.approx(e_star * 20.0 * 0.75)
+    expected_dir = ForecastDirection.up if e_star > 0 else ForecastDirection.down
+    assert ugh.forecast_direction == expected_dir
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+@pytest.mark.parametrize(
+    ("e_star", "conviction", "expected_dir", "expected_bp"),
+    [
+        # coupled 0.25*20*0.5 = 2.5 <= 3.0 -> FLAT, although 0.25*20*0.75 = 3.75 > 3.0
+        (0.25, 0.0, ForecastDirection.flat, 0.0),
+        # coupled 0.16*20*1.0 = 3.2 > 3.0 -> UP, recorded at 0.16*20*0.75 = 2.4 bp
+        (0.16, 1.0, ForecastDirection.up, 2.4),
+        (-0.16, 1.0, ForecastDirection.down, -2.4),
+    ],
+)
+def test_flat_decision_keeps_the_coupled_factor(
+    db_session, monkeypatch, e_star, conviction, expected_dir, expected_bp
+) -> None:
+    """v2.8 keeps the sign/FLAT invariant: direction / FLAT are decided on the
+    conviction-coupled pre-expansion magnitude, so decoupling changes no call. A
+    non-FLAT forecast may therefore record |bp| below the 3.0 bp epsilon."""
+    req = _request()
+    projection = _projection_result(e_star=e_star, conviction=conviction)
+    ugh = _run_ugh_alpha(db_session, monkeypatch, req, projection, _state_result(req))
+
+    assert ugh.forecast_direction == expected_dir
+    assert ugh.expected_close_change_bp == pytest.approx(expected_bp)
+
+
+@pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
+def test_weight_one_reproduces_the_v27_magnitude(db_session, monkeypatch) -> None:
+    """``magnitude_conviction_weight=1.0`` restores the v2.7 record exactly
+    (the replay script validates persisted v2.6 / v2.7 rows this way)."""
+    req = _request_with_config(magnitude_conviction_weight=1.0)
+    projection = _projection_result(e_star=0.4123, conviction=0.6789)
+    ugh = _run_ugh_alpha(db_session, monkeypatch, req, projection, _state_result(req))
+
+    assert ugh.expected_close_change_bp == 0.4123 * 20.0 * (0.5 + 0.5 * 0.6789)
+    assert ugh.forecast_direction == ForecastDirection.up
 
 
 @pytest.mark.skipif(not HAS_SQLALCHEMY, reason="sqlalchemy not installed")
