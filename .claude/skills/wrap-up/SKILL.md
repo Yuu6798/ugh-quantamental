@@ -75,7 +75,9 @@ When steps 4–6 rewrite a section programmatically, locate it by its heading
 `## 直近 merged` also appear inside the file's prose. A split there leaves the
 old section beside the new one (the 2026-11-10 sweep).
 `tests/discipline/test_status_md_section_structure.py` fails unless the file
-holds exactly `## Phase` → `## 次の発行順序` → `## 直近 merged`, once each.
+holds exactly `## Phase` → `## 次の発行順序` → `## 直近 merged`, once each and
+in that order, with no other `## ` line and every mention of a heading in the
+prose still inside a closed `` `code span` `` (a cut there leaves it open).
 
 ### 7. Externalize 5+ round disputes
 If any spec/ambiguity took **5+ rounds** of review or 壁打ち this session,

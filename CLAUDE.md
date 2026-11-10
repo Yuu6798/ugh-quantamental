@@ -229,7 +229,8 @@ truth** で、両者が乖離したら本セクションが勝つ (skill を直�
 6. **`STATUS.md ## Phase` の単一段落 check**。新 paragraph 追加時は旧
    paragraph を必ず削除。`tests/discipline/test_status_md_phase_single_paragraph.py`
    で enforce。section の書き換えは見出し**行**で区切る (見出しの文字列は本文中にも
-   出てくる)。3 section が 1 回ずつ順に並ぶことは
+   出てくる)。3 section が 1 回ずつ順に並び他の `## ` 行が無いこと、本文中の見出し
+   文字列が閉じた code span の中にあることは
    `tests/discipline/test_status_md_section_structure.py` で enforce
 7. **5+ round 論点の encode check**。当 session で review / 壁打ちが 5 round
    以上に達した曖昧 spec があれば、その解決を docs / tests に encode 済か確認し、
