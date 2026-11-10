@@ -25,3 +25,28 @@ def section_body(text: str, heading: str) -> str:
     match = pattern.search(text)
     assert match is not None, f"## {heading} section not found"
     return match.group("body").strip()
+
+
+_H2_LINE = re.compile(r"^##[ \t]+(?P<title>.*?)[ \t]*$")
+_FENCE = re.compile(r"^[ \t]*(```|~~~)")
+
+
+def level2_headings(text: str) -> list[tuple[int, str]]:
+    """Return ``(line_number, title)`` for every ``## `` heading line, in order.
+
+    Line numbers are 1-based. ``###`` and deeper headings are not level 2, and
+    lines inside fenced code blocks are skipped, so only real section headings
+    are returned. A line such as ``## Phase  `` yields the title ``Phase``.
+    """
+    headings: list[tuple[int, str]] = []
+    in_fence = False
+    for number, line in enumerate(text.splitlines(), start=1):
+        if _FENCE.match(line):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        match = _H2_LINE.match(line)
+        if match is not None:
+            headings.append((number, match.group("title")))
+    return headings

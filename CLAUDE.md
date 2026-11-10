@@ -228,7 +228,9 @@ truth** で、両者が乖離したら本セクションが勝つ (skill を直�
    「sweep が cap 超過を再導入する」 race を回避
 6. **`STATUS.md ## Phase` の単一段落 check**。新 paragraph 追加時は旧
    paragraph を必ず削除。`tests/discipline/test_status_md_phase_single_paragraph.py`
-   で enforce
+   で enforce。section の書き換えは見出し**行**で区切る (見出しの文字列は本文中にも
+   出てくる)。3 section が 1 回ずつ順に並ぶことは
+   `tests/discipline/test_status_md_section_structure.py` で enforce
 7. **5+ round 論点の encode check**。当 session で review / 壁打ちが 5 round
    以上に達した曖昧 spec があれば、その解決を docs / tests に encode 済か確認し、
    未 encode なら externalize する (round 数の test 化はしない — fragile proxy。

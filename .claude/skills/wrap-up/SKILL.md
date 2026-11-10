@@ -70,6 +70,13 @@ overflow (oldest first) to the end of
 delete the old one — do not leave both. Enforced by
 `tests/discipline/test_status_md_phase_single_paragraph.py`.
 
+When steps 4–6 rewrite a section programmatically, locate it by its heading
+**line**, never by searching for the heading text: `## 次の発行順序` and
+`## 直近 merged` also appear inside the file's prose. A split there leaves the
+old section beside the new one (the 2026-11-10 sweep).
+`tests/discipline/test_status_md_section_structure.py` fails unless the file
+holds exactly `## Phase` → `## 次の発行順序` → `## 直近 merged`, once each.
+
 ### 7. Externalize 5+ round disputes
 If any spec/ambiguity took **5+ rounds** of review or 壁打ち this session,
 confirm its resolution is encoded in docs/tests. If not, externalize it now.
