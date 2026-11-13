@@ -1,5 +1,5 @@
 {
-  "as_of_jst": "2026-11-12T08:00:00+09:00",
+  "as_of_jst": "2026-11-13T08:00:00+09:00",
   "provider_name": "alpha_vantage",
   "versions": {
     "theory_version": "v2",
@@ -7,19 +7,19 @@
     "schema_version": "v1",
     "protocol_version": "v1"
   },
-  "forecast_batch_id": "fb_USDJPY_20261112T080000_v1_fdbf24f5cd42f766",
-  "outcome_id": "oc_USDJPY_20261111T080000_20261112T080000_v1_0de5483991040a6f",
-  "forecast_created": false,
+  "forecast_batch_id": "fb_USDJPY_20261113T080000_v1_5dfb00f27a96c2e3",
+  "outcome_id": "oc_USDJPY_20261112T080000_20261113T080000_v1_2d029eea17483cda",
+  "forecast_created": true,
   "outcome_recorded": true,
   "evaluation_count": 7,
   "csv_paths": {
-    "forecast_csv_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/forecasts/USDJPY_20261112_forecast.csv",
-    "outcome_csv_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/outcomes/USDJPY_20261112_outcome.csv",
-    "evaluation_csv_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/evaluations/USDJPY_20261112_evaluation.csv"
+    "forecast_csv_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/forecasts/USDJPY_20261113_forecast.csv",
+    "outcome_csv_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/outcomes/USDJPY_20261113_outcome.csv",
+    "evaluation_csv_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/evaluations/USDJPY_20261113_evaluation.csv"
   },
   "manifest_path": "/home/runner/work/ugh-quantamental/ugh-quantamental/data/csv/latest/manifest.json",
   "snapshot_lag_business_days": 0,
   "used_fallback_adjustment": false,
-  "run_status": "idempotent_skip",
-  "generated_at_utc": "2026-11-12T18:59:35Z"
+  "run_status": "ok",
+  "generated_at_utc": "2026-11-13T13:15:29Z"
 }
