@@ -1,11 +1,11 @@
-# FX Daily Report — 2026-11-23
+# FX Daily Report — 2026-11-24
 
-Generated: 2026-11-23T22:45:13Z
+Generated: 2026-11-24T16:02:10Z
 
 ## Run Summary
 
-- **as_of_jst**: 2026-11-23T08:00:00+09:00
-- **forecast_batch_id**: fb_USDJPY_20261123T080000_v1_f247fc83f7ba457e
+- **as_of_jst**: 2026-11-24T08:00:00+09:00
+- **forecast_batch_id**: fb_USDJPY_20261124T080000_v1_437054f195c0f933
 - **forecast count**: 7
 - **outcome recorded**: Yes
 - **evaluation count**: 7
@@ -15,37 +15,37 @@ Generated: 2026-11-23T22:45:13Z
 
 | Strategy | Direction | Expected Change (bp) | Dominant State |
 |---|---|---|---|
-| baseline_prev_day_direction | DOWN | -72.6 | - |
+| baseline_prev_day_direction | UP | +27.1 | - |
 | baseline_random_walk | FLAT | +0.0 | - |
-| baseline_simple_technical | UP | +27.6 | - |
-| ugh_v2_alpha | FLAT | +0.0 | failure |
-| ugh_v2_beta | FLAT | +0.0 | failure |
-| ugh_v2_delta | FLAT | +0.0 | failure |
-| ugh_v2_gamma | FLAT | +0.0 | failure |
+| baseline_simple_technical | UP | +26.8 | - |
+| ugh_v2_alpha | UP | +7.8 | setup |
+| ugh_v2_beta | UP | +10.4 | setup |
+| ugh_v2_delta | UP | +9.3 | setup |
+| ugh_v2_gamma | UP | +7.3 | setup |
 
 ## Previous Window Outcome
 
-- **Window**: 2026-11-20T08:00:00+09:00 → 2026-11-23T08:00:00+09:00
-- **Direction**: DOWN
-- **Close change**: -72.6 bp
-- **OHLC**: O=159.69 H=159.83 L=158.40 C=158.53
-- **Range**: 1.43
+- **Window**: 2026-11-23T08:00:00+09:00 → 2026-11-24T08:00:00+09:00
+- **Direction**: UP
+- **Close change**: +27.1 bp
+- **OHLC**: O=158.57 H=159.50 L=158.52 C=159.00
+- **Range**: 0.98
 
 ## Evaluation Comparison
 
 | Strategy | Dir Hit | Range Hit | Close Err (bp) | Magnitude Err (bp) | Disconfirmer |
 |---|---|---|---|---|---|
-| baseline_prev_day_direction | False | - | 94.0 | 51.3 | No |
-| baseline_random_walk | False | - | 72.6 | 72.6 | No |
-| baseline_simple_technical | False | - | 97.0 | 48.3 | No |
-| ugh_v2_alpha | False | False | 85.1 | 60.2 | No |
-| ugh_v2_beta | False | False | 85.9 | 59.4 | No |
-| ugh_v2_delta | False | False | 85.5 | 59.8 | No |
-| ugh_v2_gamma | False | False | 84.2 | 61.1 | No |
+| baseline_prev_day_direction | False | - | 99.8 | 45.5 | No |
+| baseline_random_walk | False | - | 27.1 | 27.1 | No |
+| baseline_simple_technical | True | - | 0.5 | 0.5 | No |
+| ugh_v2_alpha | False | True | 27.1 | 27.1 | No |
+| ugh_v2_beta | False | True | 27.1 | 27.1 | No |
+| ugh_v2_delta | False | True | 27.1 | 27.1 | No |
+| ugh_v2_gamma | False | True | 27.1 | 27.1 | No |
 
 ## Observation Notes
 
 - UGH direction hit: **False**
-- UGH range hit: **False**
-- UGH close error: **85.1 bp**
-- Baseline direction hits: 0/3
+- UGH range hit: **True**
+- UGH close error: **27.1 bp**
+- Baseline direction hits: 1/3
