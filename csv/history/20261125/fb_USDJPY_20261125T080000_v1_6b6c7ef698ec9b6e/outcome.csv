@@ -1,0 +1,2 @@
+outcome_id,pair,window_start_jst,window_end_jst,realized_open,realized_high,realized_low,realized_close,realized_direction,realized_close_change_bp,realized_range_price,event_happened,event_tags,schema_version,protocol_version,market_data_vendor,market_data_feed_name,market_data_price_type,market_data_resolution,market_data_timezone
+oc_USDJPY_20261124T080000_20261125T080000_v1_45fb13b074ee6e1e,USDJPY,2026-11-24T08:00:00+09:00,2026-11-25T08:00:00+09:00,158.93,159.57,158.74,159.25,up,20.13465047505148,0.8299999999999841,False,,v1,v1,alpha_vantage,FX_DAILY/USDJPY,mid,1d,UTC
